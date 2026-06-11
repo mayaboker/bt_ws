@@ -1,0 +1,141 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "gazebo",
+            "type": "shell",
+            "command": "bt_bringup/launch/run_gz.sh",
+            "problemMatcher": []
+        },
+        {
+            "label": "websockify",
+            "type": "shell",
+            "command": "bt_bringup/launch/run_websockify.sh",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "group": "sitl"
+            },
+            "isBackground": false
+        },
+        {
+            "label": "sitl",
+            "type": "shell",
+            "command": "bt_bringup/launch/run_sitl.sh",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "group": "sitl"
+            },
+            "isBackground": false
+        },
+        {
+            "label": "gz_camera",
+            "type": "shell",
+            "command": "${workspaceFolder}/venv/bin/python",
+            "args": [
+                "-m",
+                "bt_app.sensors.gz_camera"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/bt_app"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "group": "sensor"
+            },
+            "isBackground": false
+        },
+        {
+            "label": "gz_lidar",
+            "type": "shell",
+            "command": "${workspaceFolder}/venv/bin/python",
+            "args": [
+                "-m",
+                "bt_app.sensors.gz_lidar"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/bt_app"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "group": "sensor"
+            },
+            "isBackground": false
+        },
+        {
+            "label": "sensor",
+            "dependsOn": [
+                "gz_camera",
+                "gz_lidar"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Start SITL",
+            "dependsOn": [
+                "websockify",
+                "sitl"
+            ],
+            "problemMatcher": []
+        }
+        ,
+        {
+            "label": "deploy: bt_joy (sftp)",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/deploy_bt_joy.sh",
+            "args": [],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        }
+        ,
+        {
+            "label": "build: bt_joy",
+            "type": "shell",
+            "command": "python3",
+            "args": [
+                "-m",
+                "build",
+                "--wheel"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/bt_joy"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "package: bt_joy debian",
+            "type": "shell",
+            "command": "dpkg-buildpackage",
+            "args": [
+                "-us",
+                "-uc",
+                "-b"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/bt_joy"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        }
+    ]
+}

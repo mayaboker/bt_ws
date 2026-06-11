@@ -1,0 +1,30 @@
+.TH BT-JOY-SERVER.SERVICE 8 "2026-05-18" "bt-joy 0.0.6" "System Administration"
+.SH NAME
+bt-joy-server.service \- systemd unit for the bt-joy MSP server
+.SH DESCRIPTION
+.B bt-joy-server.service
+runs the MSP server using
+.IR /etc/bt-joy/server.yaml .
+The service starts
+.B /usr/bin/bt-joy-msp-server
+and restarts on failure.
+.SH COMMANDS
+.TP
+.B systemctl enable bt-joy-server.service
+Enable the service at boot.
+.TP
+.B systemctl start bt-joy-server.service
+Start the service.
+.TP
+.B journalctl -u bt-joy-server.service -f
+Follow service logs.
+.SH FILES
+.TP
+.I /etc/bt-joy/server.yaml
+Server configuration.
+.TP
+.I /lib/systemd/system/bt-joy-server.service
+Systemd unit file.
+.SH SEE ALSO
+.BR bt-joy-msp-server (1),
+.BR bt-joy-server.yaml (5)

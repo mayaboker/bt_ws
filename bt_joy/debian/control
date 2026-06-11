@@ -1,0 +1,31 @@
+Source: bt-joy
+Section: utils
+Priority: optional
+Maintainer: bt_joy Maintainers <root@localhost>
+Build-Depends:
+ debhelper-compat (= 13),
+ dh-python,
+ pybuild-plugin-pyproject,
+ python3-all,
+ python3-click,
+ python3-hatchling,
+ python3-loguru,
+ python3-serial,
+ python3-yaml,
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: bt-joy
+Architecture: all
+Depends:
+ ${misc:Depends},
+ ${python3:Depends},
+ python3-click,
+ python3-loguru,
+ python3-serial,
+ python3-yaml,
+Description: joystick UDP bridge and Betaflight MSP forwarder
+ bt-joy reads joystick input, maps it to RC channel values, sends
+ those values over UDP, and can forward them to Betaflight using MSP.
+ The package installs client and server commands, YAML configuration
+ examples, systemd service units, and manual pages.

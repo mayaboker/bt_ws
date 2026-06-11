@@ -1,0 +1,112 @@
+.TH BT-JOY-SERVER.YAML 5 "2026-05-18" "bt-joy 0.0.6" "File Formats"
+.SH NAME
+bt-joy-server.yaml \- configuration file for the bt-joy MSP server
+.SH DESCRIPTION
+The bt-joy MSP server configuration file is YAML. It defines the UDP listener,
+MSP transport, status polling, and logging options used by the systemd service.
+.SH EXAMPLE
+.nf
+listen_host: 0.0.0.0
+listen_port: 9000
+
+output: serial
+serial_device: /dev/ttyAMA0
+baudrate: 115200
+rc_rate_hz: 50.0
+failsafe_channels: [1500, 1500, 1000, 1500, 1000, 1000, 1000, 1000]
+
+tcp_host: 127.0.0.1
+tcp_port: 5761
+
+status_interval: 1.0
+status_timeout: 1.0
+rc_read_interval: 0.1
+rc_read_timeout: 0.05
+altitude_interval: 0.2
+altitude_timeout: 0.05
+startup_probe_attempts: 3
+startup_probe_interval: 1.0
+udp_timeout: 0.05
+failsafe_joystick_timeout: 1.0
+takeoff_automation:
+  enabled: false
+  require_manual_arm: false
+  trigger_channel: aux4
+  arm_channel: aux1
+  trigger_on: 1800
+  arm_on: 2000
+  target_altitude_m: 5.0
+  target_tolerance_m: 0.2
+  throttle_base: 1300
+  throttle_min: 1000
+  throttle_max: 1800
+  pid_kp: 80.0
+  pid_ki: 10.0
+  pid_kd: 40.0
+  pid_integral_limit: 10.0
+log_level: INFO
+.fi
+.SH KEYS
+.TP
+.B listen_host, listen_port
+UDP address used to receive joystick and keepalive packets.
+.TP
+.B output
+MSP transport. Valid values are tcp and serial.
+.TP
+.B tcp_host, tcp_port
+MSP TCP destination when output is tcp.
+.TP
+.B serial_device, baudrate
+MSP serial destination when output is serial.
+.TP
+.B rc_rate_hz
+Rate used by the MSP command dispatcher to repeat the latest RC channel
+command.
+.TP
+.B failsafe_channels
+Eight RC channel values sent repeatedly when joystick data enters failsafe.
+.TP
+.B status_interval
+Seconds between MSP_STATUS_EX reads. Use 0 to disable periodic reads.
+.TP
+.B status_timeout
+Timeout for MSP startup and status reads.
+.TP
+.B rc_read_interval
+Seconds between MSP_RC reads. Use 0 to disable periodic RC reads.
+.TP
+.B rc_read_timeout
+Timeout for each MSP_RC read.
+.TP
+.B altitude_interval
+Seconds between MSP_ALTITUDE reads. Use 0 to disable periodic altitude reads.
+.TP
+.B altitude_timeout
+Timeout for each MSP_ALTITUDE read.
+.TP
+.B startup_probe_attempts
+Number of attempts for required startup MSP version reads before exiting.
+.TP
+.B startup_probe_interval
+Seconds to wait between required startup MSP version read attempts.
+.TP
+.B udp_timeout
+UDP receive timeout.
+.TP
+.B failsafe_joystick_timeout
+Seconds without valid joystick channel data before entering failsafe mode. Use
+0 to disable the joystick data monitor.
+.TP
+.B takeoff_automation
+Optional AUX-triggered automation. When enabled, trigger_channel starts the
+process, arm_channel is forced to arm_on, and throttle is computed by a PID
+loop from the latest MSP_ALTITUDE state until the trigger is released. Manual
+throttle still passes through when it is higher than the PID output. Set
+require_manual_arm to true to require the user to arm before automation starts.
+.TP
+.B log_level
+Log verbosity.
+.SH SEE ALSO
+.BR bt-joy-msp-server (1),
+.BR bt-joy-server.service (8)

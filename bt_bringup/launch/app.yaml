@@ -1,0 +1,41 @@
+session_name: app
+windows:
+  - window_name: sitl 
+    layout: tiled
+    suppress_history: false
+    shell_command_before:
+      - echo "before"
+    panes:
+      - shell_command: 
+          - printf '\033]2;%s\033\\' 'gazebo'
+          - ./bt_bringup/launch/run_gz.sh
+        focus: true
+      - shell_command:
+          - printf '\033]2;%s\033\\' 'proxy'
+          - ./bt_bringup/launch/run_websockify.sh
+      - shell_command:
+          - printf '\033]2;%s\033\\' 'sitl'
+          - sleep 3
+          - ./bt_bringup/launch/run_sitl.sh
+  - window_name: sensors
+    layout: tiled
+    suppress_history: false
+    shell_command_before:
+      - source venv/bin/activate
+    panes:
+      - shell_command: 
+          - printf '\033]2;%s\033\\' 'camera'
+          - python bt_app/bt_app/sensors/gz_camera.py
+      - shell_command: 
+          - printf '\033]2;%s\033\\' 'lidar'
+          - python bt_app/bt_app/sensors/gz_lidar.py
+  - window_name: trackers
+    layout: tiled
+    suppress_history: false
+    shell_command_before:
+      - source venv/bin/activate
+      - cd bt_app
+    panes:
+      - shell_command: 
+          - printf '\033]2;%s\033\\' 'lidar'
+          - python bt_app/trackers/red_box_tracker.py

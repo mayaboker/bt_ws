@@ -1,0 +1,19 @@
+session_name: app
+windows:
+  - window_name: sitl 
+    layout: tiled
+    suppress_history: false
+    shell_command_before:
+      - echo "before"
+    panes:
+      - shell_command: 
+          - printf '\033]2;%s\033\\' 'gazebo'
+          - ./bt_bringup/launch/run_gz.sh
+        focus: true
+      - shell_command:
+          - printf '\033]2;%s\033\\' 'proxy'
+          - ./bt_bringup/launch/run_websockify.sh
+      - shell_command:
+          - printf '\033]2;%s\033\\' 'sitl'
+          - sleep 3
+          - ./bt_bringup/launch/run_sitl.sh

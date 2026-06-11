@@ -1,0 +1,39 @@
+listen_host: 0.0.0.0
+listen_port: 9000
+
+output: serial
+serial_device: /dev/ttyAMA0
+baudrate: 115200
+rc_rate_hz: 50.0
+failsafe_channels: [1500, 1500, 1000, 1500, 1000, 1000, 1000, 1000]
+
+tcp_host: 127.0.0.1
+tcp_port: 5761
+
+status_interval: 1.0
+status_timeout: 1.0
+rc_read_interval: 1.0
+rc_read_timeout: 0.05
+altitude_interval: 0.2
+altitude_timeout: 0.05
+startup_probe_attempts: 3
+startup_probe_interval: 1.0
+udp_timeout: 0.05
+failsafe_joystick_timeout: 1.0
+takeoff_automation:
+  enabled: true
+  require_manual_arm: true
+  trigger_channel: aux4
+  arm_channel: aux1
+  trigger_on: 1800
+  arm_on: 2000
+  target_altitude_m: 5.0
+  target_tolerance_m: 0.2
+  throttle_base: 1300
+  throttle_min: 1000
+  throttle_max: 1800
+  pid_kp: 80.0
+  pid_ki: 10.0
+  pid_kd: 40.0
+  pid_integral_limit: 10.0
+log_level: INFO

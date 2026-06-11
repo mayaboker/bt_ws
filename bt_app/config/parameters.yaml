@@ -1,0 +1,46 @@
+parameters:
+  camera.fps:
+    type: int
+    default: 30
+    limits:
+      min: 1
+      max: 120
+
+  camera.width:
+    type: int
+    default: 1280
+    limits:
+      options: [640, 1280, 1920]
+
+  camera.height:
+    type: int
+    default: 720
+    limits:
+      options: [480, 720, 1080]
+
+  controller.kp:
+    type: float
+    default: 1.0
+    limits:
+      min: 0.0
+      max: 10.0
+
+  controller.ki:
+    type: float
+    default: 0.0
+    limits:
+      min: 0.0
+      max: 10.0
+
+  controller.kd:
+    type: float
+    default: 0.1
+    limits:
+      min: 0.0
+      max: 10.0
+
+  flight.mode:
+    type: str
+    default: stabilize
+    limits:
+      options: [stabilize, altitude, position]

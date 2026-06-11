@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bt-gst"
+version = "0.0.1"
+description = "GStreamer utilities for the BT workspace"
+requires-python = ">=3.10"
+dependencies = [
+    "click",
+    "loguru",
+    "msgpack",
+    "pyzmq",
+    # "pycairo>=1.25",
+    "PyGObject>=3.48",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[project.scripts]
+bt-gst = "bt_gst.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bt_gst*"]

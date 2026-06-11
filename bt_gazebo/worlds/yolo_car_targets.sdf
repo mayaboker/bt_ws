@@ -1,0 +1,204 @@
+<?xml version="1.0" ?>
+<sdf version="1.9">
+  <world name="yolo_car_targets">
+    <physics name="realtime" type="ignored">
+      <real_time_factor>1</real_time_factor>
+      <max_step_size>0.004</max_step_size>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics" />
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands" />
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster" />
+
+    <light name="sun" type="directional">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 12 0 0 0</pose>
+      <diffuse>0.85 0.82 0.75 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.45 0.25 -0.86</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>80 80</size>
+            </plane>
+          </geometry>
+        </collision>
+        <visual name="asphalt">
+          <cast_shadows>false</cast_shadows>
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>80 80</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.26 0.27 0.27 1</ambient>
+            <diffuse>0.26 0.27 0.27 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="lane_reference">
+      <static>true</static>
+      <link name="link">
+        <visual name="center_line">
+          <pose>0 0 0.01 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>45 0.08 0.02</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>1 1 1 1</ambient>
+            <diffuse>1 1 1 1</diffuse>
+          </material>
+        </visual>
+        <visual name="cross_line">
+          <pose>0 0 0.012 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.08 24 0.02</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.85 0.05 1</ambient>
+            <diffuse>0.95 0.85 0.05 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/akf/models/Evata</uri>
+      <name>evata_01</name>
+      <pose>-8 -6 0 0 0 0.25</pose>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>1</label>
+      </plugin>
+    </include>
+
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/akf/models/Evata</uri>
+      <name>evata_02</name>
+      <pose>-2 4 0 0 0 -0.65</pose>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>1</label>
+      </plugin>
+    </include>
+
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/akf/models/Evata</uri>
+      <name>evata_03</name>
+      <pose>5 -3 0 0 0 1.2</pose>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>1</label>
+      </plugin>
+    </include>
+
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/tenxlenx00/models/SUV</uri>
+      <name>suv_tracker_01</name>
+      <pose>10 6 0 0 0 2.55</pose>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>2</label>
+      </plugin>
+    </include>
+
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/tenxlenx00/models/SUV</uri>
+      <name>suv_tracker_02</name>
+      <pose>15 -8 0 0 0 -2.35</pose>
+      <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
+        <label>2</label>
+      </plugin>
+    </include>
+
+    <model name="yolo_dataset_camera">
+      <static>false</static>
+      <pose>6 0 2 0 0 3.14</pose>
+      <link name="link">
+        <gravity>false</gravity>
+        <inertial>
+          <mass>0.1</mass>
+          <inertia>
+            <ixx>0.000166667</ixx>
+            <iyy>0.000166667</iyy>
+            <izz>0.000166667</izz>
+          </inertia>
+        </inertial>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.25 0.12 0.12</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.05 0.05 0.05 1</ambient>
+            <diffuse>0.05 0.05 0.05 1</diffuse>
+          </material>
+        </visual>
+
+        <sensor name="rgb_camera" type="camera">
+          <topic>yolo/rgb</topic>
+          <camera>
+            <horizontal_fov>1.57</horizontal_fov>
+            <image>
+              <width>1280</width>
+              <height>720</height>
+            </image>
+            <clip>
+              <near>0.1</near>
+              <far>100</far>
+            </clip>
+          </camera>
+          <always_on>1</always_on>
+          <update_rate>10</update_rate>
+          <visualize>true</visualize>
+        </sensor>
+
+        <sensor name="semantic_segmentation_camera" type="segmentation">
+          <topic>yolo/semantic</topic>
+          <camera>
+            <segmentation_type>semantic</segmentation_type>
+            <horizontal_fov>1.57</horizontal_fov>
+            <image>
+              <width>1280</width>
+              <height>720</height>
+            </image>
+            <clip>
+              <near>0.1</near>
+              <far>100</far>
+            </clip>
+          </camera>
+          <always_on>1</always_on>
+          <update_rate>10</update_rate>
+          <visualize>true</visualize>
+        </sensor>
+      </link>
+    </model>
+
+    <gui fullscreen="0">
+      <camera name="user_camera">
+        <pose>-13 -16 10 0 0.55 0.75</pose>
+        <view_controller>orbit</view_controller>
+        <projection_type>perspective</projection_type>
+      </camera>
+    </gui>
+  </world>
+</sdf>

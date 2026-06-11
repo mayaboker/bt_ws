@@ -1,0 +1,83 @@
+.TH BT-JOY-CLIENT.YAML 5 "2026-05-18" "bt-joy 0.0.6" "File Formats"
+.SH NAME
+bt-joy-client.yaml \- configuration file for the bt-joy client
+.SH DESCRIPTION
+The bt-joy client configuration file is YAML. It defines the joystick device,
+polling rate, UDP target, keepalive settings, and channel mapping.
+.SH EXAMPLE
+.nf
+device: /dev/input/js0
+# expected_name: "Xbox Wireless Controller"
+mapping: mapping.yaml
+poll_hz: 50
+keepalive_interval: 1.0
+keepalive_timeout: 1.0
+joystick_reconnect_interval: 1.0
+keepalive_rtt_warning:
+  enabled: true
+  threshold_ms: 100.0
+  window_s: 10.0
+  count: 3
+  cooldown_s: 10.0
+axes: 7
+buttons: 16
+
+udp:
+  host: 127.0.0.1
+  port: 9000
+.fi
+.SH KEYS
+.TP
+.B device
+Linux joystick device path.
+.TP
+.B expected_name
+Optional exact joystick name. When set, bt-joy exits if the connected device
+name does not match.
+.TP
+.B mapping
+Path to the joystick channel mapping YAML. Relative paths are resolved relative
+to the client configuration file. The command line
+.B \-\-mapping
+option overrides this value.
+.TP
+.B poll_hz
+Joystick polling frequency.
+.TP
+.B keepalive_interval
+Seconds between UDP keepalive requests. Use 0 to disable.
+.TP
+.B keepalive_timeout
+Seconds to wait before logging a missing keepalive response.
+.TP
+.B joystick_reconnect_interval
+Seconds to wait before retrying a missing or disconnected joystick.
+.TP
+.B keepalive_rtt_warning.enabled
+Enable warning logs for repeated high keepalive round-trip times.
+.TP
+.B keepalive_rtt_warning.threshold_ms
+Round-trip time threshold, in milliseconds.
+.TP
+.B keepalive_rtt_warning.window_s
+Time window used to count high round-trip samples.
+.TP
+.B keepalive_rtt_warning.count
+Number of high round-trip samples inside the window before warning.
+.TP
+.B keepalive_rtt_warning.cooldown_s
+Minimum seconds between repeated high round-trip warning logs.
+.TP
+.B axes, buttons
+Expected joystick axis and button counts.
+.TP
+.B udp.host, udp.port
+UDP destination for the bt-joy server.
+.TP
+.B channels
+Legacy inline list of axis, button, or constant channel mappings. Prefer a
+separate mapping file referenced by
+.B mapping .
+.SH SEE ALSO
+.BR bt-joy (1),
+.BR bt-joy-client.service (8)

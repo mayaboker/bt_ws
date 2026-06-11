@@ -1,0 +1,76 @@
+.TH BT-JOY-MSP-SERVER 1 "2026-05-18" "bt-joy 0.0.6" "User Commands"
+.SH NAME
+bt-joy-msp-server \- receive bt-joy UDP packets and forward RC channels to MSP
+.SH SYNOPSIS
+.B bt-joy-msp-server
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B bt-joy-msp-server
+receives joystick UDP packets from bt-joy and forwards RC channels to
+Betaflight using MSP over TCP or serial.
+.SH OPTIONS
+.TP
+.B \-c, \-\-config FILE
+Load server configuration from FILE. The packaged service uses
+.IR /etc/bt-joy/server.yaml .
+.TP
+.B \-\-listen-host HOST
+Override UDP listen host.
+.TP
+.B \-\-listen-port PORT
+Override UDP listen port.
+.TP
+.B \-\-output tcp|serial
+Override MSP output transport.
+.TP
+.B \-\-tcp-host HOST
+Override MSP TCP host.
+.TP
+.B \-\-tcp-port PORT
+Override MSP TCP port.
+.TP
+.B \-\-serial-device PATH
+Override MSP serial device.
+.TP
+.B \-\-baudrate BAUD
+Override MSP serial baudrate.
+.TP
+.B \-\-rc-rate-hz HZ
+Override MSP_SET_RAW_RC repeat rate used by the MSP command dispatcher.
+.TP
+.B \-\-status-interval SECONDS
+Override seconds between MSP_STATUS_EX reads. Use 0 to disable periodic reads.
+.TP
+.B \-\-status-timeout SECONDS
+Override MSP_STATUS_EX read timeout.
+.TP
+.B \-\-rc-read-interval SECONDS
+Override seconds between MSP_RC reads. Use 0 to disable periodic RC reads.
+.TP
+.B \-\-rc-read-timeout SECONDS
+Override MSP_RC read timeout.
+.TP
+.B \-\-altitude-interval SECONDS
+Override seconds between MSP_ALTITUDE reads. Use 0 to disable periodic
+altitude reads.
+.TP
+.B \-\-altitude-timeout SECONDS
+Override MSP_ALTITUDE read timeout.
+.TP
+.B \-\-udp-timeout SECONDS
+Override UDP receive timeout.
+.TP
+.B \-\-failsafe-joystick-timeout SECONDS
+Override seconds without joystick channel data before failsafe. Use 0 to
+disable the joystick data monitor.
+.TP
+.B \-\-log-level LEVEL
+Set log verbosity.
+.SH FILES
+.TP
+.I /etc/bt-joy/server.yaml
+Default service configuration.
+.SH SEE ALSO
+.BR bt-joy-server.yaml (5),
+.BR bt-joy-server.service (8),
+.BR bt-joy (1)

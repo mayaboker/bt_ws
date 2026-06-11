@@ -1,0 +1,5 @@
+examples/client.yaml etc/bt-joy/
+examples/mapping.yaml etc/bt-joy/
+examples/server.yaml etc/bt-joy/
+debian/bt-joy-client.service lib/systemd/system/
+debian/bt-joy-server.service lib/systemd/system/

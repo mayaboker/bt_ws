@@ -1,0 +1,5 @@
+bt-joy (0.0.6) unstable; urgency=medium
+
+  * Package bt-joy commands, service units, YAML configs, and man pages.
+
+ -- bt_joy Maintainers <root@localhost>  Mon, 18 May 2026 00:00:00 +0000

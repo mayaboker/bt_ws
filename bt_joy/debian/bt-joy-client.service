@@ -1,0 +1,13 @@
+[Unit]
+Description=bt-joy joystick client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/bt-joy --config /etc/bt-joy/client.yaml
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

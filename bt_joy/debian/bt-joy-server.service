@@ -1,0 +1,13 @@
+[Unit]
+Description=bt-joy Betaflight MSP server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/bt-joy-msp-server --config /etc/bt-joy/server.yaml
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

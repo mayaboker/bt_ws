@@ -1,0 +1,12 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: bt-joy
+
+Files: *
+Copyright: 2026 bt_joy contributors
+License: TODO
+ A project license has not been added yet. Replace this paragraph with the
+ final project license before distributing the Debian package outside your own
+ systems.
+
+License: TODO
+ This is a placeholder for local packaging.

@@ -1,0 +1,219 @@
+<?xml version="1.0"?>
+<sdf version="1.10">
+  <world name="xxx">
+    <physics name="default_physics" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-rendering-system" name="gz::sim::systems::Rendering"/>
+
+<gui fullscreen="0">
+
+            
+            <plugin filename="MinimalScene" name="3D View">
+                <gz-gui>
+                    <title>3D View</title>
+                    <property type="bool" key="showTitleBar">false</property>
+                    <property type="string" key="state">docked</property>
+                </gz-gui>
+
+                <engine>ogre2</engine>
+                <scene>scene</scene>
+                <ambient_light>1.0 1.0 1.0</ambient_light>
+                <background_color>0.8 0.8 0.8</background_color>
+                <camera_pose>100.000 100.000 105.013 0 1.5708 0</camera_pose>
+            </plugin>
+
+            
+            
+            <plugin filename="GzSceneManager" name="Scene Manager">
+                <gz-gui>
+                    <property key="resizable" type="bool">false</property>
+                    <property key="width" type="double">5</property>
+                    <property key="height" type="double">5</property>
+                    <property key="state" type="string">floating</property>
+                    <property key="showTitleBar" type="bool">false</property>
+                </gz-gui>
+            </plugin>
+            <plugin filename="InteractiveViewControl" name="Interactive view control">
+                <gz-gui>
+                    <property key="resizable" type="bool">false</property>
+                    <property key="width" type="double">5</property>
+                    <property key="height" type="double">5</property>
+                    <property key="state" type="string">floating</property>
+                    <property key="showTitleBar" type="bool">false</property>
+                </gz-gui>
+            </plugin>
+            <plugin filename="CameraTracking" name="Camera Tracking">
+                <gz-gui>
+                    <property key="resizable" type="bool">false</property>
+                    <property key="width" type="double">5</property>
+                    <property key="height" type="double">5</property>
+                    <property key="state" type="string">floating</property>
+                    <property key="showTitleBar" type="bool">false</property>
+                </gz-gui>
+            </plugin>
+
+            
+            <plugin filename="WorldControl" name="World control">
+                <gz-gui>
+                    <title>World control</title>
+                    <property type="bool" key="showTitleBar">false</property>
+                    <property type="bool" key="resizable">false</property>
+                    <property type="double" key="height">72</property>
+                    <property type="double" key="z">1</property>
+
+                    <property type="string" key="state">floating</property>
+                    <anchors target="3D View">
+                        <line own="left" target="left" />
+                        <line own="bottom" target="bottom" />
+                    </anchors>
+                </gz-gui>
+
+                <play_pause>true</play_pause>
+                <step>true</step>
+                <start_paused>true</start_paused>
+                <use_event>true</use_event>
+
+            </plugin>
+
+            
+            <plugin filename="WorldStats" name="World stats">
+                <gz-gui>
+                    <title>World stats</title>
+                    <property type="bool" key="showTitleBar">false</property>
+                    <property type="bool" key="resizable">false</property>
+                    <property type="double" key="height">110</property>
+                    <property type="double" key="width">290</property>
+                    <property type="double" key="z">1</property>
+
+                    <property type="string" key="state">floating</property>
+                    <anchors target="3D View">
+                        <line own="right" target="right" />
+                        <line own="bottom" target="bottom" />
+                    </anchors>
+                </gz-gui>
+
+                <sim_time>true</sim_time>
+                <real_time>true</real_time>
+                <real_time_factor>true</real_time_factor>
+                <iterations>true</iterations>
+            </plugin>
+
+
+            
+            <plugin filename="ComponentInspector" name="Component inspector">
+                <gz-gui>
+                    <property type="bool" key="showTitleBar">false</property>
+                    <property type="string" key="state">docked</property>
+                </gz-gui>
+            </plugin>
+
+            
+            <plugin filename="EntityTree" name="Entity tree">
+                <gz-gui>
+                    <property type="bool" key="showTitleBar">false</property>
+                    <property type="string" key="state">docked</property>
+                </gz-gui>
+            </plugin>
+
+        </gui>
+
+    <light name="sun" type="directional">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 100 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <include>
+      <name>terrain_tile_0_0</name>
+      <uri>model://terrain_tile_0_0</uri>
+      <pose>100.000 100.000 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <name>terrain_tile_1_0</name>
+      <uri>model://terrain_tile_1_0</uri>
+      <pose>300.000 100.000 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <name>terrain_tile_0_1</name>
+      <uri>model://terrain_tile_0_1</uri>
+      <pose>100.000 300.000 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <name>terrain_tile_1_1</name>
+      <uri>model://terrain_tile_1_1</uri>
+      <pose>300.000 300.000 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://betaloop_iris_with_standoffs</uri>
+      <name>iris</name>
+      <pose>100.000 100.000 35.013 0 0 0</pose>
+    </include>
+
+    <plugin name="gz::sim" filename="dummy">
+      <performer name="probe_performer">
+        <ref>iris</ref>
+        <geometry>
+          <box>
+            <size>20 20 20</size>
+          </box>
+        </geometry>
+      </performer>
+
+      <level name="level_tile_0_0">
+        <pose>100.000 100.000 0.000 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>200.000 200.000 1500.000</size>
+          </box>
+        </geometry>
+        <buffer>30</buffer>
+        <ref>terrain_tile_0_0</ref>
+      </level>
+
+      <level name="level_tile_1_0">
+        <pose>300.000 100.000 0.000 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>200.000 200.000 1500.000</size>
+          </box>
+        </geometry>
+        <buffer>30</buffer>
+        <ref>terrain_tile_1_0</ref>
+      </level>
+
+      <level name="level_tile_0_1">
+        <pose>100.000 300.000 0.000 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>200.000 200.000 1500.000</size>
+          </box>
+        </geometry>
+        <buffer>30</buffer>
+        <ref>terrain_tile_0_1</ref>
+      </level>
+
+      <level name="level_tile_1_1">
+        <pose>300.000 300.000 0.000 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>200.000 200.000 1500.000</size>
+          </box>
+        </geometry>
+        <buffer>30</buffer>
+        <ref>terrain_tile_1_1</ref>
+      </level>
+    </plugin>
+  </world>
+</sdf>

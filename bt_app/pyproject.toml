@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bt-app"
+version = "0.0.1"
+description = "BT application services"
+requires-python = ">=3.10"
+dependencies = [
+    "loguru",
+    "click",
+    "numpy",
+    "opencv-python",
+    "py_trees",
+    "pyserial",
+    "pyyaml",
+    "pyzmq",
+    "msgpack",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy",
+    "websockify",
+]
+
+[project.scripts]
+bt-app = "bt_app.main:main"
+bt-gz-camera = "bt_app.sensors.gz_camera:cli"
+bt-optical-flow-tracker = "bt_app.trackers.optical_flow_tracker:main"
+bt-gz-rtf = "bt_app.sensors.gz_rtf_monitor:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bt_app*", "msp*"]

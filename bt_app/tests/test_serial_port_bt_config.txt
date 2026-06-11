@@ -1,0 +1,55 @@
+defaults nosave
+
+
+# version
+# Betaflight / STM32F7X2 (F722) 2025.12.2 Mar 24 2026 / 14:20:48 (79065c96b) MSP API: 1.47
+# config rev: e378347
+
+# start the command batch
+batch start
+
+# reset configuration to default settings
+defaults nosave
+
+board_name MAMBAF722_2022B
+manufacturer_id DIAT
+mcu_id 004600313433510e35353234
+signature 
+
+# feature
+feature -RX_SERIAL
+feature TELEMETRY
+feature LED_STRIP
+
+# serial
+serial UART3 1 115200 57600 0 115200
+
+# aux
+aux 0 0 0 1700 2100 0 0
+
+# master
+set small_angle = 180
+
+profile 0
+
+profile 1
+
+profile 2
+
+profile 3
+
+# restore original profile selection
+profile 0
+
+rateprofile 0
+
+rateprofile 1
+
+rateprofile 2
+
+rateprofile 3
+
+# restore original rateprofile selection
+rateprofile 0
+
+# save configuration

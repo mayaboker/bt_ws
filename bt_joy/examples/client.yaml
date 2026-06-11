@@ -1,0 +1,19 @@
+device: /dev/input/js0
+# expected_name: "Xbox Wireless Controller"
+mapping: mapping.yaml
+poll_hz: 50
+keepalive_interval: 1.0
+keepalive_timeout: 1.0
+joystick_reconnect_interval: 1.0
+keepalive_rtt_warning:
+  enabled: true
+  threshold_ms: 100.0
+  window_s: 10.0
+  count: 3
+  cooldown_s: 10.0
+axes: 7
+buttons: 16
+
+udp:
+  host: 127.0.0.1
+  port: 9000

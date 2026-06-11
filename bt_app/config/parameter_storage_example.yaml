@@ -1,0 +1,106 @@
+parameters:
+  altitude.kp:
+    type: float
+    default: 60.0
+    limits:
+      min: 0.0
+      max: 200.0
+  altitude.ki:
+    type: float
+    default: 20.0
+    limits:
+      min: 0.0
+      max: 200.0
+  altitude.kd:
+    type: float
+    default: 6.0
+    limits:
+      min: 0.0
+      max: 200.0
+  altitude.output_limits:
+    type: float
+    default: 400.0
+    limits:
+      min: 0.0
+      max: 500.0
+  takeoff_altitude:
+    type: float
+    default: 4.0
+    limits:
+      min: 0.0
+      max: 200.0
+  hover_yaw.altitude:
+    type: float
+    default: 7.0
+    limits:
+      min: 0.0
+      max: 200.0
+  hover_yaw.yaw_rate:
+    type: int
+    default: 20
+    limits:
+      min: -500
+      max: 500
+  visual.hover_throttle:
+    type: float
+    default: 0.55
+    limits:
+      min: 0.0
+      max: 1.0
+  visual.forward_pitch_deg:
+    type: float
+    default: -20.0
+    limits:
+      min: -100.0
+      max: 100.0
+  visual.max_pitch_deg:
+    type: float
+    default: 60.0
+    limits:
+      min: 0.0
+      max: 100.0
+  visual.max_throttle:
+    type: float
+    default: 0.85
+    limits:
+      min: 0.0
+      max: 1.0
+  visual.kp_yaw:
+    type: float
+    default: 1
+    limits:
+      min: 0.0
+      max: 100.0
+  visual.kp_pitch_y:
+    type: float
+    default: 1
+    limits:
+      min: 0.0
+      max: 100.0
+  visual.kp_throttle_y:
+    type: float
+    default: 0.06
+    limits:
+      min: 0.0
+      max: 1.0
+  betaflight_yaw_rate_full_stick_dps:
+    type: float
+    default: 67.0
+    limits:
+      min: 1.0
+      max: 1000.0
+  visual.final_tracking_distance:
+    type: float
+    default: 3.0
+    limits:
+      min: 0.0
+      max: 10.0
+      
+  flight.mode:
+    type: str
+    default: stabilize
+    limits:
+      options:
+      - stabilize
+      - altitude
+      - position

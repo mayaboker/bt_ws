@@ -1,0 +1,16 @@
+session_name: joy
+windows:
+  - window_name: joystick 
+    layout: tiled
+    suppress_history: false
+    shell_command_before:
+      - echo "before"
+    panes:
+      - shell_command: 
+          - printf '\033]2;%s\033\\' 'server'
+          - bt-joy-msp-server --output tcp --tcp-host 127.0.0.1 --tcp-port 5761 --status-interval 1.0
+        focus: true
+      - shell_command:
+          - printf '\033]2;%s\033\\' 'client'
+          - bt-joy
+      

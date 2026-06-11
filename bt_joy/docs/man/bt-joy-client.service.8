@@ -1,0 +1,30 @@
+.TH BT-JOY-CLIENT.SERVICE 8 "2026-05-18" "bt-joy 0.0.6" "System Administration"
+.SH NAME
+bt-joy-client.service \- systemd unit for the bt-joy joystick client
+.SH DESCRIPTION
+.B bt-joy-client.service
+runs the joystick client using
+.IR /etc/bt-joy/client.yaml .
+The service starts
+.B /usr/bin/bt-joy
+and restarts on failure.
+.SH COMMANDS
+.TP
+.B systemctl enable bt-joy-client.service
+Enable the service at boot.
+.TP
+.B systemctl start bt-joy-client.service
+Start the service.
+.TP
+.B journalctl -u bt-joy-client.service -f
+Follow service logs.
+.SH FILES
+.TP
+.I /etc/bt-joy/client.yaml
+Client configuration.
+.TP
+.I /lib/systemd/system/bt-joy-client.service
+Systemd unit file.
+.SH SEE ALSO
+.BR bt-joy (1),
+.BR bt-joy-client.yaml (5)

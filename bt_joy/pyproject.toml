@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bt-joy"
+version = "0.0.7-dev"
+description = "Joystick input utilities for the BT workspace"
+requires-python = ">=3.10"
+dependencies = [
+    "click",
+    "loguru",
+    "pyserial",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build",
+    "pytest",
+    "websockify"
+]
+
+[project.scripts]
+bt-joy = "bt_joy.client.main:main"
+bt-joy-msp-server = "bt_joy.server.joy_msp_server:main"
+bt-joy-mock-server = "bt_joy.server.mock_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bt_joy"]
+
+[tool.hatch.build.targets.wheel.shared-scripts]
+"scripts/bt-joy-install-prompt" = "bt-joy-install-prompt"
