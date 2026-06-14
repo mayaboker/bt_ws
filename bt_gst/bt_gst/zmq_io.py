@@ -1,127 +1,107 @@
-import queue
-import threading
-import time
-from dataclasses import asdict
-from typing import Any
+"""ZMQ adapter for tracker requests and telemetry."""
 
-DEFAULT_TRACKER_META_ENDPOINT = "tcp://127.0.0.1:5556"
-TRACKER_META_TOPIC = b"tracker_meta"
-TRACKER_META_VERSION = 1
+from typing import Protocol
 
+from loguru import logger
 
-class ZmqPublisherError(RuntimeError):
-    """Raised when the ZMQ publisher cannot start."""
+from bt_gst.zmq_models import (
+    TrackRequest,
+    TrackerDataMessage,
+    TrackerDebugMessage,
+    decode_request,
+    encode_message,
+)
 
-
-def encode_tracker_meta(meta: Any, timestamp_ns: int | None = None) -> bytes:
-    import msgpack
-
-    payload = {
-        "version": TRACKER_META_VERSION,
-        "timestamp_ns": timestamp_ns if timestamp_ns is not None else time.time_ns(),
-        **asdict(meta),
-    }
-    return msgpack.packb(payload, use_bin_type=True)
+DEFAULT_REQUEST_ENDPOINT = "tcp://127.0.0.1:5555"
+DEFAULT_TELEMETRY_ENDPOINT = "tcp://127.0.0.1:5556"
 
 
-class TrackerMetaPublisher:
-    def __init__(self, endpoint: str = DEFAULT_TRACKER_META_ENDPOINT) -> None:
-        self.endpoint = endpoint
-        self._queue: queue.Queue[bytes | None] = queue.Queue(maxsize=1)
-        self._ready = threading.Event()
-        self._closed = threading.Event()
-        self._startup_error: BaseException | None = None
-        self._thread: threading.Thread | None = None
+class TrackerIoAdapter(Protocol):
+    def poll_latest_request(self) -> TrackRequest | None:
+        """Return the newest pending request, dropping older pending requests."""
 
-    def start(self) -> None:
-        if self._thread is not None:
-            return
+    def publish_tracker_data(self, message: TrackerDataMessage) -> None:
+        """Publish tracker metadata without blocking."""
 
-        try:
-            import msgpack  # noqa: F401
-            import zmq  # noqa: F401
-        except ImportError as exc:
-            raise ZmqPublisherError(
-                "failed to import ZMQ tracker metadata publisher dependencies"
-            ) from exc
-
-        self._thread = threading.Thread(
-            target=self._run,
-            name="bt-gst-tracker-meta-publisher",
-            daemon=True,
-        )
-        self._thread.start()
-        self._ready.wait()
-
-        if self._startup_error is not None:
-            self.close()
-            raise ZmqPublisherError(
-                f"failed to start ZMQ tracker metadata publisher at {self.endpoint}: "
-                f"{self._startup_error}"
-            ) from self._startup_error
-
-    def publish(self, meta: Any) -> None:
-        if self._closed.is_set():
-            return
-
-        message = encode_tracker_meta(meta)
-        self._replace_queued_message(message)
+    def publish_tracker_debug(self, message: TrackerDebugMessage) -> None:
+        """Publish tracker debug data without blocking."""
 
     def close(self) -> None:
-        self._closed.set()
-        self._replace_queued_message(None)
-        if self._thread is not None:
-            self._thread.join(timeout=1.0)
-            self._thread = None
+        """Release transport resources."""
 
-    def _replace_queued_message(self, message: bytes | None) -> None:
-        try:
-            self._queue.put_nowait(message)
-            return
-        except queue.Full:
-            pass
 
-        try:
-            self._queue.get_nowait()
-        except queue.Empty:
-            pass
-        try:
-            self._queue.put_nowait(message)
-        except queue.Full:
-            pass
+class NullTrackerIoAdapter:
+    def poll_latest_request(self) -> TrackRequest | None:
+        return None
 
-    def _run(self) -> None:
+    def publish_tracker_data(self, message: TrackerDataMessage) -> None:
+        return
+
+    def publish_tracker_debug(self, message: TrackerDebugMessage) -> None:
+        return
+
+    def close(self) -> None:
+        return
+
+
+class ZmqTrackerIoAdapter:
+    def __init__(
+        self,
+        request_endpoint: str = DEFAULT_REQUEST_ENDPOINT,
+        telemetry_endpoint: str = DEFAULT_TELEMETRY_ENDPOINT,
+        *,
+        bind: bool = True,
+        context: object | None = None,
+    ) -> None:
         import zmq
 
-        context = zmq.Context()
-        socket = context.socket(zmq.PUB)
-        socket.setsockopt(zmq.SNDHWM, 1)
-        socket.setsockopt(zmq.LINGER, 0)
+        self._zmq = zmq
+        self._context = context if context is not None else zmq.Context()
+        self._owns_context = context is None
+        self._request_socket = self._context.socket(zmq.SUB)
+        self._telemetry_socket = self._context.socket(zmq.PUB)
 
+        self._request_socket.setsockopt(zmq.LINGER, 0)
+        self._request_socket.setsockopt(zmq.RCVHWM, 10)
+        self._request_socket.setsockopt(zmq.SUBSCRIBE, b"")
+
+        self._telemetry_socket.setsockopt(zmq.LINGER, 0)
+        self._telemetry_socket.setsockopt(zmq.SNDHWM, 1)
+
+        if bind:
+            self._request_socket.bind(request_endpoint)
+            self._telemetry_socket.bind(telemetry_endpoint)
+        else:
+            self._request_socket.connect(request_endpoint)
+            self._telemetry_socket.connect(telemetry_endpoint)
+
+    def poll_latest_request(self) -> TrackRequest | None:
+        latest_request = None
+        while True:
+            try:
+                payload = self._request_socket.recv(flags=self._zmq.NOBLOCK)
+            except self._zmq.Again:
+                return latest_request
+
+            try:
+                latest_request = decode_request(payload)
+            except (KeyError, TypeError, ValueError, self._zmq.ZMQError) as exc:
+                logger.warning("ignored invalid tracker request reason={}", exc)
+
+    def publish_tracker_data(self, message: TrackerDataMessage) -> None:
+        self._publish(message)
+
+    def publish_tracker_debug(self, message: TrackerDebugMessage) -> None:
+        self._publish(message)
+
+    def close(self) -> None:
+        self._request_socket.close(linger=0)
+        self._telemetry_socket.close(linger=0)
+        if self._owns_context:
+            self._context.term()
+
+    def _publish(self, message: TrackerDataMessage | TrackerDebugMessage) -> None:
         try:
-            socket.bind(self.endpoint)
-        except BaseException as exc:
-            self._startup_error = exc
-            self._ready.set()
-            socket.close(linger=0)
-            context.term()
-            return
-
-        self._ready.set()
-
-        try:
-            while True:
-                message = self._queue.get()
-                if message is None:
-                    break
-
-                try:
-                    socket.send_multipart(
-                        [TRACKER_META_TOPIC, message],
-                        flags=zmq.NOBLOCK,
-                    )
-                except zmq.Again:
-                    continue
-        finally:
-            socket.close(linger=0)
-            context.term()
+            self._telemetry_socket.send(encode_message(message), flags=self._zmq.NOBLOCK)
+        except self._zmq.Again:
+            logger.debug("dropped tracker telemetry reason=send-would-block")

@@ -12,6 +12,9 @@ Gst.init(None)
 META_NAME = "bt-tracker-meta"
 G_TYPE_INT = 24
 G_TYPE_FLOAT = 56
+STATUS_OFF = 0
+STATUS_TRACK = 1
+STATUS_BREAK = 2
 
 
 class GValue(ctypes.Structure):
@@ -42,7 +45,8 @@ _gobject.g_value_set_float.restype = None
 _gobject.g_value_unset.argtypes = [ctypes.c_void_p]
 _gobject.g_value_unset.restype = None
 
-Gst.Meta.register_custom_simple(META_NAME)
+if Gst.Meta.get_info(META_NAME) is None:
+    Gst.Meta.register_custom_simple(META_NAME)
 
 
 def set_meta_int(custom_meta: object, name: str, value: int) -> None:
@@ -104,6 +108,7 @@ class BtPassThrough(GstBase.BaseTransform):
         set_meta_int(meta, "dx", 0)
         set_meta_int(meta, "dy", 0)
         set_meta_float(meta, "score", 1.0)
+        set_meta_int(meta, "status", STATUS_TRACK)
 
         return Gst.FlowReturn.OK
 
