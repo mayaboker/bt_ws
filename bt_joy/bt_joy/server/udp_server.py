@@ -33,6 +33,9 @@ class FailsafeMonitor:
         )
 
     def record_joystick(self) -> None:
+        """
+        Record that a valid joystick frame was received.
+        This resets the failsafe timer."""
         self.last_joystick_at = time.monotonic()
 
     def evaluate(self, controller: JoystickController) -> None:
@@ -71,6 +74,16 @@ def run_udp_server(
     udp_timeout: float,
     failsafe_joystick_timeout: float,
 ) -> None:
+    """
+    Wait for UDP data up to udp_timeout.
+    - If timeout happens, no packet is processed, but failsafe and controller.tick() still run.
+    - If keepalive arrives, respond immediately.
+    - If joystick frame arrives, parse it and forward it to the controller.
+    - If the controller accepts the frame, update the last valid joystick timestamp.
+    - Every iteration checks failsafe state and ticks the controller.
+    - parse_joystick_packet(...) converts raw UDP bytes into a JoystickFrame.
+    - handle_keepalive_packet(...) sends a small response back to the sender and logs latency.
+    """
     failsafe = FailsafeMonitor.create(
         joystick_timeout=failsafe_joystick_timeout,
     )
@@ -90,7 +103,7 @@ def run_udp_server(
                 return
 
             if payload is not None and address is not None:
-                # keep
+                # keep alive 
                 if is_keepalive_request(payload):
                     handle_keepalive_packet(udp_socket, payload, address)
                     failsafe.evaluate(controller)
@@ -98,9 +111,17 @@ def run_udp_server(
                     continue
                 # joystick
                 frame = parse_joystick_packet(payload, address)
-                if frame is not None and controller.handle_frame(frame):
-                    failsafe.record_joystick()
+                if frame is not None:
+                    try:
+                        handled = controller.handle_frame(frame)
+                    except Exception as exc:
+                        logger.error("controller frame handler failed: {}", exc)
+                        handled = False
+                    if handled:
+                        failsafe.record_joystick()
 
+            # even if no packet or an invalid packet was received, 
+            # we still want to evaluate failsafe and tick the controller
             failsafe.evaluate(controller)
             controller.tick()
 
@@ -109,6 +130,9 @@ def parse_joystick_packet(
     payload: bytes,
     address: tuple[str, int],
 ) -> JoystickFrame | None:
+    """
+    unpack and map joystick request to channels array and return a JoystickFrame object.
+    """
     try:
         sequence, frame_timestamp_us, channels = unpack_frame(payload)
     except ValueError as exc:
