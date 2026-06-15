@@ -92,29 +92,29 @@ bt-joy-mock-server --host 127.0.0.1 --port 9000 --timeout 5
 Forward joystick UDP packets to Betaflight MSP `MSP_SET_RAW_RC` over TCP:
 
 ```bash
-bt-joy-msp-server --listen-host 127.0.0.1 --listen-port 9000 --output tcp --tcp-host 127.0.0.1 --tcp-port 5761
+joy-server --listen-host 127.0.0.1 --listen-port 9000 --output tcp --tcp-host 127.0.0.1 --tcp-port 5761
 ```
 
 Forward to MSP over serial:
 
 ```bash
-bt-joy-msp-server --listen-port 9000 --output serial --serial-device /dev/ttyUSB0 --baudrate 115200
+joy-server --listen-port 9000 --output serial --serial-device /dev/ttyUSB0 --baudrate 115200
 ```
 
 ```bash title="rpi"
-bt-joy-msp-server --listen-port 9000 --output serial --serial-device /dev/ttyAMA0 --baudrate 115200
+joy-server --listen-port 9000 --output serial --serial-device /dev/ttyAMA0 --baudrate 115200
 ```
 
 Read and log MSP status, including Betaflight arming disable flags, at a fixed interval:
 
 ```bash
-bt-joy-msp-server --output tcp --tcp-host 127.0.0.1 --tcp-port 5761 --status-interval 1.0
+joy-server --output tcp --tcp-host 127.0.0.1 --tcp-port 5761 --status-interval 1.0
 ```
 
 Use a YAML config file for the MSP server:
 
 ```bash
-bt-joy-msp-server --config /etc/bt-joy/server.yaml
+joy-server --config /etc/bt-joy/server.yaml
 ```
 
 ## Debian Package
@@ -131,7 +131,7 @@ The package installs:
 
 ```text
 /usr/bin/bt-joy
-/usr/bin/bt-joy-msp-server
+/usr/bin/joy-server
 /etc/bt-joy/client.yaml
 /etc/bt-joy/mapping.yaml
 /etc/bt-joy/server.yaml

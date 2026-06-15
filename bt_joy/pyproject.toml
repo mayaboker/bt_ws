@@ -23,7 +23,7 @@ dev = [
 
 [project.scripts]
 bt-joy = "bt_joy.client.main:main"
-bt-joy-msp-server = "bt_joy.server.joy_msp_server:main"
+joy-server = "bt_joy.server.joy_server:main"
 bt-joy-mock-server = "bt_joy.server.mock_server:main"
 
 [tool.hatch.build.targets.wheel]

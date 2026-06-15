@@ -6,7 +6,7 @@ bt-joy-server.service \- systemd unit for the bt-joy MSP server
 runs the MSP server using
 .IR /etc/bt-joy/server.yaml .
 The service starts
-.B /usr/bin/bt-joy-msp-server
+.B /usr/bin/joy-server
 and restarts on failure.
 .SH COMMANDS
 .TP
@@ -26,5 +26,5 @@ Server configuration.
 .I /lib/systemd/system/bt-joy-server.service
 Systemd unit file.
 .SH SEE ALSO
-.BR bt-joy-msp-server (1),
+.BR joy-server (1),
 .BR bt-joy-server.yaml (5)

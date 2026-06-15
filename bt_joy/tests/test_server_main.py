@@ -30,10 +30,14 @@ sys.modules.setdefault("loguru", SimpleNamespace(logger=_Logger()))
 
 from click.testing import CliRunner
 
-import bt_joy.server.joy_msp_server as joy_msp_server
+import bt_joy.server.joy_server as joy_server
+import bt_joy.server.cli as server_cli
 import bt_joy.server.adapters.msp as msp_adapter
 from bt_joy.server.adapters.msp import StartupProbeError, _read_startup_info
-from bt_joy.server.joy_msp_server import main as server_main
+from bt_joy.server.joy_server import ServerCliArgs, ServerConfigError
+
+
+server_main = server_cli.main
 
 
 class _RefusedTransport:
@@ -71,13 +75,40 @@ class _StartupClient:
         raise TimeoutError("status timeout")
 
 
+def make_server_args(**overrides) -> ServerCliArgs:
+    values = {
+        "config": None,
+        "adapter": None,
+        "listen_host": None,
+        "listen_port": None,
+        "output_kind": None,
+        "tcp_host": None,
+        "tcp_port": None,
+        "serial_device": None,
+        "baudrate": None,
+        "rc_rate_hz": None,
+        "status_interval": None,
+        "status_timeout": None,
+        "rc_read_interval": None,
+        "rc_read_timeout": None,
+        "altitude_interval": None,
+        "altitude_timeout": None,
+        "udp_timeout": None,
+        "failsafe_joystick_timeout": None,
+        "print_config": True,
+        "log_level": None,
+    }
+    values.update(overrides)
+    return ServerCliArgs(**values)
+
+
 class ServerMainTest(unittest.TestCase):
     def test_help_includes_print_config_example(self) -> None:
         result = CliRunner().invoke(server_main, ["--help"])
 
         self.assertEqual(result.exit_code, 0)
         self.assertIn(
-            "bt-joy-msp-server --adapter crossfire --print-config > crossfire-server.yaml",
+            "joy-server --adapter crossfire --print-config > crossfire-server.yaml",
             result.output,
         )
 
@@ -114,9 +145,9 @@ class ServerMainTest(unittest.TestCase):
 
     def test_connection_refused_exits_with_click_error(self) -> None:
         with patch(
-            "bt_joy.server.joy_msp_server._make_transport",
+            "bt_joy.server.joy_server._make_transport",
             return_value=_RefusedTransport(),
-        ), patch.object(joy_msp_server, "logger", _Logger()):
+        ), patch.object(joy_server, "logger", _Logger()):
             result = CliRunner().invoke(server_main, [])
 
         self.assertNotEqual(result.exit_code, 0)
@@ -124,7 +155,7 @@ class ServerMainTest(unittest.TestCase):
         self.assertNotIn("Traceback", result.output)
 
     def test_print_config_outputs_effective_yaml_and_does_not_open_transport(self) -> None:
-        with patch("bt_joy.server.joy_msp_server._make_transport") as make_transport:
+        with patch("bt_joy.server.joy_server._make_transport") as make_transport:
             result = CliRunner().invoke(
                 server_main,
                 [
@@ -166,6 +197,29 @@ class ServerMainTest(unittest.TestCase):
         self.assertEqual(data["adapter"], "crossfire")
         self.assertEqual(data["listen_port"], 9002)
 
+    def test_programmatic_main_returns_effective_config(self) -> None:
+        config = joy_server.main(
+            make_server_args(
+                output_kind="serial",
+                serial_device="/dev/ttyUSB0",
+                baudrate=115200,
+                listen_port=9001,
+            )
+        )
+
+        self.assertIsNotNone(config)
+        self.assertEqual(config.output, "serial")
+        self.assertEqual(str(config.serial_device), "/dev/ttyUSB0")
+        self.assertEqual(config.baudrate, 115200)
+        self.assertEqual(config.listen_port, 9001)
+
+    def test_programmatic_main_uses_plain_config_errors(self) -> None:
+        with self.assertRaisesRegex(
+            ServerConfigError,
+            "--serial-device is required when --output serial",
+        ):
+            joy_server.main(make_server_args(output_kind="serial", print_config=False))
+
     def test_crossfire_adapter_runs_without_msp_transport(self) -> None:
         class _StopAdapter:
             def __enter__(self):
@@ -190,14 +244,14 @@ class ServerMainTest(unittest.TestCase):
                 pass
 
         with patch(
-            "bt_joy.server.joy_msp_server.CrossfireOutputAdapter",
+            "bt_joy.server.joy_server.CrossfireOutputAdapter",
             return_value=_StopAdapter(),
         ) as crossfire_adapter, patch(
-            "bt_joy.server.joy_msp_server.run_udp_server",
+            "bt_joy.server.joy_server.run_udp_server",
             side_effect=KeyboardInterrupt,
         ) as run_udp_server, patch(
-            "bt_joy.server.joy_msp_server._make_transport",
-        ) as make_transport, patch.object(joy_msp_server, "logger", _Logger()):
+            "bt_joy.server.joy_server._make_transport",
+        ) as make_transport, patch.object(joy_server, "logger", _Logger()):
             result = CliRunner().invoke(server_main, ["--adapter", "crossfire"])
 
         self.assertNotEqual(result.exit_code, 0)
