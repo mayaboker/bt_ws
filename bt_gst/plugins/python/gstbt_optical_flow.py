@@ -467,7 +467,7 @@ class BtOpticalFlow(GstBase.BaseTransform):
             return True
 
         self._pending_point = (int(x), int(y))
-        logger.info("track request received x={} y={}", int(x), int(y))
+        logger.info("track request received on frame ID: {}", self._frame_number)
         self._activate_pending_roi()
         return True
 
@@ -556,16 +556,7 @@ class BtOpticalFlow(GstBase.BaseTransform):
             frame_height=self._frame_height,
         )
         logger.info(
-            "activate pending roi point_x={} point_y={} roi_x={} roi_y={} "
-            "roi_width={} roi_height={} frame_width={} frame_height={}",
-            x,
-            y,
-            self._active_roi.x,
-            self._active_roi.y,
-            self._active_roi.width,
-            self._active_roi.height,
-            self._frame_width,
-            self._frame_height,
+            "activate pending roi frame ID={}", self._frame_number
         )
         self._pending_point = None
         self._mark_reacquire_needed()
@@ -632,7 +623,7 @@ class BtOpticalFlow(GstBase.BaseTransform):
         self._needs_feature_init = False
         min_features = int(self._property_values[PROP_MIN_FEATURES])
         if features is None or len(features) < min_features:
-            self._feature_points = None
+            self._reset_tracking(clear_roi=True, previous_gray=gray)
             logger.info(
                 "feature init failed feature_count={} min_features={}",
                 0 if features is None else len(features),
@@ -682,7 +673,7 @@ class BtOpticalFlow(GstBase.BaseTransform):
         )
 
         if next_points is None or point_status is None:
-            self._reset_tracking(clear_roi=False, previous_gray=gray)
+            self._reset_tracking(clear_roi=True, previous_gray=gray)
             return 0, 0, 0.0, STATUS_BREAK
 
         good_mask = point_status.reshape(-1) == 1
@@ -691,7 +682,7 @@ class BtOpticalFlow(GstBase.BaseTransform):
         # break tracking if too few good points
         min_features = int(self._property_values[PROP_MIN_FEATURES])
         if len(good_new) < min_features:
-            self._reset_tracking(clear_roi=False, previous_gray=gray)
+            self._reset_tracking(clear_roi=True, previous_gray=gray)
             return 0, 0, 0.0, STATUS_BREAK
 
         # Use the per-axis median displacement as a robust estimate of dominant ROI motion.
@@ -722,7 +713,7 @@ class BtOpticalFlow(GstBase.BaseTransform):
         good_new = good_new[in_roi_mask]
         good_old = good_old[in_roi_mask]
         if len(good_new) < min_features:
-            self._reset_tracking(clear_roi=False, previous_gray=gray)
+            self._reset_tracking(clear_roi=True, previous_gray=gray)
             return 0, 0, 0.0, STATUS_BREAK
 
         # calc median again

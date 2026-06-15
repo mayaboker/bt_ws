@@ -7,6 +7,11 @@ import pytest
 
 from bt_gst import optical_flow_tracker
 
+pytestmark = pytest.mark.skipif(
+    importlib.util.find_spec("gi") is None,
+    reason="PyGObject is unavailable",
+)
+
 
 PLUGIN_PATH = (
     Path(__file__).resolve().parents[1] / "plugins" / "python" / "gstbt_optical_flow.py"
@@ -295,7 +300,7 @@ def test_plugin_draws_adjusted_roi() -> None:
     assert data[new_top_left_offset : new_top_left_offset + 4] == bytes((255, 0, 0, 255))
 
 
-def test_plugin_draws_roi_and_keeps_break_status() -> None:
+def test_plugin_clears_roi_and_keeps_break_status() -> None:
     import gi
 
     from bt_gst.main import read_tracker_meta
@@ -330,9 +335,10 @@ def test_plugin_draws_roi_and_keeps_break_status() -> None:
     data = buffer.extract_dup(0, 8 * 8 * 4)
     top_left_offset = ((2 * 8) + 2) * 4
     inside_offset = ((3 * 8) + 3) * 4
-    assert data[top_left_offset : top_left_offset + 4] == bytes((255, 0, 0, 255))
+    assert data[top_left_offset : top_left_offset + 4] == bytes((0, 0, 0, 0))
     assert data[inside_offset : inside_offset + 4] == bytes((0, 0, 0, 0))
     assert read_tracker_meta(buffer).status == optical_flow_tracker.STATUS_BREAK
+    assert element._active_roi is None
 
 
 def test_plugin_point_request_initializes_features_and_tracks() -> None:
@@ -405,6 +411,7 @@ def test_plugin_too_few_features_emits_break() -> None:
     assert meta is not None
     assert meta.status == optical_flow_tracker.STATUS_BREAK
     assert element._feature_points is None
+    assert element._active_roi is None
 
 
 def test_plugin_shifted_frame_moves_roi_and_updates_offset() -> None:
@@ -549,7 +556,7 @@ def test_plugin_track_features_breaks_when_roi_filter_leaves_too_few_points(
 
     assert status == optical_flow_tracker.STATUS_BREAK
     assert element._feature_points is None
-    assert element._active_roi == optical_flow_tracker.Roi(x=10, y=10, width=10, height=10)
+    assert element._active_roi is None
 
 
 def test_plugin_debug_false_posts_no_debug_message() -> None:

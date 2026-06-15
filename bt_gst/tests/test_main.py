@@ -6,7 +6,12 @@ from pathlib import Path
 from bt_gst.cli import DEFAULT_VIDEO, PlayCommand, VersionCommand, parse_args
 from bt_gst.main import (
     GST_PLUGIN_PATH,
+    SYNTHETIC_VIDEO_FPS,
+    SYNTHETIC_VIDEO_HEIGHT,
+    SYNTHETIC_VIDEO_WIDTH,
+    SyntheticVideoSource,
     TrackerMeta,
+    build_synthetic_frame_timing,
     build_tracker_data_message,
     build_tracker_debug_message_from_structure,
     build_user_adjust_roi_request_structure,
@@ -19,6 +24,8 @@ from bt_gst.main import (
     format_tracker_debug_message,
     format_tracker_debug_structure,
     format_video_click,
+    generate_synthetic_rgba_frame,
+    synthetic_target_position,
     _handle_bus_message,
     read_tracker_meta,
 )
@@ -81,17 +88,60 @@ def test_build_video_pipeline_description_uses_explicit_gtksink_pipeline() -> No
 
     pipeline = build_video_pipeline_description(video)
 
-    assert "filesrc" in pipeline
-    assert "decodebin" in pipeline
+    assert "appsrc name=video_source" in pipeline
+    assert "filesrc" not in pipeline
+    assert "decodebin" not in pipeline
     assert "videoconvert" in pipeline
-    assert "video/x-raw,format=RGBA" in pipeline
+    assert (
+        "video/x-raw,format=RGBA,width=640,height=480,framerate=10/1"
+        in pipeline
+    )
     assert "bt_optical_flow name=tracker" in pipeline
     assert "btpassthrough" not in pipeline
     assert "tee name=metadata_tee" in pipeline
     assert "queue" in pipeline
     assert "gtksink name=video_sink" in pipeline
     assert "appsink name=metadata_sink" in pipeline
-    assert f'location="{video.resolve()}"' in pipeline
+
+
+def test_synthetic_frame_timing_uses_10_hz_duration() -> None:
+    timing = build_synthetic_frame_timing(3, gst_second=1_000_000_000)
+
+    assert SYNTHETIC_VIDEO_FPS == 10
+    assert timing.duration == 100_000_000
+    assert timing.pts == 300_000_000
+    assert timing.dts == 300_000_000
+
+
+def test_generate_synthetic_rgba_frame_has_expected_size_and_motion() -> None:
+    first = generate_synthetic_rgba_frame(
+        0,
+        width=SYNTHETIC_VIDEO_WIDTH,
+        height=SYNTHETIC_VIDEO_HEIGHT,
+    )
+    second = generate_synthetic_rgba_frame(
+        1,
+        width=SYNTHETIC_VIDEO_WIDTH,
+        height=SYNTHETIC_VIDEO_HEIGHT,
+    )
+
+    assert len(first) == SYNTHETIC_VIDEO_WIDTH * SYNTHETIC_VIDEO_HEIGHT * 4
+    assert len(second) == SYNTHETIC_VIDEO_WIDTH * SYNTHETIC_VIDEO_HEIGHT * 4
+    assert first != second
+    assert synthetic_target_position(1) > synthetic_target_position(0)
+
+
+def test_synthetic_video_source_uses_10_hz_interval() -> None:
+    class AppSrc:
+        def emit(self, *_args):
+            return None
+
+    class Gst:
+        SECOND = 1_000_000_000
+
+    source = SyntheticVideoSource(AppSrc(), Gst, fps=SYNTHETIC_VIDEO_FPS)
+
+    assert source.frame_interval_seconds == 0.1
 
 
 def test_build_centered_roi() -> None:

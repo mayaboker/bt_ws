@@ -1,6 +1,7 @@
 #region imports
 import os
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +51,9 @@ from bt_gst.zmq_models import (
 DEFAULT_VIDEO = Path(__file__).resolve().parents[1] / "data" / "vtest.avi"
 GST_PLUGIN_PATH = Path(__file__).resolve().parents[1] / "plugins"
 TRACKER_META_NAME = META_NAME
+SYNTHETIC_VIDEO_WIDTH = 640
+SYNTHETIC_VIDEO_HEIGHT = 480
+SYNTHETIC_VIDEO_FPS = 20
 # endregion constants
 
 @dataclass
@@ -63,6 +67,83 @@ class TrackerMeta:
     dy: int
     score: float
     status: int
+
+
+@dataclass(frozen=True)
+class SyntheticFrameTiming:
+    pts: int
+    dts: int
+    duration: int
+
+
+class SyntheticVideoSource:
+    def __init__(
+        self,
+        appsrc: object,
+        gst: object,
+        *,
+        width: int = SYNTHETIC_VIDEO_WIDTH,
+        height: int = SYNTHETIC_VIDEO_HEIGHT,
+        fps: int = SYNTHETIC_VIDEO_FPS,
+    ) -> None:
+        self._appsrc = appsrc
+        self._gst = gst
+        self._width = width
+        self._height = height
+        self._fps = fps
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    @property
+    def frame_interval_seconds(self) -> float:
+        return 1.0 / float(self._fps)
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(
+            target=self._run,
+            name="bt-gst-synthetic-video-source",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+        self._appsrc.emit("end-of-stream")
+
+    def _run(self) -> None:
+        frame_index = 0
+        next_frame_at = time.monotonic()
+        while not self._stop_event.is_set():
+            frame = generate_synthetic_rgba_frame(
+                frame_index,
+                width=self._width,
+                height=self._height,
+            )
+            timing = build_synthetic_frame_timing(
+                frame_index,
+                fps=self._fps,
+                gst_second=self._gst.SECOND,
+            )
+            buffer = self._gst.Buffer.new_allocate(None, len(frame), None)
+            buffer.fill(0, frame)
+            buffer.pts = timing.pts
+            buffer.dts = timing.dts
+            buffer.duration = timing.duration
+            flow_return = self._appsrc.emit("push-buffer", buffer)
+            if flow_return != self._gst.FlowReturn.OK:
+                logger.warning("synthetic frame push stopped flow_return={}", flow_return)
+                break
+
+            frame_index += 1
+            next_frame_at += self.frame_interval_seconds
+            sleep_seconds = next_frame_at - time.monotonic()
+            if sleep_seconds > 0:
+                self._stop_event.wait(sleep_seconds)
 
 # region user event
 def on_video_click(
@@ -137,14 +218,92 @@ def main(argv: Sequence[str] | None = None) -> int:
     raise RuntimeError(f"unsupported command: {command!r}")
 
 
+def build_synthetic_frame_timing(
+    frame_index: int,
+    *,
+    fps: int = SYNTHETIC_VIDEO_FPS,
+    gst_second: int,
+) -> SyntheticFrameTiming:
+    duration = int(gst_second) // int(fps)
+    timestamp = int(frame_index) * duration
+    return SyntheticFrameTiming(pts=timestamp, dts=timestamp, duration=duration)
+
+
+def synthetic_target_position(
+    frame_index: int,
+    *,
+    width: int = SYNTHETIC_VIDEO_WIDTH,
+    height: int = SYNTHETIC_VIDEO_HEIGHT,
+    target_size: int = 80,
+) -> tuple[int, int]:
+    max_x = width - target_size - 40
+    max_y = height - target_size - 40
+    travel_x = max(1, max_x - 40)
+    travel_y = max(1, max_y - 40)
+    period_x = travel_x * 2
+    period_y = travel_y * 2
+    phase_x = (frame_index * 2) % period_x
+    phase_y = frame_index % period_y
+    offset_x = phase_x if phase_x <= travel_x else period_x - phase_x
+    offset_y = phase_y if phase_y <= travel_y else period_y - phase_y
+    return 40 + offset_x, 40 + offset_y
+
+
+def generate_synthetic_rgba_frame(
+    frame_index: int,
+    *,
+    width: int = SYNTHETIC_VIDEO_WIDTH,
+    height: int = SYNTHETIC_VIDEO_HEIGHT,
+) -> bytes:
+    import numpy as np
+
+    frame = np.zeros((height, width, 4), dtype=np.uint8)
+    frame[..., 0:3] = 18
+    frame[..., 3] = 255
+
+    grid_color = np.array([42, 42, 42], dtype=np.uint8)
+    frame[::40, :, 0:3] = grid_color
+    frame[:, ::40, 0:3] = grid_color
+
+    target_size = 80
+    x, y = synthetic_target_position(
+        frame_index,
+        width=width,
+        height=height,
+        target_size=target_size,
+    )
+    x2 = x + target_size
+    y2 = y + target_size
+    frame[y:y2, x:x2, 0:3] = 60
+    frame[y : y + 4, x:x2, 0:3] = 255
+    frame[y2 - 4 : y2, x:x2, 0:3] = 255
+    frame[y:y2, x : x + 4, 0:3] = 255
+    frame[y:y2, x2 - 4 : x2, 0:3] = 255
+
+    feature_offsets = (
+        (16, 16),
+        (56, 16),
+        (16, 56),
+        (56, 56),
+        (36, 36),
+    )
+    for dx, dy in feature_offsets:
+        fx = x + dx
+        fy = y + dy
+        frame[fy : fy + 8, fx : fx + 8, 0:3] = (255, 255, 255)
+
+    return frame.tobytes()
+
+
 def build_video_pipeline_description(video_path: Path) -> str:
-    resolved_path = video_path.resolve()
-    location = str(resolved_path).replace("\\", "\\\\").replace('"', '\\"')
     return (
-        f'filesrc location="{location}" ! decodebin ! videoconvert ! '
-        "video/x-raw,format=RGBA ! bt_optical_flow name=tracker debug=true ! "
+        "appsrc name=video_source is-live=true format=time block=true "
+        'do-timestamp=false caps="video/x-raw,format=RGBA,'
+        f"width={SYNTHETIC_VIDEO_WIDTH},height={SYNTHETIC_VIDEO_HEIGHT},"
+        f'framerate={SYNTHETIC_VIDEO_FPS}/1" ! '
+        "bt_optical_flow name=tracker debug=false ! "
         "tee name=metadata_tee "
-        "metadata_tee. ! queue ! videoconvert ! gtksink name=video_sink sync=true "
+        "metadata_tee. ! queue ! videoconvert ! gtksink name=video_sink sync=true qos=true "
         "metadata_tee. ! queue leaky=downstream max-size-buffers=1 ! "
         "appsink name=metadata_sink emit-signals=false sync=false max-buffers=1 drop=true"
     )
@@ -197,6 +356,10 @@ def play_video(video_path: Path = DEFAULT_VIDEO) -> None:
     if metadata_sink is None:
         raise RuntimeError("GStreamer element 'metadata_sink' was not found.")
 
+    video_source = pipeline.get_by_name("video_source")
+    if video_source is None:
+        raise RuntimeError("GStreamer element 'video_source' was not found.")
+
     tracker = pipeline.get_by_name("tracker")
     if tracker is None:
         raise RuntimeError("GStreamer element 'tracker' was not found.")
@@ -218,7 +381,7 @@ def play_video(video_path: Path = DEFAULT_VIDEO) -> None:
 
     window = Gtk.Window(title=f"bt-gst: {video_path.name}")
     # window.set_default_size(960, 540)
-    window.set_default_size(768, 576)
+    window.set_default_size(SYNTHETIC_VIDEO_WIDTH, SYNTHETIC_VIDEO_HEIGHT)
 
     window.connect("destroy", close_window)
     window.connect("key-press-event", on_key_press, tracker, tracker_state)
@@ -227,8 +390,10 @@ def play_video(video_path: Path = DEFAULT_VIDEO) -> None:
     # endregion window and event setup
 
     bus = pipeline.get_bus()
+    synthetic_source = SyntheticVideoSource(video_source, Gst)
 
     pipeline.set_state(Gst.State.PLAYING)
+    synthetic_source.start()
     try:
         # main loop
         while running:
@@ -279,6 +444,7 @@ def play_video(video_path: Path = DEFAULT_VIDEO) -> None:
             # endregion pull metadata sample and publish tracker data
 
     finally:
+        synthetic_source.stop()
         pipeline.set_state(Gst.State.NULL)
         io_adapter.close()
 

@@ -1,4 +1,5 @@
 """Shared optical-flow tracker interface constants and helpers."""
+from typing import Final
 
 from dataclasses import dataclass
 
@@ -39,7 +40,10 @@ DEFAULT_LK_MAX_LEVEL = 3
 DEFAULT_LK_CRITERIA_COUNT = 30
 DEFAULT_LK_CRITERIA_EPS = 0.01
 
-DEFAULT_REQUEST_SEARCH_SIZE = 30
+### ROI Size for point tracking requests (pixels)###
+DEFAULT_REQUEST_SEARCH_SIZE: Final[int] = 30
+
+
 DEFAULT_ROI_ADJUST_STEP_PX = 10
 DEFAULT_ROI_RESIZE_STEP_PX = 10
 DEFAULT_ACCEPT_UPSTREAM_REQUEST = True
