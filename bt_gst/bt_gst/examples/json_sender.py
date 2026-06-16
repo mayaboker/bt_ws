@@ -45,7 +45,6 @@ class H264JsonUdpSender:
         height: int,
         fps: int,
         bitrate_kbps: int,
-        json_rate_hz: int,
     ) -> None:
         self.host = host
         self.port = port
@@ -53,7 +52,6 @@ class H264JsonUdpSender:
         self.height = height
         self.fps = fps
         self.bitrate_kbps = bitrate_kbps
-        self.json_rate_hz = json_rate_hz
 
         self.counter = 0
         self.loop: Optional[GLib.MainLoop] = None
@@ -66,12 +64,17 @@ class H264JsonUdpSender:
     videotestsrc is-live=true pattern=ball
         ! video/x-raw,width={width},height={height},framerate={fps}/1
         ! videoconvert
+        ! identity name=frame_trigger silent=true
         ! textoverlay name=sender_overlay
                       text="TX JSON #0"
                       valignment=top
                       halignment=left
                       font-desc="Sans, 32"
                       shaded-background=true
+        ! tee name=video_tee
+
+    video_tee.
+        ! queue leaky=downstream max-size-buffers=3 max-size-time=0 max-size-bytes=0
         ! x264enc tune=zerolatency
                   speed-preset=ultrafast
                   bitrate={bitrate_kbps}
@@ -81,6 +84,11 @@ class H264JsonUdpSender:
         ! h264parse config-interval=1
         ! queue max-size-buffers=0 max-size-time=0 max-size-bytes=0
         ! mux.
+
+    video_tee.
+        ! queue leaky=downstream max-size-buffers=3 max-size-time=0 max-size-bytes=0
+        ! videoconvert
+        ! autovideosink sync=false
 
     appsrc name=jsonsrc
            is-live=true
@@ -101,6 +109,15 @@ class H264JsonUdpSender:
         self.sender_overlay = self.pipeline.get_by_name("sender_overlay")
         if self.sender_overlay is None:
             raise RuntimeError("Could not find textoverlay named sender_overlay")
+
+        self.frame_trigger = self.pipeline.get_by_name("frame_trigger")
+        if self.frame_trigger is None:
+            raise RuntimeError("Could not find identity named frame_trigger")
+
+        frame_trigger_pad = self.frame_trigger.get_static_pad("src")
+        if frame_trigger_pad is None:
+            raise RuntimeError("Could not get frame_trigger src pad")
+        frame_trigger_pad.add_probe(Gst.PadProbeType.BUFFER, self.on_video_frame)
 
         self.jsonsrc.set_property("is-live", True)
         self.jsonsrc.set_property("format", Gst.Format.TIME)
@@ -141,22 +158,21 @@ class H264JsonUdpSender:
                 old, new, _pending = message.parse_state_changed()
                 print(f"[INFO] Pipeline state: {old.value_nick} -> {new.value_nick}")
 
-    def start_json_timer(self) -> bool:
-        interval_ms = max(1, int(1000 / self.json_rate_hz))
+    def on_video_frame(self, pad: Gst.Pad, info: Gst.PadProbeInfo) -> Gst.PadProbeReturn:
+        buf = info.get_buffer()
+        if buf is None:
+            return Gst.PadProbeReturn.OK
 
-        print(f"[INFO] Starting JSON timer: {self.json_rate_hz} Hz, interval={interval_ms} ms")
-        GLib.timeout_add(interval_ms, self.push_json)
-        return False
+        frame_pts = buf.pts
+        if frame_pts == Gst.CLOCK_TIME_NONE:
+            return Gst.PadProbeReturn.OK
 
-    def push_json(self) -> bool:
-        clock = self.pipeline.get_clock()
-        if clock is None:
-            return True
+        frame_duration = buf.duration
+        self.push_json_for_frame(frame_pts, frame_duration)
+        return Gst.PadProbeReturn.OK
 
-        base_time = self.pipeline.get_base_time()
-        now = clock.get_time()
-        running_time = now - base_time
-        pts_ms = running_time / Gst.MSECOND
+    def push_json_for_frame(self, frame_pts: int, frame_duration: int) -> None:
+        pts_ms = frame_pts / Gst.MSECOND
 
         self.sender_overlay.set_property(
             "text",
@@ -169,16 +185,16 @@ class H264JsonUdpSender:
         buf = Gst.Buffer.new_allocate(None, len(payload), None)
         buf.fill(0, payload)
 
-        duration = Gst.SECOND // self.json_rate_hz
-        buf.pts = running_time
-        buf.dts = running_time
-        buf.duration = duration
+        buf.pts = frame_pts
+        buf.dts = frame_pts
+        if frame_duration != Gst.CLOCK_TIME_NONE:
+            buf.duration = frame_duration
 
         ret = self.jsonsrc.emit("push-buffer", buf)
         if ret != Gst.FlowReturn.OK:
             print(f"[WARNING] push-buffer returned {ret}", file=sys.stderr)
 
-        if self.counter % self.json_rate_hz == 0:
+        if self.counter % max(1, self.fps) == 0:
             print(
                 f"[INFO] pushed JSON #{self.counter}, "
                 f"pts_ms={pts_ms:.2f}, "
@@ -186,7 +202,6 @@ class H264JsonUdpSender:
             )
 
         self.counter += 1
-        return True
 
     def run(self) -> None:
         self.loop = GLib.MainLoop()
@@ -196,13 +211,11 @@ class H264JsonUdpSender:
         )
         print(
             f"[INFO] Video={self.width}x{self.height}@{self.fps}, "
-            f"bitrate={self.bitrate_kbps} kbps, JSON={self.json_rate_hz} Hz"
+            f"bitrate={self.bitrate_kbps} kbps, JSON=per video frame"
         )
 
         ret = self.pipeline.set_state(Gst.State.PLAYING)
         print(f"[INFO] set_state PLAYING returned: {ret.value_nick}")
-
-        GLib.timeout_add(100, self.start_json_timer)
 
         def handle_signal(sig, frame):
             print("\n[INFO] Stopping sender...")
@@ -236,7 +249,6 @@ def main() -> int:
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--bitrate-kbps", type=int, default=2500)
-    parser.add_argument("--json-rate-hz", type=int, default=30)
 
     args = parser.parse_args()
 
@@ -247,7 +259,6 @@ def main() -> int:
         height=args.height,
         fps=args.fps,
         bitrate_kbps=args.bitrate_kbps,
-        json_rate_hz=args.json_rate_hz,
     )
 
     sender.run()
