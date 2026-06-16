@@ -7,6 +7,7 @@ import argparse
 import json
 import signal
 import sys
+import time
 from typing import Optional
 
 import gi
@@ -42,6 +43,7 @@ class TsVideoJsonReceiver:
         self.json_count = 0
         self.video_linked = False
         self.metadata_linked = False
+        self.latest_video_pts_ms: float | None = None
 
         self.pipeline = Gst.Pipeline.new("ts-video-json-receiver")
 
@@ -65,6 +67,7 @@ class TsVideoJsonReceiver:
         self.h264parse = make_element("h264parse", "h264parse")
         self.decoder = make_element("avdec_h264", "decoder")
         self.videoconvert = make_element("videoconvert", "videoconvert")
+        self.receiver_overlay = make_element("textoverlay", "receiver_overlay")
         self.video_sink = make_element(
             "autovideosink" if show_video else "fakesink",
             "video_sink",
@@ -76,6 +79,11 @@ class TsVideoJsonReceiver:
         self.video_queue.set_property("max-size-bytes", 0)
 
         self.decoder.set_property("max-threads", 1)
+        self.receiver_overlay.set_property("text", "RX JSON waiting")
+        self.receiver_overlay.set_property("valignment", "bottom")
+        self.receiver_overlay.set_property("halignment", "left")
+        self.receiver_overlay.set_property("font-desc", "Sans, 20")
+        self.receiver_overlay.set_property("shaded-background", True)
         self.video_sink.set_property("sync", False)
 
         for elem in [
@@ -83,6 +91,7 @@ class TsVideoJsonReceiver:
             self.h264parse,
             self.decoder,
             self.videoconvert,
+            self.receiver_overlay,
             self.video_sink,
         ]:
             self.pipeline.add(elem)
@@ -90,7 +99,13 @@ class TsVideoJsonReceiver:
         link_or_raise(self.video_queue, self.h264parse)
         link_or_raise(self.h264parse, self.decoder)
         link_or_raise(self.decoder, self.videoconvert)
-        link_or_raise(self.videoconvert, self.video_sink)
+        link_or_raise(self.videoconvert, self.receiver_overlay)
+        link_or_raise(self.receiver_overlay, self.video_sink)
+
+        video_probe_pad = self.videoconvert.get_static_pad("src")
+        if video_probe_pad is None:
+            raise RuntimeError("Could not get videoconvert src pad")
+        video_probe_pad.add_probe(Gst.PadProbeType.BUFFER, self.on_video_buffer)
 
         self.meta_queue = make_element("queue", "meta_queue")
         self.meta_sink = make_element("appsink", "meta_sink")
@@ -113,6 +128,12 @@ class TsVideoJsonReceiver:
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_bus_message)
+
+    def on_video_buffer(self, pad: Gst.Pad, info: Gst.PadProbeInfo) -> Gst.PadProbeReturn:
+        buf = info.get_buffer()
+        if buf is not None and buf.pts != Gst.CLOCK_TIME_NONE:
+            self.latest_video_pts_ms = buf.pts / Gst.MSECOND
+        return Gst.PadProbeReturn.OK
 
     def on_demux_pad_added(self, demux: Gst.Element, pad: Gst.Pad) -> None:
         caps = pad.get_current_caps()
@@ -190,10 +211,40 @@ class TsVideoJsonReceiver:
             )
             return Gst.FlowReturn.OK
 
+        counter = payload.get("counter")
+        created_unix_ns = payload.get("created_unix_ns")
+        sender_pts_ms = payload.get("sender_pts_ms")
+
+        receiver_time_ns = time.time_ns()
+        wall_latency_ms = None
+        if isinstance(created_unix_ns, int):
+            wall_latency_ms = (receiver_time_ns - created_unix_ns) / 1_000_000.0
+
+        metadata_pts_delta_ms = None
+        if pts_ms is not None and isinstance(sender_pts_ms, (int, float)):
+            metadata_pts_delta_ms = pts_ms - float(sender_pts_ms)
+
+        video_meta_delta_ms = None
+        if self.latest_video_pts_ms is not None and pts_ms is not None:
+            video_meta_delta_ms = self.latest_video_pts_ms - pts_ms
+
+        overlay_lines = [f"RX JSON #{counter}"]
+        if wall_latency_ms is not None:
+            overlay_lines.append(f"wall {wall_latency_ms:.2f} ms")
+        if video_meta_delta_ms is not None:
+            overlay_lines.append(f"video-meta {video_meta_delta_ms:.2f} ms")
+        self.receiver_overlay.set_property("text", "\n".join(overlay_lines))
+
         print(
             f"JSON #{self.json_count}: "
+            f"counter={counter}, "
             f"size={len(data)} bytes, "
-            f"pts_ms={pts_ms}, "
+            f"metadata_pts_ms={pts_ms}, "
+            f"sender_pts_ms={sender_pts_ms}, "
+            f"wall_latency_ms={wall_latency_ms}, "
+            f"latest_video_pts_ms={self.latest_video_pts_ms}, "
+            f"video_meta_delta_ms={video_meta_delta_ms}, "
+            f"metadata_pts_delta_ms={metadata_pts_delta_ms}, "
             f"duration_ms={duration_ms}, "
             f"payload={payload}",
             flush=True,

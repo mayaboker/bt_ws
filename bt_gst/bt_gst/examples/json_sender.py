@@ -26,11 +26,11 @@ from gi.repository import GLib, Gst
 Gst.init(None)
 
 
-def make_json_payload(counter: int, pts_ms: float) -> bytes:
+def make_json_payload(counter: int, created_unix_ns: int, sender_pts_ms: float) -> bytes:
     payload = {
         "counter": counter,
-        "unix_time": time.time(),
-        "pts_ms": pts_ms,
+        "created_unix_ns": created_unix_ns,
+        "sender_pts_ms": sender_pts_ms,
         "message": "hello from json metadata stream",
     }
     return json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -66,6 +66,12 @@ class H264JsonUdpSender:
     videotestsrc is-live=true pattern=ball
         ! video/x-raw,width={width},height={height},framerate={fps}/1
         ! videoconvert
+        ! textoverlay name=sender_overlay
+                      text="TX JSON #0"
+                      valignment=top
+                      halignment=left
+                      font-desc="Sans, 32"
+                      shaded-background=true
         ! x264enc tune=zerolatency
                   speed-preset=ultrafast
                   bitrate={bitrate_kbps}
@@ -91,6 +97,10 @@ class H264JsonUdpSender:
         self.jsonsrc = self.pipeline.get_by_name("jsonsrc")
         if self.jsonsrc is None:
             raise RuntimeError("Could not find appsrc named jsonsrc")
+
+        self.sender_overlay = self.pipeline.get_by_name("sender_overlay")
+        if self.sender_overlay is None:
+            raise RuntimeError("Could not find textoverlay named sender_overlay")
 
         self.jsonsrc.set_property("is-live", True)
         self.jsonsrc.set_property("format", Gst.Format.TIME)
@@ -148,7 +158,13 @@ class H264JsonUdpSender:
         running_time = now - base_time
         pts_ms = running_time / Gst.MSECOND
 
-        payload = make_json_payload(self.counter, pts_ms)
+        self.sender_overlay.set_property(
+            "text",
+            f"TX JSON #{self.counter}\nPTS {pts_ms:.2f} ms",
+        )
+
+        created_unix_ns = time.time_ns()
+        payload = make_json_payload(self.counter, created_unix_ns, pts_ms)
 
         buf = Gst.Buffer.new_allocate(None, len(payload), None)
         buf.fill(0, payload)
