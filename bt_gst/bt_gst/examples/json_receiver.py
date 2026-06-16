@@ -20,19 +20,11 @@ from gi.repository import GLib, Gst
 Gst.init(None)
 
 
-def make_element(factory: str, name: str) -> Gst.Element:
-    elem = Gst.ElementFactory.make(factory, name)
+def get_element_or_raise(pipeline: Gst.Element, name: str) -> Gst.Element:
+    elem = pipeline.get_by_name(name)
     if elem is None:
-        raise RuntimeError(
-            f"Could not create element '{factory}'. "
-            f"Check: gst-inspect-1.0 {factory}"
-        )
+        raise RuntimeError(f"Could not find element named {name!r}")
     return elem
-
-
-def link_or_raise(src: Gst.Element, dst: Gst.Element) -> None:
-    if not src.link(dst):
-        raise RuntimeError(f"Could not link {src.get_name()} -> {dst.get_name()}")
 
 
 class TsVideoJsonReceiver:
@@ -45,85 +37,44 @@ class TsVideoJsonReceiver:
         self.metadata_linked = False
         self.latest_video_pts_ms: float | None = None
 
-        self.pipeline = Gst.Pipeline.new("ts-video-json-receiver")
+        video_sink = "autovideosink" if show_video else "fakesink"
+        pipeline_desc = f"""
+    udpsrc name=udpsrc port={port}
+        caps="video/mpegts,systemstream=true,packetsize=188"
+        ! tsdemux name=demux latency=0
 
-        self.udpsrc = make_element("udpsrc", "udpsrc")
-        self.demux = make_element("tsdemux", "demux")
+    queue name=video_queue leaky=downstream max-size-buffers=3 max-size-time=0 max-size-bytes=0
+        ! h264parse name=h264parse
+        ! avdec_h264 name=decoder max-threads=1
+        ! videoconvert name=videoconvert
+        ! textoverlay name=receiver_overlay
+                       text="RX JSON waiting"
+                       valignment=bottom
+                       halignment=right
+                       font-desc="Sans, 20"
+                       shaded-background=true
+        ! {video_sink} name=video_sink sync=false
 
-        self.udpsrc.set_property("port", port)
-        self.udpsrc.set_property(
-            "caps",
-            Gst.Caps.from_string("video/mpegts, systemstream=true, packetsize=188"),
-        )
-        self.demux.set_property("latency", 0)
+    queue name=meta_queue leaky=downstream max-size-buffers=100 max-size-time=0 max-size-bytes=0
+        ! appsink name=meta_sink emit-signals=true sync=false drop=true max-buffers=100
+"""
 
-        self.pipeline.add(self.udpsrc)
-        self.pipeline.add(self.demux)
-        link_or_raise(self.udpsrc, self.demux)
+        self.pipeline = Gst.parse_launch(pipeline_desc)
+
+        self.demux = get_element_or_raise(self.pipeline, "demux")
+        self.video_queue = get_element_or_raise(self.pipeline, "video_queue")
+        self.videoconvert = get_element_or_raise(self.pipeline, "videoconvert")
+        self.receiver_overlay = get_element_or_raise(self.pipeline, "receiver_overlay")
+        self.meta_queue = get_element_or_raise(self.pipeline, "meta_queue")
+        self.meta_sink = get_element_or_raise(self.pipeline, "meta_sink")
 
         self.demux.connect("pad-added", self.on_demux_pad_added)
-
-        self.video_queue = make_element("queue", "video_queue")
-        self.h264parse = make_element("h264parse", "h264parse")
-        self.decoder = make_element("avdec_h264", "decoder")
-        self.videoconvert = make_element("videoconvert", "videoconvert")
-        self.receiver_overlay = make_element("textoverlay", "receiver_overlay")
-        self.video_sink = make_element(
-            "autovideosink" if show_video else "fakesink",
-            "video_sink",
-        )
-
-        self.video_queue.set_property("leaky", 2)
-        self.video_queue.set_property("max-size-buffers", 3)
-        self.video_queue.set_property("max-size-time", 0)
-        self.video_queue.set_property("max-size-bytes", 0)
-
-        self.decoder.set_property("max-threads", 1)
-        self.receiver_overlay.set_property("text", "RX JSON waiting")
-        self.receiver_overlay.set_property("valignment", "bottom")
-        self.receiver_overlay.set_property("halignment", "right")
-        self.receiver_overlay.set_property("font-desc", "Sans, 20")
-        self.receiver_overlay.set_property("shaded-background", True)
-        self.video_sink.set_property("sync", False)
-
-        for elem in [
-            self.video_queue,
-            self.h264parse,
-            self.decoder,
-            self.videoconvert,
-            self.receiver_overlay,
-            self.video_sink,
-        ]:
-            self.pipeline.add(elem)
-
-        link_or_raise(self.video_queue, self.h264parse)
-        link_or_raise(self.h264parse, self.decoder)
-        link_or_raise(self.decoder, self.videoconvert)
-        link_or_raise(self.videoconvert, self.receiver_overlay)
-        link_or_raise(self.receiver_overlay, self.video_sink)
+        self.meta_sink.connect("new-sample", self.on_metadata_sample)
 
         video_probe_pad = self.videoconvert.get_static_pad("src")
         if video_probe_pad is None:
             raise RuntimeError("Could not get videoconvert src pad")
         video_probe_pad.add_probe(Gst.PadProbeType.BUFFER, self.on_video_buffer)
-
-        self.meta_queue = make_element("queue", "meta_queue")
-        self.meta_sink = make_element("appsink", "meta_sink")
-
-        self.meta_queue.set_property("leaky", 2)
-        self.meta_queue.set_property("max-size-buffers", 100)
-        self.meta_queue.set_property("max-size-time", 0)
-        self.meta_queue.set_property("max-size-bytes", 0)
-
-        self.meta_sink.set_property("emit-signals", True)
-        self.meta_sink.set_property("sync", False)
-        self.meta_sink.set_property("drop", True)
-        self.meta_sink.set_property("max-buffers", 100)
-        self.meta_sink.connect("new-sample", self.on_metadata_sample)
-
-        self.pipeline.add(self.meta_queue)
-        self.pipeline.add(self.meta_sink)
-        link_or_raise(self.meta_queue, self.meta_sink)
 
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
