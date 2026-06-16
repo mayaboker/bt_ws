@@ -81,7 +81,7 @@ class TsVideoJsonReceiver:
         self.decoder.set_property("max-threads", 1)
         self.receiver_overlay.set_property("text", "RX JSON waiting")
         self.receiver_overlay.set_property("valignment", "bottom")
-        self.receiver_overlay.set_property("halignment", "left")
+        self.receiver_overlay.set_property("halignment", "right")
         self.receiver_overlay.set_property("font-desc", "Sans, 20")
         self.receiver_overlay.set_property("shaded-background", True)
         self.video_sink.set_property("sync", False)
