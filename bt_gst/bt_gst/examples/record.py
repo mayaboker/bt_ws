@@ -12,6 +12,22 @@ gst-launch-1.0 \
   ! rawvideoparse width=640 height=512 framerate=30/1 \
   ! videoconvert \
   ! autovideosink
+
+
+Why it uses this structure:
+- tee lets preview keep running while recording starts/stops.
+- queue isolates the recording branch from the live preview branch.
+- videoconvert normalizes the camera format.
+- videorate forces the requested FPS.
+- MP4 mode encodes and muxes, so the file is playable as video.
+- Raw mode writes raw frames directly, so playback needs width/height/fps/format.
+When stop_recording() runs:
+- It blocks the recording tee output on the next buffer.
+- It detaches that branch from the live camera stream.
+- It sends EOS into the detached recording branch.
+- EOS lets mp4mux write the MP4 trailer/final metadata.
+- The branch is removed from the pipeline.
+- The key idea is: preview is permanent, recording is dynamic.
 """
 import argparse
 import os
@@ -20,6 +36,8 @@ import time
 import threading
 
 import gi
+from loguru import logger
+
 gi.require_version("Gst", "1.0")
 gi.require_version("GLib", "2.0")
 
@@ -27,6 +45,11 @@ from gi.repository import Gst, GLib
 
 
 Gst.init(None)
+logger.remove()
+logger.add(
+    sys.stderr,
+    format="{time:HH:mm:ss} | {level:<8} | {line} | {message}",
+)
 
 
 def get_element_or_raise(pipeline, name):
@@ -138,13 +161,13 @@ class CameraRecorder:
         self.record_first_pts = None
         self.record_first_dts = None
 
-        print(f"Recording started: {filename} ({self.record_format})")
+        logger.info(f"Recording started: {filename} ({self.record_format})")
 
     def stop_recording(self):
         if not self.recording or not self.record_bin:
             return
 
-        print("Stopping recording...")
+        logger.info("Stopping recording...")
 
         self.stopping = True
 
@@ -162,7 +185,7 @@ class CameraRecorder:
                 pad.unlink(record_sink_pad)
                 self.tee.release_request_pad(pad)
                 self.record_tee_pad = None
-                print("Recording branch detached from tee")
+                logger.info("Recording branch detached from tee")
                 GLib.idle_add(self._send_recording_eos)
                 return Gst.PadProbeReturn.REMOVE
             return Gst.PadProbeReturn.OK
@@ -180,11 +203,11 @@ class CameraRecorder:
 
         record_sink_pad = self.record_bin.get_static_pad("sink")
         if record_sink_pad is None:
-            print("Recording branch has no sink pad for EOS", file=sys.stderr)
+            logger.warning("Recording branch has no sink pad for EOS")
             return False
 
         if not record_sink_pad.send_event(Gst.Event.new_eos()):
-            print("Failed to send EOS to recording branch", file=sys.stderr)
+            logger.warning("Failed to send EOS to recording branch")
 
         self.record_stop_timeout_id = GLib.timeout_add_seconds(
             5,
@@ -195,7 +218,7 @@ class CameraRecorder:
     def _finish_stop_recording_after_timeout(self):
         self.record_stop_timeout_id = None
         if self.stopping and self.record_bin:
-            print("Recording stop timed out waiting for EOS; cleaning up branch")
+            logger.warning("Recording stop timed out waiting for EOS; cleaning up branch")
             self._finish_stop_recording()
         return False
 
@@ -231,7 +254,7 @@ class CameraRecorder:
         self.record_first_pts = None
         self.record_first_dts = None
 
-        print("Recording stopped and file finalized")
+        logger.info("Recording stopped and file finalized")
         return False
 
     def _print_recording_summary(self):
@@ -241,7 +264,7 @@ class CameraRecorder:
         try:
             file_size = os.path.getsize(self.record_filename)
         except OSError as exc:
-            print(f"Could not stat raw recording {self.record_filename}: {exc}")
+            logger.warning(f"Could not stat raw recording {self.record_filename}: {exc}")
             return
 
         frame_size = self.width * self.height * 3 // 2
@@ -250,7 +273,7 @@ class CameraRecorder:
 
         frames = file_size / frame_size
         duration = frames / self.fps
-        print(
+        logger.info(
             f"Raw recording size={file_size} bytes, "
             f"frames={frames:.1f}, duration_at_{self.fps}fps={duration:.2f}s"
         )
@@ -331,9 +354,9 @@ class CameraRecorder:
 
         if msg_type == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
-            print(f"GStreamer ERROR: {err}", file=sys.stderr)
+            logger.error(f"GStreamer ERROR: {err}")
             if debug:
-                print(f"Debug: {debug}", file=sys.stderr)
+                logger.debug(f"Debug: {debug}")
             self.loop.quit()
 
         elif msg_type == Gst.MessageType.EOS:
@@ -342,7 +365,7 @@ class CameraRecorder:
             if self.stopping:
                 self._finish_stop_recording()
             else:
-                print("Pipeline EOS")
+                logger.info("Pipeline EOS")
                 self.loop.quit()
 
         elif msg_type == Gst.MessageType.ELEMENT:
@@ -353,7 +376,7 @@ class CameraRecorder:
             forwarded = structure.get_value("message")
             if forwarded and forwarded.type == Gst.MessageType.EOS and self.stopping:
                 source_name = forwarded.src.get_name() if forwarded.src else "unknown"
-                print(f"Recording branch EOS forwarded from {source_name}")
+                logger.info(f"Recording branch EOS forwarded from {source_name}")
                 self._finish_stop_recording()
 
 
@@ -363,8 +386,11 @@ def main():
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--fps", type=int, default=30)
-    parser.add_argument("--record-format", choices=["mp4", "raw"], default="raw")
+    parser.add_argument("--record-format", choices=["mp4", "raw"], default="mp4")
+    parser.add_argument("--target-folder", default="./output")
     args = parser.parse_args()
+
+    os.makedirs(args.target_folder, exist_ok=True)
 
     rec = CameraRecorder(
         device=args.device,
@@ -375,27 +401,30 @@ def main():
     )
 
     extension = "mp4" if args.record_format == "mp4" else "i420"
+    first_recording = os.path.join(args.target_folder, f"first.{extension}")
+    second_recording = os.path.join(args.target_folder, f"second.{extension}")
 
+    # play the pipe and stream
     rec.start()
 
     try:
-        print("Camera running")
+        logger.info("Camera running")
         if args.record_format == "raw":
-            print(
+            logger.info(
                 "Raw playback example: "
-                f"gst-launch-1.0 filesrc location=first.i420 "
+                f"gst-launch-1.0 filesrc location={first_recording} "
                 f"! rawvideoparse format=i420 width={args.width} height={args.height} "
                 f"framerate={args.fps}/1 ! videoconvert ! autovideosink"
             )
         time.sleep(2)
 
-        rec.start_recording(f"first.{extension}")
+        rec.start_recording(first_recording)
         time.sleep(5)
         rec.stop_recording()
 
         time.sleep(5)
 
-        rec.start_recording(f"second.{extension}")
+        rec.start_recording(second_recording)
         time.sleep(5)
         rec.stop_recording()
 
