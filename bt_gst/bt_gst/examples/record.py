@@ -60,7 +60,7 @@ class CameraRecorder:
 
         pipeline_desc = f"""
             v4l2src name=camera
-                ! video/x-raw,width={self.width},height={self.height},framerate={self.fps}/1
+                ! video/x-raw,format=I420,width={self.width},height={self.height},framerate={self.fps}/1
                 ! tee name=tee
 
             tee.
@@ -287,7 +287,8 @@ class CameraRecorder:
             record_desc = f"""
             queue name=record-queue flush-on-eos=true
                 ! videoconvert name=record-convert
-                ! video/x-raw,format=I420
+                ! videorate name=record-rate drop-only=true
+                ! video/x-raw,format=I420,framerate={self.fps}/1
                 ! x264enc name=record-encoder
                           tune=zerolatency
                           speed-preset=veryfast
@@ -297,10 +298,11 @@ class CameraRecorder:
                 ! filesink name=record-sink sync=false
         """
         else:
-            record_desc = """
+            record_desc = f"""
             queue name=record-queue flush-on-eos=true
                 ! videoconvert name=record-convert
-                ! video/x-raw,format=I420
+                ! videorate name=record-rate drop-only=true
+                ! video/x-raw,format=I420,framerate={self.fps}/1
                 ! filesink name=record-sink sync=false
         """
 
@@ -361,7 +363,7 @@ def main():
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--fps", type=int, default=30)
-    parser.add_argument("--record-format", choices=["mp4", "raw"], default="mp4")
+    parser.add_argument("--record-format", choices=["mp4", "raw"], default="raw")
     args = parser.parse_args()
 
     rec = CameraRecorder(
