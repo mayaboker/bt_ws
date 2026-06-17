@@ -32,3 +32,6 @@ bt-gst = "bt_gst.main:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["bt_gst*"]
+
+[tool.setuptools.package-data]
+bt_gst = ["static/*.html"]

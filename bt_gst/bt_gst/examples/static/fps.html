@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BT FPS Control</title>
+  <style>
+    :root {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color-scheme: light dark;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      background: #101418;
+      color: #edf2f7;
+    }
+
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 20px;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+
+    section {
+      margin-bottom: 16px;
+      padding: 16px;
+      border: 1px solid #2d3748;
+      border-radius: 8px;
+      background: #151b22;
+    }
+
+    .fps-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    button {
+      min-width: 96px;
+      padding: 9px 14px;
+      border: 1px solid #3182ce;
+      border-radius: 6px;
+      background: #2b6cb0;
+      color: #edf2f7;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    button.active {
+      border-color: #68d391;
+      background: #2f855a;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    dl {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 8px 12px;
+      margin: 0;
+    }
+
+    dt {
+      color: #a0aec0;
+    }
+
+    dd {
+      margin: 0;
+      word-break: break-word;
+    }
+
+    #message {
+      min-height: 22px;
+      color: #90cdf4;
+    }
+
+    #message.error {
+      color: #feb2b2;
+    }
+
+    @media (max-width: 520px) {
+      body {
+        padding: 16px;
+      }
+
+      dl {
+        grid-template-columns: 1fr;
+      }
+
+      button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>BT FPS Control</h1>
+
+    <section class="fps-buttons">
+      <button data-fps="1">1 FPS</button>
+      <button data-fps="5">5 FPS</button>
+      <button data-fps="10">10 FPS</button>
+      <button data-fps="20">20 FPS</button>
+      <button data-fps="30">30 FPS</button>
+    </section>
+
+    <section>
+      <dl>
+        <dt>Pipeline</dt>
+        <dd id="started">unknown</dd>
+        <dt>Current FPS</dt>
+        <dd id="fps">unknown</dd>
+        <dt>Pipeline object</dt>
+        <dd id="pipeline">unknown</dd>
+        <dt>Caps filter</dt>
+        <dd id="capsfilter">unknown</dd>
+      </dl>
+    </section>
+
+    <section id="message"></section>
+  </main>
+
+  <script>
+    const buttons = Array.from(document.querySelectorAll("[data-fps]"));
+    const startedEl = document.getElementById("started");
+    const fpsEl = document.getElementById("fps");
+    const pipelineEl = document.getElementById("pipeline");
+    const capsfilterEl = document.getElementById("capsfilter");
+    const messageEl = document.getElementById("message");
+
+    function yesNo(value) {
+      return value ? "yes" : "no";
+    }
+
+    function setMessage(text, isError = false) {
+      messageEl.textContent = text || "";
+      messageEl.className = isError ? "error" : "";
+    }
+
+    async function requestJson(url, options = {}) {
+      const response = await fetch(url, options);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.detail || `HTTP ${response.status}`);
+      }
+      return body;
+    }
+
+    function renderStatus(status) {
+      startedEl.textContent = yesNo(status.started);
+      fpsEl.textContent = `${status.fps} FPS`;
+      pipelineEl.textContent = status.has_pipeline ? "ready" : "missing";
+      capsfilterEl.textContent = status.has_capsfilter ? "ready" : "missing";
+
+      for (const button of buttons) {
+        const fps = Number(button.dataset.fps);
+        button.disabled = !status.started || !status.has_capsfilter;
+        button.classList.toggle("active", fps === status.fps);
+      }
+    }
+
+    async function refreshStatus() {
+      const status = await requestJson("/status");
+      renderStatus(status);
+      return status;
+    }
+
+    for (const button of buttons) {
+      button.addEventListener("click", async () => {
+        try {
+          const fps = Number(button.dataset.fps);
+          const status = await requestJson("/fps", {
+            method: "POST",
+            headers: {"content-type": "application/json"},
+            body: JSON.stringify({fps}),
+          });
+          renderStatus(status);
+          setMessage(`FPS set to ${status.fps}`);
+        } catch (err) {
+          setMessage(err.message, true);
+          await refreshStatus().catch(() => {});
+        }
+      });
+    }
+
+    refreshStatus().catch((err) => setMessage(err.message, true));
+    setInterval(() => {
+      refreshStatus().catch((err) => setMessage(err.message, true));
+    }, 2000);
+  </script>
+</body>
+</html>
