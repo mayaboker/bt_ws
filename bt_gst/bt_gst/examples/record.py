@@ -28,15 +28,26 @@ When stop_recording() runs:
 - EOS lets mp4mux write the MP4 trailer/final metadata.
 - The branch is removed from the pipeline.
 - The key idea is: preview is permanent, recording is dynamic.
+
+Example usage:
+curl -X POST http://127.0.0.1:8000/record/start \
+  -H 'content-type: application/json' \
+  -d '{"filename":"remote_test.mp4"}'
+
+curl -X POST http://127.0.0.1:8000/record/stop
+
+curl http://127.0.0.1:8000/record/list
 """
 import argparse
 import os
 import sys
-import time
 import threading
 
 import gi
+import uvicorn
+from fastapi import FastAPI, HTTPException
 from loguru import logger
+from pydantic import BaseModel
 
 gi.require_version("Gst", "1.0")
 gi.require_version("GLib", "2.0")
@@ -109,6 +120,7 @@ class CameraRecorder:
         self.record_eos_sent = False
         self.record_first_pts = None
         self.record_first_dts = None
+        self.stop_finished_event = None
         self.recording = False
         self.stopping = False
 
@@ -124,7 +136,7 @@ class CameraRecorder:
         self.loop_thread.start()
 
     def shutdown(self):
-        if self.recording:
+        if self.recording and not self.stopping:
             self.stop_recording()
 
         self.pipeline.set_state(Gst.State.NULL)
@@ -165,11 +177,12 @@ class CameraRecorder:
 
     def stop_recording(self):
         if not self.recording or not self.record_bin:
-            return
+            return None
 
         logger.info("Stopping recording...")
 
         self.stopping = True
+        self.stop_finished_event = threading.Event()
 
         record_sink_pad = self.record_bin.get_static_pad("sink")
         if record_sink_pad is None:
@@ -196,6 +209,7 @@ class CameraRecorder:
             Gst.PadProbeType.BLOCK_DOWNSTREAM,
             block_cb,
         )
+        return self.stop_finished_event
 
     def _send_recording_eos(self):
         if not self.stopping or not self.record_bin:
@@ -253,8 +267,12 @@ class CameraRecorder:
         self.record_eos_sent = False
         self.record_first_pts = None
         self.record_first_dts = None
+        stop_finished_event = self.stop_finished_event
+        self.stop_finished_event = None
 
         logger.info("Recording stopped and file finalized")
+        if stop_finished_event is not None:
+            stop_finished_event.set()
         return False
 
     def _print_recording_summary(self):
@@ -380,6 +398,175 @@ class CameraRecorder:
                 self._finish_stop_recording()
 
 
+class StartRecordingRequest(BaseModel):
+    filename: str
+
+
+class RecorderRequestError(ValueError):
+    pass
+
+
+class RecorderConflictError(RuntimeError):
+    pass
+
+
+class RecorderService:
+    def __init__(
+        self,
+        recorder: CameraRecorder,
+        target_folder: str,
+        record_format: str,
+    ):
+        self.recorder = recorder
+        self.target_folder = target_folder
+        self.record_format = record_format
+        self.extension = ".mp4" if record_format == "mp4" else ".i420"
+        self.lock = threading.Lock()
+
+    def start(self, filename: str):
+        safe_filename = self._normalize_filename(filename)
+        output_path = os.path.join(self.target_folder, safe_filename)
+
+        with self.lock:
+            if self.recorder.recording or self.recorder.stopping:
+                raise RecorderConflictError("Recording is already active")
+
+            self._run_on_gst_thread(
+                lambda: self.recorder.start_recording(output_path),
+                timeout=5,
+            )
+
+        return {"recording": True, "filename": safe_filename}
+
+    def stop(self):
+        with self.lock:
+            if not self.recorder.recording or self.recorder.stopping:
+                raise RecorderConflictError("No active recording")
+
+            stop_finished_event = self._run_on_gst_thread(
+                self.recorder.stop_recording,
+                timeout=5,
+            )
+
+            if stop_finished_event is not None and not stop_finished_event.wait(15):
+                raise TimeoutError("Timed out waiting for recording to finalize")
+
+        return {"recording": False}
+
+    def list_files(self):
+        files = []
+        for name in os.listdir(self.target_folder):
+            path = os.path.join(self.target_folder, name)
+            if os.path.isfile(path) and name.endswith(self.extension):
+                files.append(name)
+        return {"files": sorted(files)}
+
+    def status(self):
+        filename = None
+        if self.recorder.record_filename:
+            filename = os.path.basename(self.recorder.record_filename)
+        return {
+            "recording": bool(self.recorder.recording),
+            "filename": filename,
+            "format": self.record_format,
+        }
+
+    def shutdown(self):
+        with self.lock:
+            if self.recorder.recording and self.recorder.stopping:
+                stop_finished_event = self.recorder.stop_finished_event
+                if stop_finished_event is not None:
+                    stop_finished_event.wait(15)
+
+            elif self.recorder.recording:
+                try:
+                    stop_finished_event = self._run_on_gst_thread(
+                        self.recorder.stop_recording,
+                        timeout=5,
+                    )
+                    if stop_finished_event is not None:
+                        stop_finished_event.wait(15)
+                except Exception as exc:
+                    logger.warning(f"Failed to stop recording during shutdown: {exc}")
+
+        self.recorder.shutdown()
+
+    def _normalize_filename(self, filename: str):
+        if not filename:
+            raise RecorderRequestError("filename is required")
+
+        if os.path.isabs(filename) or os.path.basename(filename) != filename:
+            raise RecorderRequestError("filename must be a basename, not a path")
+
+        stem, ext = os.path.splitext(filename)
+        if not stem or stem in {".", ".."}:
+            raise RecorderRequestError("filename is invalid")
+
+        if ext and ext.lower() != self.extension:
+            raise RecorderRequestError(f"filename extension must be {self.extension}")
+
+        return f"{stem}{self.extension}"
+
+    def _run_on_gst_thread(self, func, timeout: float):
+        done = threading.Event()
+        result = {}
+
+        def runner():
+            try:
+                result["value"] = func()
+            except Exception as exc:
+                result["error"] = exc
+            finally:
+                done.set()
+            return False
+
+        GLib.idle_add(runner)
+
+        if not done.wait(timeout):
+            raise TimeoutError("Timed out waiting for GStreamer operation")
+
+        if "error" in result:
+            raise result["error"]
+
+        return result.get("value")
+
+
+def create_app(service: RecorderService):
+    app = FastAPI(title="BT GST Recorder")
+
+    @app.post("/record/start")
+    def start_recording(request: StartRecordingRequest):
+        try:
+            return service.start(request.filename)
+        except RecorderRequestError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RecorderConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Failed to start recording")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/record/stop")
+    def stop_recording():
+        try:
+            return service.stop()
+        except RecorderConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Failed to stop recording")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/record/list")
+    def list_recordings():
+        return service.list_files()
+
+    @app.get("/record/status")
+    def recording_status():
+        return service.status()
+
+    return app
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="/dev/video0")
@@ -388,6 +575,8 @@ def main():
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--record-format", choices=["mp4", "raw"], default="mp4")
     parser.add_argument("--target-folder", default="./output")
+    parser.add_argument("--api-host", default="0.0.0.0")
+    parser.add_argument("--api-port", type=int, default=8000)
     args = parser.parse_args()
 
     os.makedirs(args.target_folder, exist_ok=True)
@@ -400,38 +589,29 @@ def main():
         record_format=args.record_format,
     )
 
-    extension = "mp4" if args.record_format == "mp4" else "i420"
-    first_recording = os.path.join(args.target_folder, f"first.{extension}")
-    second_recording = os.path.join(args.target_folder, f"second.{extension}")
+    service = RecorderService(
+        recorder=rec,
+        target_folder=args.target_folder,
+        record_format=args.record_format,
+    )
+    app = create_app(service)
 
-    # play the pipe and stream
     rec.start()
 
     try:
-        logger.info("Camera running")
+        logger.info(
+            f"Camera running; API listening on http://{args.api_host}:{args.api_port}"
+        )
         if args.record_format == "raw":
             logger.info(
                 "Raw playback example: "
-                f"gst-launch-1.0 filesrc location={first_recording} "
+                f"gst-launch-1.0 filesrc location={args.target_folder}/example.i420 "
                 f"! rawvideoparse format=i420 width={args.width} height={args.height} "
                 f"framerate={args.fps}/1 ! videoconvert ! autovideosink"
             )
-        time.sleep(2)
-
-        rec.start_recording(first_recording)
-        time.sleep(5)
-        rec.stop_recording()
-
-        time.sleep(5)
-
-        rec.start_recording(second_recording)
-        time.sleep(5)
-        rec.stop_recording()
-
-        time.sleep(2)
-
+        uvicorn.run(app, host=args.api_host, port=args.api_port)
     finally:
-        rec.shutdown()
+        service.shutdown()
 
 
 if __name__ == "__main__":
