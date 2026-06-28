@@ -1,1 +1,0 @@
-"""Packaged example joystick mappings."""

@@ -1,6 +1,0 @@
-#TODO: what happen when server stop get message from client
-#TODO: add warning if latency in hb bigger then XXX - to check
-#TODO: add error to hb if server fail connect to BF
-#TODO: split client config to joy mapping and running configuration: Done
-#TODO: create script that create tag and upload whl to github releases
-#TODO: how notify user about issue and error if run as server (check )
