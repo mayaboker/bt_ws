@@ -1,4 +1,8 @@
-from bt_app.control import joy_zmq_adapter
+from bt_app.control import (
+    joy_zmq_adapter
+)
+
+from bt_app.control import FailSafeController
 from bt_app.sm import Robot_StateMachine
 from bt_app.context import Context
 from bt_app.rc_utils import matching
@@ -41,7 +45,20 @@ class App:
     def __load_controllers(self):
         joy_adapter = joy_zmq_adapter.JoyZmqAdapter()
         joy_adapter.start()
+        joy_adapter.on_failsafe_enter += self.__joystick_fs_enter
+        joy_adapter.on_failsafe_exit += self.__joystick_fs_exit
         self.controllers[RobotState.MANUAL] = joy_adapter
+
+        fs_controller = FailSafeController()
+        self.controllers[RobotState.FAILSAFE] = fs_controller
+
+    def __joystick_fs_enter(self):
+        log.warning("Joystick Failsafe Entered")
+        self.ctx.joy_fail_safe = True
+
+    def __joystick_fs_exit(self):
+        log.warning("Joystick Failsafe Exited")
+        self.ctx.joy_fail_safe = False
 
     def __update_state(self):
         vehicle_state =self.drone_adapter.get_state()
@@ -53,6 +70,8 @@ class App:
     def __resolve_rc(self):
         if self.ctx.state == RobotState.MANUAL.value:
             return self.controllers[RobotState.MANUAL].pull_rc_channels()
+        elif self.ctx.state == RobotState.FAILSAFE.value:
+            return self.controllers[RobotState.FAILSAFE].update()
         else:
             log.error(f"RC selector not implemented for state {self.ctx.state}")
             raise NotImplementedError(f"RC selector not implemented for state {self.ctx.state}")

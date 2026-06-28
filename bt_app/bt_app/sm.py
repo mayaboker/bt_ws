@@ -27,15 +27,15 @@ class Robot_StateMachine:
             "resolve",
             RobotState.IDLE,
             RobotState.MANUAL,
-            conditions=[self.entry_manual_mode],
+            conditions=[self.enter_manual_mode],
         )
 
-        # self.machine.add_transition(
-        #     "resolve",
-        #     RobotState.SEARCH,
-        #     RobotState.TRACKING,
-        #     conditions=[self.good_target],
-        # )
+        self.machine.add_transition(
+            "resolve",
+            RobotState.MANUAL,
+            RobotState.FAILSAFE,
+            conditions=[self.enter_failsafe],
+        )
 
         # self.machine.add_transition(
         #     "resolve",
@@ -58,29 +58,19 @@ class Robot_StateMachine:
         log.info(f"State changed: {previous_state} -> {new_state}")
 
 
-    def entry_manual_mode(self, event):
+    def enter_manual_mode(self, event):
         return (
             self.ctx.force_manual_mode
         )
 
-    def good_target(self, event):
+    def enter_failsafe(self, event):
+        # TODO: Add on air
         return (
-            self.ctx.target_found
-            and self.ctx.target_confidence > 0.75
+            self.ctx.armable
+            and self.ctx.joy_fail_safe
         )
 
-    def target_lost_but_can_retry(self, event):
-        return (
-            not self.ctx.target_found
-            and self.ctx.retry_count < 3
-        )
-
-    def critical_error(self, event):
-        return (
-            self.ctx.error
-            or self.ctx.battery_voltage < 9.5
-            or self.ctx.retry_count >= 3
-        )
+    
 
 
 # robot = Robot()

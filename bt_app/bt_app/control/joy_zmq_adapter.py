@@ -17,12 +17,13 @@ import time
 from typing import Any
 from loguru import logger as log
 import queue
-
+from bt_app.common import Event
 
 DEFAULT_SERVER_PUB_ENDPOINT = "ipc:///tmp/bt_joy_server_pub.ipc"
 DEFAULT_EXTERNAL_PUB_ENDPOINT = "ipc:///tmp/bt_joy_external_pub.ipc"
 SUB_STATE_TOPIC = "joystick.state"
-DEFAULT_SUBSCRIBE_TOPICS = (SUB_STATE_TOPIC, "joystick.failsafe")
+SUB_FAILSAFE_TOPIC = "joystick.failsafe"
+DEFAULT_SUBSCRIBE_TOPICS = (SUB_STATE_TOPIC, SUB_FAILSAFE_TOPIC)
 DEFAULT_PUBLISH_TOPIC = "bt_joy.external"
 DEFAULT_PUBLISH_RATE_HZ = 1.0
 DEFAULT_MESSAGE = "hello from zmq mock"
@@ -37,6 +38,9 @@ class JoyZmqAdapter:
         self._stop_event = False
         self.last_rc_channels = []
         self.__event_queue = queue.Queue()
+        self.on_failsafe_enter = Event()
+        self.on_failsafe_exit = Event()
+
     
 
     def put_event(self, key, value):
@@ -106,6 +110,14 @@ class JoyZmqAdapter:
                 if topic == SUB_STATE_TOPIC:
                     self.last_rc_channels = payload["channels"]
                     # print(self.last_rc_channels)
+
+                if topic == SUB_FAILSAFE_TOPIC:
+                    
+                    failsafe_active = payload.get("active", True)
+                    if failsafe_active:
+                        self.on_failsafe_enter.emit()
+                    else:
+                        self.on_failsafe_exit.emit()
 
                 # region publish external event
                 current_time = time.monotonic()

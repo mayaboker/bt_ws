@@ -12,6 +12,7 @@ class Context:
     force_manual_mode: bool = field(default=True)
     arming_disable_flags: list = field(default_factory=list)
     armable: bool = field(default=False)
+    joy_fail_safe: bool = field(default=False)
 
     # region singleton
     _instance = None

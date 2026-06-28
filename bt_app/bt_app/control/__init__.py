@@ -4,3 +4,5 @@
 # from bt_app.control.takeoff_controller import TakeoffController
 
 # __all__ = ["PID", "BetaflightRcMapper", "clamp", "HoverYawController", "TakeoffController"]
+from bt_app.control.failsafe_controller import FailSafeController
+__all__ = ["FailSafeController"]

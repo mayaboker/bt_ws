@@ -17,7 +17,7 @@ class RobotState(Enum):
     MANUAL = "MANUAL"
     TRACKING = "TRACKING"
     RECOVERY = "RECOVERY"
-    ERROR = "ERROR"
+    FAILSAFE = "FAILSAFE"
 
 __all__ = [
     "FREQ_HZ",
