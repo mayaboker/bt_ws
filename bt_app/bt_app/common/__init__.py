@@ -1,4 +1,4 @@
-from enum import IntEnum
+from enum import Enum
 from bt_app.common.event import Event
 
 TREE_TICK_INTERVAL_S = 0.1
@@ -12,14 +12,12 @@ ZMQ_ULTRASONIC_LIDAR_TOPIC = b"ultrasonic_lidar.scan"
 ZMQ_TRACKER_RESULT_ENDPOINT = "ipc:///tmp/bt_app.tracker_result"
 ZMQ_TRACKER_RESULT_TOPIC = b"tracker_result"
 
-class State(IntEnum):
-    DISARMED = 0
-    ARMED = 1
-    TAKEOFF = 2
-    LAND = 3
-    VISUAL_TRACK = 4
-    FINAL = 5
-    SEARCH = 6
+class RobotState(Enum):
+    IDLE = "IDLE"
+    MANUAL = "MANUAL"
+    TRACKING = "TRACKING"
+    RECOVERY = "RECOVERY"
+    ERROR = "ERROR"
 
 __all__ = [
     "FREQ_HZ",

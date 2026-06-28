@@ -6,7 +6,7 @@ from loguru import logger
 import zmq
 
 from bt_app.common import Event, ZMQ_TRACKER_RESULT_ENDPOINT, ZMQ_TRACKER_RESULT_TOPIC
-from bt_app.context import Context
+from bt_app.bt_app.context_old import Context
 from bt_app.msgs import TrackerResult, unpack_tracker_result
 
 

@@ -9,7 +9,7 @@ from bt_app.common import ZMQ_TRACKER_RESULT_ENDPOINT, ZMQ_TRACKER_RESULT_TOPIC
 from bt_app.msgs import TrackerResult, TrackerState, RCChannels, unpack_tracker_result
 from bt_app.msp.command_dispatcher import MspCommandDispatcher
 from bt_app.parameters import Parameters
-from bt_app.context import Context
+from bt_app.bt_app.context_old import Context
 from bt_app.common import State
 from bt_app import FREQ_HZ
 from bt_app.control import PID

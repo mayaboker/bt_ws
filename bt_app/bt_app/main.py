@@ -14,7 +14,7 @@ from bt_app.msp import BetaflightMspClient, TcpMspTransport
 from bt_app.msp.command_dispatcher import MspCommandDispatcher
 from bt_app.parameters import Parameters
 from loguru import logger as log
-from bt_app.context import Context
+from bt_app.bt_app.context_old import Context
 from bt_app.control import TakeoffController, HoverYawController
 from bt_app.control.visual_controller import VisualTrackerManager
 from bt_app.sensors.sim_senors import SimSensors

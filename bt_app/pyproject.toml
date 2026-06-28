@@ -12,7 +12,7 @@ dependencies = [
     "click",
     "numpy",
     "opencv-python",
-    "py_trees",
+    "transitions",
     "pyserial",
     "pyyaml",
     "pyzmq",

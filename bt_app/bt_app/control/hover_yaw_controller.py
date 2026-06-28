@@ -6,7 +6,7 @@ from loguru import logger as log
 
 from bt_app import FREQ_HZ
 from bt_app.common import State
-from bt_app.context import Context
+from bt_app.bt_app.context_old import Context
 from bt_app.control.pid import PID
 from bt_app.control.rc_mapper import BetaflightRcMapper
 from bt_app.msp.bt_v2 import (
