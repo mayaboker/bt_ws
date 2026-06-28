@@ -1,0 +1,13 @@
+device_path: /dev/input/js0
+joystick_name: Spektrum InterLinkDX
+mapping_path: interlink_mapping.yaml
+poll_rate_hz: 50.0
+server_host: 127.0.0.1
+server_port: 9000
+keep_alive_rate_hz: 1.0
+keep_alive_timeout_sec: 1.0
+high_latency_threshold_ms: 50.0
+notification_publisher:
+- module: console
+  config: {}
+log_level: INFO

@@ -1,0 +1,30 @@
+server:
+  bind_host: 0.0.0.0
+  bind_port: 9000
+  receive_timeout_s: 0.02
+stream_monitor:
+  joystick_timeout_s: 0.25
+  keep_alive_timeout_s: 1.0
+adapter_event_stream:
+  enabled: true
+  interval_s: 1.0
+adapters:
+  zmq:
+    module: zmq
+    config:
+      publish:
+        protocol: ipc
+        endpoint: /tmp/bt_joy_server_pub.ipc
+        bind: true
+        topics:
+          joystick_state: joystick.state
+          failsafe: joystick.failsafe
+      subscribe:
+        protocol: ipc
+        endpoint: /tmp/bt_joy_external_pub.ipc
+        bind: false
+        topics:
+        - bt_joy.external
+        max_messages_per_tick: 50
+        max_queue_size: 1000
+log_level: INFO
