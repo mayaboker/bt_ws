@@ -16,6 +16,7 @@ from threading import Thread
 import time
 from typing import Any
 from loguru import logger as log
+import queue
 
 
 DEFAULT_SERVER_PUB_ENDPOINT = "ipc:///tmp/bt_joy_server_pub.ipc"
@@ -35,7 +36,13 @@ class JoyZmqAdapter:
         self._thread: Thread | None = None
         self._stop_event = False
         self.last_rc_channels = []
+        self.__event_queue = queue.Queue()
     
+
+    def put_event(self, key, value):
+        #TODO: think about time stamp
+        self.__event_queue.put((key, value))
+
     def pull_rc_channels(self):
         return self.last_rc_channels
 
@@ -60,12 +67,19 @@ class JoyZmqAdapter:
         self._stop_event = True
         
     #endregion
+    def make_external_event(self, sequence: int, timestamp_us: int) -> dict[str, object]:
+        return {
+            "type": "mock_external_event",
+            "sequence": sequence,
+            "timestamp_us": timestamp_us,
+            "message": DEFAULT_MESSAGE,
+        }
 
     def _run(self) -> None:
-    # publish_period_s = 1.0 / args.publish_rate_hz if args.publish_rate_hz > 0 else 0.0
+        publish_period_s = 1.0 / DEFAULT_PUBLISH_RATE_HZ if DEFAULT_PUBLISH_RATE_HZ > 0 else 0.0
         context = zmq.Context()
         sub_socket = context.socket(zmq.SUB)
-        # pub_socket = context.socket(zmq.PUB)
+        pub_socket = context.socket(zmq.PUB)
         sequence = 0
         next_publish_at = time.monotonic()
 
@@ -76,7 +90,7 @@ class JoyZmqAdapter:
 
             # pub_socket.bind(args.external_pub_endpoint)
             log.info(f"subscribed {DEFAULT_SERVER_PUB_ENDPOINT} topics={','.join(DEFAULT_SUBSCRIBE_TOPICS)}")
-            # print(f"publishing {args.external_pub_endpoint} topic={args.publish_topic}")
+            log.info(f"publishing {DEFAULT_EXTERNAL_PUB_ENDPOINT} topic={DEFAULT_PUBLISH_TOPIC} rate={DEFAULT_PUBLISH_RATE_HZ}Hz")
 
             while not self._stop_event:
                 try:
@@ -95,17 +109,16 @@ class JoyZmqAdapter:
 
                 # region publish external event
                 current_time = time.monotonic()
-                # if current_time >= next_publish_at:
-                #     event = self.make_external_event(sequence, self.now_us())
-                #     pub_socket.send_multipart(
-                #         [
-                #             args.publish_topic.encode("utf-8"),
-                #             self.encode_payload(msgpack, event),
-                #         ]
-                #     )
-                #     print(f"{args.publish_topic} {json.dumps(event, sort_keys=True)}")
-                #     sequence += 1
-                #     next_publish_at = current_time + publish_period_s
+                if current_time >= next_publish_at:
+                    event = self.make_external_event(sequence, self.now_us())
+                    pub_socket.send_multipart(
+                        [
+                            DEFAULT_PUBLISH_TOPIC.encode("utf-8"),
+                            self.encode_payload(msgpack, event),
+                        ]
+                    )
+                    sequence += 1
+                    next_publish_at = current_time + publish_period_s
                 # endregion
 
             time.sleep(1/FPS)

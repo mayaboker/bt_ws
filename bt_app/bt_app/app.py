@@ -5,7 +5,9 @@ from bt_app.rc_utils import matching
 from bt_app.vehicle_config import VehicleConfig
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.common import RobotState
-
+from bt_app.common import (
+    FREQ_HZ
+)
 from loguru import logger as log
 import time
 
@@ -42,8 +44,11 @@ class App:
         self.controllers[RobotState.MANUAL] = joy_adapter
 
     def __update_state(self):
-        # update state based on context
-        pass
+        vehicle_state =self.drone_adapter.get_state()
+        if vehicle_state:
+            #TODO: move to consts
+            self.ctx.armable = vehicle_state.get("armable", False)
+            self.ctx.arming_disable_flags = vehicle_state.get("arming_disable_flags", [])
 
     def __resolve_rc(self):
         if self.ctx.state == RobotState.MANUAL.value:
@@ -63,7 +68,7 @@ class App:
                 rc_channels = matching(self.ctx, rc_channels)
                 self.drone_adapter.dispatcher.set_rc(rc_channels)
                 # print(f"RC Channels: {self.__resolve_rc()}")
-                time.sleep(1/50)
+                time.sleep(1/FREQ_HZ)
         except KeyboardInterrupt:
             log.warning("Stopping...")
 

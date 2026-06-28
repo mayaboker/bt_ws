@@ -20,15 +20,18 @@ class MSPAdapter:
 
     def get_state(self):
         """
-        Dispatcher last state: {'cycle_time_us': 109, 'i2c_errors': 0, 'sensors_mask': 35, 
+        Dispatcher last state: {
+        'cycle_time_us': 109, 
+        'i2c_errors': 0, 
+        'sensors_mask': 35, 
         'sensors_mask_hex': '0x0023',
-          'box_mode_flags': 0,
-            'box_mode_flags_hex': '0x00000000', 'pid_profile': 0, 'pid_profile_count': 4, 
-            'rate_profile': 0, 'cpu_load_raw': 0, 'flight_mode_byte_count': 0, 
-            'arming_disable_flag_count': 29, 'arming_disable_mask': 4, 
-            'arming_disable_mask_hex': '0x00000004', 
-            'arming_disable_flags': ['RX_FAILSAFE'], 'arming_disabled': True, 'armable': False, 'calibrating': False, 
-            'failsafe': True, 'throttle_blocking_arm': False, 'arm_switch_blocking_arm': False, 'not_disarmed': False}
+        'box_mode_flags': 0,
+        'box_mode_flags_hex': '0x00000000', 'pid_profile': 0, 'pid_profile_count': 4, 
+        'rate_profile': 0, 'cpu_load_raw': 0, 'flight_mode_byte_count': 0, 
+        'arming_disable_flag_count': 29, 'arming_disable_mask': 4, 
+        'arming_disable_mask_hex': '0x00000004', 
+        'arming_disable_flags': ['RX_FAILSAFE'], 'arming_disabled': True, 'armable': False, 'calibrating': False, 
+        'failsafe': True, 'throttle_blocking_arm': False, 'arm_switch_blocking_arm': False, 'not_disarmed': False}
         """
         return self.dispatcher.last_state
 

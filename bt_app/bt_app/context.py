@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 class Context:
     state: RobotState = field(default=RobotState.MANUAL)
     force_manual_mode: bool = field(default=True)
+    arming_disable_flags: list = field(default_factory=list)
+    armable: bool = field(default=False)
 
     # region singleton
     _instance = None
