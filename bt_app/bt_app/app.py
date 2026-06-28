@@ -1,6 +1,11 @@
 from bt_app.control import joy_zmq_adapter
 from bt_app.sm import Robot_StateMachine
 from bt_app.context import Context
+from bt_app.rc_utils import matching
+from bt_app.vehicle_config import VehicleConfig
+from bt_app.msp_adapter import MSPAdapter
+from bt_app.common import RobotState
+
 from loguru import logger as log
 import time
 
@@ -12,35 +17,55 @@ class App:
         """
         self.ctx = Context()
         self.robot_sm = Robot_StateMachine(self.ctx)
+        self.drone_adapter = None
+        self.config = self.__handle_config()
+        self.controllers = {}
         
-        # load controllers
-        self.__load_controllers()
 
+        
+
+    def __load_drone_interface(self):
+        self.drone_adapter = MSPAdapter(self.config)
+        self.drone_adapter.start()
+
+    def __handle_config(self):
+        """
+        merge cli with yaml file and return config object
+        """
+        config = VehicleConfig()
+        # handle config
+        return config
+    
     def __load_controllers(self):
-        self.adapter = joy_zmq_adapter.JoyZmqAdapter()
-        self.adapter.start()
+        joy_adapter = joy_zmq_adapter.JoyZmqAdapter()
+        joy_adapter.start()
+        self.controllers[RobotState.MANUAL] = joy_adapter
 
     def __update_state(self):
         # update state based on context
         pass
 
     def __resolve_rc(self):
-        if self.ctx.state == "MANUAL":
-            return self.adapter.pull_rc_channels()
+        if self.ctx.state == RobotState.MANUAL.value:
+            return self.controllers[RobotState.MANUAL].pull_rc_channels()
         else:
             log.error(f"RC selector not implemented for state {self.ctx.state}")
             raise NotImplementedError(f"RC selector not implemented for state {self.ctx.state}")
 
     def run(self):
+        self.__load_drone_interface()
+        self.__load_controllers()
         try:
             while True:
-                time.sleep(1)
                 self.__update_state()
                 self.robot_sm.resolve()
-                print(f"RC Channels: {self.__resolve_rc()}")
+                rc_channels = self.__resolve_rc()
+                rc_channels = matching(self.ctx, rc_channels)
+                self.drone_adapter.dispatcher.set_rc(rc_channels)
+                # print(f"RC Channels: {self.__resolve_rc()}")
+                time.sleep(1/50)
         except KeyboardInterrupt:
-            print("Stopping...")
-            self.adapter.stop()
+            log.warning("Stopping...")
 
 def main():
     app = App()

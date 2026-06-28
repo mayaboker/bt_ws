@@ -40,3 +40,9 @@ channels:
   index: 7
   'off': 1000
   'on': 2000
+- name: aux3
+  source: constant
+  value: 1000
+- name: aux4
+  source: constant
+  value: 1000

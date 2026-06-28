@@ -48,6 +48,7 @@ class ReadStateCommand(MspCommand):
 
     def execute(self, dispatcher: "MspCommandDispatcher") -> dict[str, object]:
         dispatcher.last_state = dispatcher.msp.read_state()
+        print("Dispatcher last state:", dispatcher.last_state)
         if dispatcher.on_state is not None:
             dispatcher.on_state(dispatcher.last_state)
         return dispatcher.last_state
