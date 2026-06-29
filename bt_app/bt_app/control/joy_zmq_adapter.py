@@ -40,14 +40,26 @@ class JoyZmqAdapter:
         self.__event_queue = queue.Queue()
         self.on_failsafe_enter = Event()
         self.on_failsafe_exit = Event()
+        self.on_interrupt = Event()
+        self.__interrupt_mask = []
 
-    
+    def __check_for_interrupt(self, current):
+        if not self.__interrupt_mask or not self.last_rc_channels: return
+
+        for i, name in self.__interrupt_mask:
+            
+            if self.last_rc_channels[i] != current[i]:
+                self.on_interrupt.emit(name, current[i])
+
+
+    def register_interrupt(self, button_index, interrupt_name):
+        self.__interrupt_mask.append((button_index, interrupt_name))
 
     def put_event(self, key, value):
         #TODO: think about time stamp
         self.__event_queue.put((key, value))
 
-    def pull_rc_channels(self):
+    def update(self):
         return self.last_rc_channels
 
     #region encoding/decoding helpers
@@ -108,7 +120,9 @@ class JoyZmqAdapter:
                 payload = self.decode_payload(msgpack, payload_bytes)
                 
                 if topic == SUB_STATE_TOPIC:
-                    self.last_rc_channels = payload["channels"]
+                    current = payload["channels"]
+                    self.__check_for_interrupt(current)
+                    self.last_rc_channels = current
                     # print(self.last_rc_channels)
 
                 if topic == SUB_FAILSAFE_TOPIC:

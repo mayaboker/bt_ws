@@ -15,9 +15,24 @@ class MSPAdapter:
 
         self.dispatcher = MspCommandDispatcher(
             self.msp,
-            on_error=lambda exc: log.error(f"MSP dispatcher error: {exc}"),
+            on_error=lambda exc: log.exception(f"MSP dispatcher error: {exc}"),
         )
 
+    def get_rc(self):
+        """
+        read current drone rc
+        use for switch between external pilot to machine
+        see example and scenario in documents
+        """
+        return self.dispatcher.last_rc
+
+    def get_altitude(self):
+        """
+        {'altitude_m': 0.25, 'vertical_speed_m_s': 0.0}
+        """
+        if not self.dispatcher.last_altitude: return 0
+        return self.dispatcher.last_altitude["altitude_m"]
+    
     def get_state(self):
         """
         Dispatcher last state: {
@@ -36,8 +51,10 @@ class MSPAdapter:
         return self.dispatcher.last_state
 
     def start(self):
-        self.msp.open()       
+        self.msp.open()
         self.dispatcher.schedule_state(interval_s=1.0)
         self.dispatcher.schedule_altitude(interval_s=0.1)
+        self.dispatcher.schedule_rc(interval_s=1.0)
+        
         self.dispatcher.start()
 

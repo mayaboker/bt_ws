@@ -64,30 +64,40 @@ class ReadAltitudeCommand(MspCommand):
             dispatcher.on_altitude(dispatcher.last_altitude)
         return dispatcher.last_altitude
 
-
 @dataclass
-class HoverAtAltitudeCommand(MspCommand):
-    key: ClassVar[str | None] = "rc"
-    target_altitude_m: float
-    base_channels: Sequence[int]
-    kp: float = 40.0
-    throttle_min: int = 1000
-    throttle_max: int = 1800
+class ReadRCCommand(MspCommand):
+    #TODO: move the names to class commands
+    key: ClassVar[str | None] = "current_rc"
     repeat_interval_s: float | None = None
 
-    def execute(self, dispatcher: "MspCommandDispatcher") -> RcChannels:
-        altitude = dispatcher.last_altitude or dispatcher.msp.read_altitude()
-        dispatcher.last_altitude = altitude
-        altitude_m = float(altitude.get("altitude_m", 0.0))
-        error_m = self.target_altitude_m - altitude_m
+    def execute(self, dispatcher: "MspCommandDispatcher") -> dict[str, float]:
+        dispatcher.last_rc = dispatcher.msp.read_rc()
+        
+        
 
-        channels = list(dispatcher.normalize_channels(self.base_channels))
-        throttle = int(channels[2] + self.kp * error_m)
-        channels[2] = max(self.throttle_min, min(self.throttle_max, throttle))
+# @dataclass
+# class HoverAtAltitudeCommand(MspCommand):
+#     key: ClassVar[str | None] = "rc"
+#     target_altitude_m: float
+#     base_channels: Sequence[int]
+#     kp: float = 40.0
+#     throttle_min: int = 1000
+#     throttle_max: int = 1800
+#     repeat_interval_s: float | None = None
 
-        dispatcher.current_channels = dispatcher.normalize_channels(channels)
-        dispatcher.msp.send_raw_rc(dispatcher.current_channels)
-        return dispatcher.current_channels
+#     def execute(self, dispatcher: "MspCommandDispatcher") -> RcChannels:
+#         altitude = dispatcher.last_altitude or dispatcher.msp.read_altitude()
+#         dispatcher.last_altitude = altitude
+#         altitude_m = float(altitude.get("altitude_m", 0.0))
+#         error_m = self.target_altitude_m - altitude_m
+
+#         channels = list(dispatcher.normalize_channels(self.base_channels))
+#         throttle = int(channels[2] + self.kp * error_m)
+#         channels[2] = max(self.throttle_min, min(self.throttle_max, throttle))
+
+#         dispatcher.current_channels = dispatcher.normalize_channels(channels)
+#         dispatcher.msp.send_raw_rc(dispatcher.current_channels)
+#         return dispatcher.current_channels
 
 
 @dataclass
@@ -133,7 +143,7 @@ class MspCommandDispatcher:
         self.current_channels = self.normalize_channels(initial_channels)
         self.last_state: dict[str, object] | None = None
         self.last_altitude: dict[str, float] | None = None
-
+        self.last_rc: list[int] | None = None
         self._on_error = on_error
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
@@ -214,6 +224,9 @@ class MspCommandDispatcher:
 
     def schedule_altitude(self, interval_s: float = 0.1) -> None:
         self.schedule(ReadAltitudeCommand(), interval_s=interval_s)
+
+    def schedule_rc(self, interval_s: float = 0.1) -> None:
+        self.schedule(ReadRCCommand(), interval_s=interval_s)
 
     def hover_at_altitude(
         self,

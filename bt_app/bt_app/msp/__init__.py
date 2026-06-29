@@ -15,7 +15,6 @@ from bt_app.msp.bt_v2 import (
 )
 from bt_app.msp.command_dispatcher import (
     FunctionCommand,
-    HoverAtAltitudeCommand,
     MspCommand,
     MspCommandDispatcher,
     RawRcCommand,

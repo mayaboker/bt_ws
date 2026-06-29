@@ -1,7 +1,7 @@
 from loguru import logger as log
 from bt_app.common import RobotState
 from transitions import Machine
-
+from bt_app.common import Event
 
 from bt_app.context import Context
 
@@ -13,7 +13,7 @@ class Robot_StateMachine:
 
     def __init__(self, ctx: Context):
         self.ctx = ctx
-
+        self.on_before_state_changed = Event()
         self.machine = Machine(
             model=self,
             states=self.states,
@@ -39,6 +39,35 @@ class Robot_StateMachine:
 
         # self.machine.add_transition(
         #     "resolve",
+        #     RobotState.IDLE,
+        #     RobotState.TAKEOFF,
+        #     conditions=[self.enter_takeoff]
+        # )
+
+        self.machine.add_transition(
+            "resolve",
+            RobotState.IDLE,
+            RobotState.ARM,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.IDLE, RobotState.ARM),
+            conditions=[self.enter_arm]
+        )
+
+        self.machine.add_transition(
+            "resolve",
+            RobotState.IDLE,
+            RobotState.MANUAL,
+            conditions=[self.enter_manual_from_idle]
+        )
+
+        self.machine.add_transition(
+            "resolve",
+            RobotState.MANUAL,
+            RobotState.IDLE,
+            conditions=[self.enter_idle_from_manual]
+        )
+
+        # self.machine.add_transition(
+        #     "resolve",
         #     RobotState.TRACKING,
         #     RobotState.RECOVERY,
         #     conditions=[self.target_lost_but_can_retry],
@@ -58,6 +87,29 @@ class Robot_StateMachine:
         log.info(f"State changed: {previous_state} -> {new_state}")
 
 
+    # ------------------
+
+    def enter_idle_from_manual(self, event):
+        return not self.ctx.force_manual_interrupt and not self.ctx.takeoff_interrupt and not self.ctx.armable
+
+    def enter_manual_from_idle(self, event):
+        return self.ctx.force_manual_interrupt and not self.ctx.takeoff_interrupt
+
+    def enter_arm(self, event):
+        ok = all([
+            self.ctx.takeoff_interrupt,
+            not self.ctx.force_manual_interrupt
+        ])
+        return  ok
+    
+    def enter_takeoff(self, event):
+        # print(event)
+        ok = all([
+            self.ctx.takeoff_interrupt,
+            not self.ctx.force_manual_interrupt
+        ])
+        return  ok
+
     def enter_manual_mode(self, event):
         return (
             self.ctx.force_manual_mode
@@ -73,19 +125,3 @@ class Robot_StateMachine:
     
 
 
-# robot = Robot()
-
-# robot.ctx.camera_connected = True
-# robot.ctx.battery_voltage = 11.8
-# robot.resolve()
-# print(robot.state)  # RobotState.SEARCH
-
-# robot.ctx.target_found = True
-# robot.ctx.target_confidence = 0.9
-# robot.resolve()
-# print(robot.state)  # RobotState.TRACKING
-
-# robot.ctx.target_found = False
-# robot.ctx.retry_count = 1
-# robot.resolve()
-# print(robot.state)  # RobotState.RECOVERY
