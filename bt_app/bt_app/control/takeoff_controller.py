@@ -12,7 +12,7 @@ class TakeoffController:
     def __init__(self):
         # self.params.on_parameter_changed.subscribe(self.on_parameter_changed)
         # self._setup()
-        self.alt_pid = PID(10,1,0)
+        self.alt_pid = PID(50,10,0)
 
     def _setup(self):
         self.alt_pid = PID(
@@ -33,7 +33,6 @@ class TakeoffController:
         channels[RCChannel.THROTTLE] = max(RC_MIN, min(RC_MAX, throttle))
         channels[RCChannel.ARM] = RC_MAX
         channels[RCChannel.ANGLE] = RC_MAX
-
         return channels
     
     def on_parameter_changed(self, name: str, value: Any) -> None:

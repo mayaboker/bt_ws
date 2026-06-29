@@ -13,11 +13,15 @@ class Context:
     force_manual_mode: bool = field(default=False)
     # drone state arm disabled update at 1hz
     arming_disable_flags: list = field(default_factory=list)
-    # drone state arm state update at 1hz
+    # drone state if drone can armed update at 1hz
     armable: bool = field(default=False)
+    # is drone armed update 1hz
+    armed: bool = field(default=False)
     joy_fail_safe: bool = field(default=False)
     takeoff_interrupt: bool = field(default=False)
     force_manual_interrupt: bool = field(default=False)
+    take_control: bool = field(default=False)
+    auto_arm: bool = field(default=False)
     
     # current drone alt , update from drone at 10hz
     drone_alt: float = 0.0

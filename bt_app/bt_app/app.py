@@ -53,6 +53,13 @@ class App:
             log.warning("reset arm controller ")
             self.controllers[RobotState.ARM].reset()
 
+        elif prev == RobotState.TAKEOFF and next == RobotState.MANUAL:
+            log.warning("Reset take control")
+            self.ctx.take_control = False
+            self.ctx.auto_arm = True
+
+        
+
     def __handle_joy_interrupt(self, name, value):
         """
         handle interrupt that register as joy action
@@ -103,6 +110,8 @@ class App:
         vehicle_state =self.drone_adapter.get_state()
         if vehicle_state:
             #TODO: move to consts
+            # TODO read more about armed mask the code is just for test
+            self.ctx.armed = vehicle_state.get("box_mode_flags") == 3
             self.ctx.armable = vehicle_state.get("armable", False)
             self.ctx.arming_disable_flags = vehicle_state.get("arming_disable_flags", [])
             
@@ -116,15 +125,17 @@ class App:
 
     def __resolve_rc(self):
         if self.ctx.state == RobotState.MANUAL.value:
-            return self.controllers[RobotState.MANUAL].update()
+            channels = self.controllers[RobotState.MANUAL].update()
+            if self.ctx.auto_arm:
+                channels[4] = RC_MAX
+            return channels
         elif self.ctx.state == RobotState.FAILSAFE.value:
             return self.controllers[RobotState.FAILSAFE].update(10, self.ctx.drone_alt)
         elif self.ctx.state == RobotState.TAKEOFF.value:
-            return self.controllers[RobotState.TAKEOFF].update(10, self.ctx.drone_alt)
+            return self.controllers[RobotState.TAKEOFF].update(2, self.ctx.drone_alt)
         elif self.ctx.state == RobotState.IDLE.value:
             return [1000]*8
         elif self.ctx.state == RobotState.ARM.value:
-            print(self.ctx.arming_disable_flags)
             return self.controllers[RobotState.ARM].update()
         else:
             log.error(f"RC selector not implemented for state {self.ctx.state}")

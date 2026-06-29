@@ -8,6 +8,8 @@ from bt_app.msp.bt_v2 import (
     RCChannel_alias as RCChannel)
 from loguru import logger as log
 
+DISABLED_HOLD_TIME = 1.0
+
 class ARMController:
     def __init__(self):
         # self.params.on_parameter_changed.subscribe(self.on_parameter_changed)
@@ -18,7 +20,7 @@ class ARMController:
     
     def update(self, ):
         delta = time.monotonic() - self.__time
-        if delta < 1.0:
+        if delta < DISABLED_HOLD_TIME:
             return self.make_channels(throttle=RC_MIN, arm=RC_MIN)
         else:
             return self.make_channels(throttle=RC_MIN, arm=RC_MAX)
