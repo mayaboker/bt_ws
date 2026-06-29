@@ -19,9 +19,10 @@ from bt_app.common import (
 from bt_app.msp.bt_v2 import (
     RC_MAX
 )
-
+from bt_app.common import AETR1234
 from loguru import logger as log
 import time
+
 
 class App:
     def __init__(self):
@@ -80,8 +81,8 @@ class App:
         joy_adapter.on_failsafe_exit += self.__joystick_fs_exit
         joy_adapter.on_interrupt += self.__handle_joy_interrupt
         # TODO: convert to const and mapping
-        joy_adapter.register_interrupt(6, "takeoff")
-        joy_adapter.register_interrupt(7, "force_manual")
+        joy_adapter.register_interrupt(AETR1234.AUX4, "takeoff")
+        joy_adapter.register_interrupt(AETR1234.AUX5, "force_manual")
         self.controllers[RobotState.MANUAL] = joy_adapter
 
         fs_controller = FailSafeController()
@@ -149,11 +150,11 @@ class App:
                 self.__update_state()
                 self.robot_sm.resolve()
                 rc_channels = self.__resolve_rc()
-                rc_channels = matching(self.ctx, rc_channels)
+                rc_channels = matching(self.ctx, rc_channels, self.config)
                 if not rc_channels:
                     log.error(f"rc not valid: {rc_channels} in state {self.ctx.state}")
                     continue
-                self.drone_adapter.dispatcher.set_rc(rc_channels)
+                self.drone_adapter.dispatcher.set_rc(rc_channels[:8])
                 time.sleep(1/FREQ_HZ)
         except KeyboardInterrupt:
             log.warning("Stopping...")

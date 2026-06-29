@@ -12,7 +12,8 @@ class DroneSink(Enum):
 
 @dataclass
 class VehicleConfig():
-
+    has_external_pilot: bool = field(default=True)
+    # FCU connection type serial, ethernet
     drone_sink: int = 2#field(default_factory=lambda: DroneSink.ETHERNET.value)
     drone_eth_host: str = field(default="127.0.0.1")
     drone_eth_port: int = field(default=5761)

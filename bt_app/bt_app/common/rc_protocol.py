@@ -6,5 +6,5 @@ from bt_app.msgs import RCChannels
 class RCProtocol(Protocol):
     name: str
 
-    def pull_rc_channels(self) -> RCChannels:
+    def update(self) -> RCChannels:
         ...

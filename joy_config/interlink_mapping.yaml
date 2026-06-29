@@ -41,11 +41,14 @@ channels:
   'off': 1000
   'on': 2000
 - name: aux3
+  source: constant
+  value: 2000
+- name: aux4
   source: button
   index: 1
   'off': 1000
   'on': 2000
-- name: aux4
+- name: aux5
   source: button
   index: 9
   'off': 1000
