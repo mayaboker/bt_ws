@@ -21,8 +21,8 @@ class Event:
         return self
 
     def emit(self, *args: Any, **kwargs: Any) -> None:
-        with self._lock:
-            callbacks = tuple(self._callbacks)
+        # with self._lock:
+        #     callbacks = tuple(self._callbacks)
 
-        for callback in callbacks:
+        for callback in self._callbacks:
             callback(*args, **kwargs)

@@ -28,7 +28,7 @@ dev = [
 ]
 
 [project.scripts]
-bt-app = "bt_app.main:main"
+bt-app = "bt_app.app:main"
 bt-gz-camera = "bt_app.sensors.gz_camera:cli"
 bt-optical-flow-tracker = "bt_app.trackers.optical_flow_tracker:main"
 bt-gz-rtf = "bt_app.sensors.gz_rtf_monitor:main"

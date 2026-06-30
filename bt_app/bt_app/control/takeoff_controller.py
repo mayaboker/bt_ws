@@ -1,5 +1,5 @@
 from typing import Any
-
+import time
 from bt_app.control import PID
 from bt_app.msp.bt_v2 import (
     RC_MAX,
@@ -8,11 +8,18 @@ from bt_app.msp.bt_v2 import (
     RCChannel_alias as RCChannel)
 from loguru import logger as log
 
+ALT_REACH_DELTA = 0.5
+
 class TakeoffController:
-    def __init__(self):
-        # self.params.on_parameter_changed.subscribe(self.on_parameter_changed)
-        # self._setup()
-        self.alt_pid = PID(50,10,0)
+    """
+    Takeoff to request alt
+    """
+    def __init__(self, params):
+        self.params = params
+        self.__time_in_alt = 0
+        self.__prev_date = 0
+        self.params.on_parameter_changed.subscribe(self.on_parameter_changed)
+        self._setup()
 
     def _setup(self):
         self.alt_pid = PID(
@@ -22,9 +29,27 @@ class TakeoffController:
             output_limits=self.params.get("altitude.output_limits")
         )
 
+    # region properties
+    @property
+    def time_in_alt(self):
+        return self.__time_in_alt
+    # endregion properties
+    # 
+    def reset(self):
+        self.__time_in_alt = 0
+        self.__prev_date = 0
+        
     def update(self, setpoint, current):
+        current_time = time.monotonic()
+        if abs(setpoint-current) < ALT_REACH_DELTA:
+            #self.__prev_date can't be zero in this timeline
+            self.__time_in_alt += current_time - self.__prev_date
+        else:
+            self.__time_in_alt = 0
+            
         output = self.alt_pid.update(setpoint, current)
         channels = self.make_channels(int(output))
+        self.__prev_date = current_time
         return channels
 
     def make_channels(self, throttle: int = 0) -> list[int]:

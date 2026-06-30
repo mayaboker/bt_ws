@@ -16,7 +16,7 @@ class AETR1234(IntEnum):
     """
     roll, pitch, throttle, yaw
     """
-    ROLL= auto()
+    ROLL= 0
     PITCH = auto()
     THROTTLE = auto()
     YAW = auto()
@@ -36,6 +36,7 @@ class RobotState(Enum):
     FAILSAFE = "FAILSAFE"
     TAKEOFF = "TAKEOFF"
     ARM = "ARM"
+    SEARCH = "SEARCH"
 
 __all__ = [
     "FREQ_HZ",

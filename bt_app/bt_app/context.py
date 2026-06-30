@@ -21,8 +21,10 @@ class Context:
     takeoff_interrupt: bool = field(default=False)
     force_manual_interrupt: bool = field(default=False)
     take_control: bool = field(default=False)
+    # allow automatic arm without joy AUX1 set to high
     auto_arm: bool = field(default=False)
-    
+    # is takeoff reach alt and wait (stabilize)
+    takeoff_reach: bool = field(default=False)
     # current drone alt , update from drone at 10hz
     drone_alt: float = 0.0
     #current rc read from drone (use to switch between external and internal pilot and controller switch)

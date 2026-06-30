@@ -1,34 +1,28 @@
-import threading
-import time
 from typing import Any
 
 from loguru import logger as log
 
 from bt_app.control.pid import PID
+
 # from bt_app.control.rc_mapper import BetaflightRcMapper
 from bt_app.msp.bt_v2 import (
     RC_MAX,
-    RC_MIN,
     RC_MID,
+    RC_MIN,
+)
+from bt_app.msp.bt_v2 import (
     RCChannel_alias as RCChannel,
 )
 from bt_app.parameters import Parameters
 
 
 class FailSafeController:
-    """Hold altitude and command a slow constant yaw maneuver."""
+    """FS logic is Hold altitude ."""
 
-    def __init__(
-        self
-    ):
-        #TODO: reset safe channels
-        self.last_rc_channels = []
-        self.hover_altitude = 0 # update by other keep the last altitude in context
-        # self.yaw_rate = self.params.get("hover_yaw.yaw_rate")
-        # self.yaw_stick_range = self.params.get("betaflight_yaw_rate_full_stick_dps")
-        
-        # self.params.on_parameter_changed.subscribe(self.on_parameter_changed)
-        # self._setup()
+    def __init__(self, params: Parameters):
+        self.params = params
+        self.params.on_parameter_changed.subscribe(self.on_parameter_changed)
+        self._setup()
 
     def _setup(self):
         self.alt_pid = PID(
@@ -38,24 +32,9 @@ class FailSafeController:
             output_limits=self.params.get("altitude.output_limits"),
         )
 
-
-
-
-
-
     def update(self, setpoint, current):
-        """
-        if controller is not enabled, do nothing. On first run, initialize hover altitude from current altitude.
-         Then read current altitude, compute throttle output from PID, compute yaw output from yaw_rate parameter, and send RC commands to MSP.
-        """
-        
-        altitude = current
-
-        if altitude is None:
-            log.warning("No altitude data available for HoverYawController")
-            return
-        
-        throttle_output = int(self.alt_pid.update(setpoint, altitude))
+        """ """
+        throttle_output = int(self.alt_pid.update(setpoint, current))
         channels = self.make_channels(
             throttle=throttle_output,
             yaw=RC_MID,
@@ -83,10 +62,3 @@ class FailSafeController:
             self.alt_pid.kd = value
         elif name == "altitude.output_limits":
             self.alt_pid.set_output_limits(value)
-        elif name == "hover_yaw.yaw_rate":
-            self.yaw_rate = value
-        elif name == "betaflight_yaw_rate_full_stick_dps":
-            self.yaw_stick_range = value
-            self.rc_mapper.yaw_rate_full_stick_dps = value
-
-

@@ -8,7 +8,7 @@ The listener run in a separate thread and update vehicle state when failsafe is 
 """
 
 from __future__ import annotations
-
+import threading
 import msgpack
 import zmq
 import json
@@ -33,7 +33,7 @@ NAME = "joy_zmq_adapter"
 class JoyZmqAdapter:
     name = NAME
 
-    def __init__(self):
+    def __init__(self, params):
         self._thread: Thread | None = None
         self._stop_event = False
         self.last_rc_channels = []
@@ -45,11 +45,14 @@ class JoyZmqAdapter:
 
     def __check_for_interrupt(self, current):
         if not self.__interrupt_mask or not self.last_rc_channels: return
-
         for i, name in self.__interrupt_mask:
-            
-            if self.last_rc_channels[i] != current[i]:
-                self.on_interrupt.emit(name, current[i])
+            try:
+                print(f"----------->{i}")
+            # if self.last_rc_channels[i] != current[i]:
+            #     self.on_interrupt.emit(name, current[i])
+            except Exception as e:
+                print(e)
+                
 
 
     def register_interrupt(self, button_index, interrupt_name):
@@ -98,7 +101,6 @@ class JoyZmqAdapter:
         pub_socket = context.socket(zmq.PUB)
         sequence = 0
         next_publish_at = time.monotonic()
-
         try:
             sub_socket.connect(DEFAULT_SERVER_PUB_ENDPOINT)
             for topic in DEFAULT_SUBSCRIBE_TOPICS:
@@ -109,6 +111,7 @@ class JoyZmqAdapter:
             log.info(f"publishing {DEFAULT_EXTERNAL_PUB_ENDPOINT} topic={DEFAULT_PUBLISH_TOPIC} rate={DEFAULT_PUBLISH_RATE_HZ}Hz")
 
             while not self._stop_event:
+                print(1)
                 try:
                     # non-blocking receive with timeout, using not block to later publish state 
                     topic_bytes, payload_bytes = sub_socket.recv_multipart()
@@ -118,13 +121,10 @@ class JoyZmqAdapter:
                     continue
                 topic = topic_bytes.decode("utf-8")
                 payload = self.decode_payload(msgpack, payload_bytes)
-                
                 if topic == SUB_STATE_TOPIC:
                     current = payload["channels"]
                     self.__check_for_interrupt(current)
                     self.last_rc_channels = current
-                    # print(self.last_rc_channels)
-
                 if topic == SUB_FAILSAFE_TOPIC:
                     
                     failsafe_active = payload.get("active", True)
@@ -134,6 +134,7 @@ class JoyZmqAdapter:
                         self.on_failsafe_exit.emit()
 
                 # region publish external event
+                print(4)
                 current_time = time.monotonic()
                 if current_time >= next_publish_at:
                     event = self.make_external_event(sequence, self.now_us())
@@ -146,9 +147,10 @@ class JoyZmqAdapter:
                     sequence += 1
                     next_publish_at = current_time + publish_period_s
                 # endregion
-
+            
             time.sleep(1/FPS)
         except KeyboardInterrupt:
+            log.error("exit")
             return 0
         finally:
             sub_socket.close()

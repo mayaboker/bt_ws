@@ -2,7 +2,7 @@ from loguru import logger as log
 from bt_app.common import RobotState
 from transitions import Machine
 from bt_app.common import Event
-
+from bt_app.vehicle_config import VehicleConfig
 from bt_app.context import Context
 
 
@@ -11,8 +11,9 @@ from bt_app.context import Context
 class Robot_StateMachine:
     states = list(RobotState)
 
-    def __init__(self, ctx: Context):
+    def __init__(self, ctx: Context, config: VehicleConfig):
         self.ctx: Context = ctx
+        self.config: VehicleConfig = config
         self.on_before_state_changed = Event()
         self.machine = Machine(
             model=self,
@@ -56,6 +57,7 @@ class Robot_StateMachine:
             "resolve",
             RobotState.ARM,
             RobotState.TAKEOFF,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.ARM, RobotState.TAKEOFF),
             conditions=[self.enter_takeoff_from_arm]
         )
 
@@ -79,6 +81,13 @@ class Robot_StateMachine:
             RobotState.MANUAL,
             before=lambda x: self.on_before_state_changed.emit(RobotState.TAKEOFF, RobotState.MANUAL),
             conditions=[self.enter_manual_from_takeoff]
+        )
+
+        self.machine.add_transition(
+            "resolve",
+            RobotState.TAKEOFF,
+            RobotState.SEARCH,
+            conditions=[self.enter_search_from_takeoff]
         )
 
         # self.machine.add_transition(
@@ -109,6 +118,19 @@ class Robot_StateMachine:
 
 
     # ------------------
+    
+    def enter_search_from_takeoff(self, event) :
+        """
+        
+        """
+        ok = all([
+            self.config.auto_search_after_takeoff,
+            self.ctx.takeoff_reach
+            
+        ])
+
+        return ok
+    
     def enter_manual_from_takeoff(self, event):
         ok = all([
             self.ctx.armed,

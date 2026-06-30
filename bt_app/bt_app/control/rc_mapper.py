@@ -16,6 +16,18 @@ class BetaflightRcMapper:
         rc_max: int = 2000,
         yaw_sign: float = 1.0,
     ) -> None:
+        """Map desired yaw rates to Betaflight RC yaw channel values.
+
+        Args:
+            yaw_rate_full_stick_dps: Yaw rate, in degrees per second, represented by
+                full stick deflection. Must be greater than zero.
+            rc_mid: RC channel value at centered stick.
+            rc_mid_range: Channel offset from center to full stick in either direction.
+            rc_min: Minimum allowed RC channel value.
+            rc_max: Maximum allowed RC channel value.
+            yaw_sign: Direction multiplier for yaw output. Use 1.0 for normal direction
+                or -1.0 to invert yaw.
+        """
         if yaw_rate_full_stick_dps <= 0:
             raise ValueError("yaw_rate_full_stick_dps must be greater than zero")
 

@@ -1,5 +1,7 @@
-from typing import Any
-
+"""
+implement MSP arm sequence
+TODO: the conroller exit by statemachine when armed, add keep alive and exit to error when not armed for few seconds
+"""
 import time
 from bt_app.msp.bt_v2 import (
     RC_MAX,
@@ -11,9 +13,14 @@ from loguru import logger as log
 DISABLED_HOLD_TIME = 1.0
 
 class ARMController:
-    def __init__(self):
+    """
+    Run betaflight arm sequence
+    - set ARM and THROTTLE to low for 1 sec
+    - set ARM to RC_MAX and THROTTL to low
+    """
+    def __init__(self, params):
         # self.params.on_parameter_changed.subscribe(self.on_parameter_changed)
-        self.__time = None
+        self.__time = time.monotonic()
 
     def reset(self):
         self.__time = time.monotonic()
