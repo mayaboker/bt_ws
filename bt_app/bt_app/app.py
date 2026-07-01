@@ -16,6 +16,7 @@ from bt_app.rc_utils import matching
 from bt_app.vehicle_config import VehicleConfig
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.common import RobotState
+from bt_app.parameters.generated import ParameterKey
 from bt_app.common import (
     FREQ_HZ
 )
@@ -170,9 +171,15 @@ class App:
         self.ctx.drone_rc = self.drone_adapter.get_rc()
 
         # log.info(self.ctx.state, self.ctx.armable, self.ctx.takeoff_interrupt)
-    def __get_takeoff_rc(self):
-        TEST_ALT_SP = 2 
-        rc = self.controllers[RobotState.TAKEOFF].update(TEST_ALT_SP, self.ctx.drone_alt)
+    def _takeoff_handler(self):
+        """
+        take off logic
+        - get rc from takeoff controller
+        - triggrt takeoff_reach flag
+        """
+        
+        setpoint = self.__params.get(ParameterKey.TAKEOFF_ALTITUDE)
+        rc = self.controllers[RobotState.TAKEOFF].update(setpoint, self.ctx.drone_alt)
         
         self.ctx.takeoff_reach = self.controllers[RobotState.TAKEOFF].time_in_alt > 4
         return rc
@@ -181,13 +188,13 @@ class App:
         if self.ctx.state == RobotState.MANUAL.value:
             channels = self.controllers[RobotState.MANUAL].update()
             if self.ctx.auto_arm:
-                channels[4] = RC_MAX
+                channels[AETR1234.AUX1] = RC_MAX
             return channels
         elif self.ctx.state == RobotState.FAILSAFE.value:
             fs_alt = self.__params.get("fail_safe.alt")
             return self.controllers[RobotState.FAILSAFE].update(fs_alt, self.ctx.drone_alt)
         elif self.ctx.state == RobotState.TAKEOFF.value:
-            return self.__get_takeoff_rc() 
+            return self._takeoff_handler() 
         elif self.ctx.state == RobotState.IDLE.value:
             return [1000]*8
         elif self.ctx.state == RobotState.ARM.value:

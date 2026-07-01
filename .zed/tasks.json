@@ -1,0 +1,24 @@
+[
+  {
+    "label": "generate parameter types",
+    "command": "bt_app/.venv/bin/python",
+    "args": [
+      "scripts/generate_parameter_types.py"
+    ],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "watch parameter types",
+    "command": "bt_app/.venv/bin/python",
+    "args": [
+      "scripts/watch_parameter_types.py"
+    ],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  }
+]
