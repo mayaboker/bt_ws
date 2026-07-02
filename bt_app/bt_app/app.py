@@ -1,3 +1,6 @@
+"""
+Application entry point
+"""
 import pathlib
 
 from bt_app.control import (
@@ -96,15 +99,14 @@ class App:
         """
         handle interrupt that register as joy action
         """
-        print(name)
         # TODO: create interrupt action list
-        # if name == "takeoff":
-        #     self.ctx.takeoff_interrupt = value == RC_MAX
-        #     log.warning(f"--------takeoff interrupt {value}")
+        if name == "takeoff":
+            self.ctx.takeoff_interrupt = value == RC_MAX
+            log.warning(f"--------takeoff interrupt {value}")
 
-        # if name == "force_manual":
-        #     log.warning(f"--------force manual interrupt {value}")
-        #     self.ctx.force_manual_interrupt = value == RC_MAX
+        if name == "force_manual":
+            log.warning(f"--------force manual interrupt {value}")
+            self.ctx.force_manual_interrupt = value == RC_MAX
 
     def __load_controllers(self):
         """
@@ -122,8 +124,6 @@ class App:
         joy_adapter.on_failsafe_exit += self.__joystick_fs_exit
         joy_adapter.on_interrupt += self.__handle_joy_interrupt
         # TODO: convert to const and mapping
-        print("44444444", AETR1234.AUX5)
-        exit()
         joy_adapter.register_interrupt(AETR1234.AUX4, "takeoff")
         joy_adapter.register_interrupt(AETR1234.AUX5, "force_manual")
         self.controllers[RobotState.MANUAL] = joy_adapter

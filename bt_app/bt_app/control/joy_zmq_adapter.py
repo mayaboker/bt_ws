@@ -44,18 +44,27 @@ class JoyZmqAdapter:
         self.__interrupt_mask = []
 
     def __check_for_interrupt(self, current):
+        """
+        check if some input channel config as interrupt is triggered, if so emit the event
+        """
+        
         if not self.__interrupt_mask or not self.last_rc_channels: return
+
+
         for i, name in self.__interrupt_mask:
             try:
-                print(f"----------->{i}")
-            # if self.last_rc_channels[i] != current[i]:
-            #     self.on_interrupt.emit(name, current[i])
+                
+                if self.last_rc_channels[i] != current[i]:
+                    self.on_interrupt.emit(name, current[i])
             except Exception as e:
-                print(e)
+                log.error(e)
                 
 
 
     def register_interrupt(self, button_index, interrupt_name):
+        """
+        register a button index as interrupt, when the button value change, the event will be emitted
+        """
         self.__interrupt_mask.append((button_index, interrupt_name))
 
     def put_event(self, key, value):
@@ -111,7 +120,6 @@ class JoyZmqAdapter:
             log.info(f"publishing {DEFAULT_EXTERNAL_PUB_ENDPOINT} topic={DEFAULT_PUBLISH_TOPIC} rate={DEFAULT_PUBLISH_RATE_HZ}Hz")
 
             while not self._stop_event:
-                print(1)
                 try:
                     # non-blocking receive with timeout, using not block to later publish state 
                     topic_bytes, payload_bytes = sub_socket.recv_multipart()
@@ -134,7 +142,6 @@ class JoyZmqAdapter:
                         self.on_failsafe_exit.emit()
 
                 # region publish external event
-                print(4)
                 current_time = time.monotonic()
                 if current_time >= next_publish_at:
                     event = self.make_external_event(sequence, self.now_us())

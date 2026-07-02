@@ -46,8 +46,12 @@ To inspect the bundled pass-through plugin manually:
 GST_PLUGIN_PATH="$PWD/plugins" gst-inspect-1.0 btpassthrough
 ```
 
-## Test
+## gst gazebo image src plugin
 
 ```bash
-pytest
+GST_PLUGIN_PATH="$PWD/plugins" gst-inspect-1.0 customsrc
+```
+
+```bash
+GST_PLUGIN_PATH="$PWD/plugins" gst-launch-1.0 customsrc ! videoconvert ! autovideosink
 ```

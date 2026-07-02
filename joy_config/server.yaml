@@ -9,6 +9,15 @@ adapter_event_stream:
   enabled: true
   interval_s: 1.0
 adapters:
+  mock:
+    module: mock
+    config:
+      joystick_state:
+        enabled: true
+        interval_s: 0.02
+      failsafe:
+        enabled: true
+        interval_s: 1.0
   zmq:
     module: zmq
     config:

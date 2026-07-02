@@ -18,6 +18,7 @@ dependencies = [
     "PyGObject>=3.48",
     "uvicorn",
     "pyzmq",
+    "bt-joy",
 ]
 
 [project.optional-dependencies]
@@ -35,3 +36,6 @@ include = ["bt_gst*"]
 
 [tool.setuptools.package-data]
 bt_gst = ["static/*.html"]
+
+[tool.uv.sources]
+bt-joy = { path = "../../bt_joy/dist/bt_joy-0.1.1.dev0-py3-none-any.whl" }
