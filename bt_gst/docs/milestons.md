@@ -16,3 +16,10 @@
 - [x] add optional local debug video branch controlled by config
 - [x] add stream config fields: video_local, codec, host, port, mtu
 - [x] keep tracker/ATR and metadata bridge branches deferred
+
+
+# milestone #4
+- [x] add simulation source using `gzimagesrc`
+- [x] add simulation source rate config
+- [x] configure GStreamer plugin path in active runtime
+- [x] keep Gazebo Python modules as optional runtime dependencies

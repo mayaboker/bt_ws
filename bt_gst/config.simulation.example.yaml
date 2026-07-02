@@ -1,7 +1,7 @@
 source:
-  type: file
-  path: data/vtest.avi
-  rate: 10
+  type: simulation
+  topic: /camera
+  rate: 30
 video_local: true
 codec: h264
 host: 127.0.0.1

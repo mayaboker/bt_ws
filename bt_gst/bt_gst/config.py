@@ -13,6 +13,7 @@ class ConfigError(ValueError):
 
 
 DEFAULT_FILE_RATE = 20
+DEFAULT_SIMULATION_RATE = 30
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class CameraSourceConfig:
 @dataclass(frozen=True)
 class SimulationSourceConfig:
     topic: str
+    rate: int = DEFAULT_SIMULATION_RATE
     type: str = "simulation"
 
 
@@ -57,6 +59,7 @@ class CameraSourceConfigOverrides:
 @dataclass(frozen=True)
 class SimulationSourceConfigOverrides:
     topic: str | None = None
+    rate: int | None = None
     type: str = "simulation"
 
 
@@ -164,8 +167,12 @@ def source_config_from_mapping(raw_source: dict[str, Any]) -> SourceConfig:
             device=_required_string(raw_source, "device", source_type)
         )
     if source_type == "simulation":
+        rate = _optional_simulation_rate(raw_source)
+        if rate <= 0:
+            raise ConfigError("source.rate must be greater than 0")
         return SimulationSourceConfig(
-            topic=_required_string(raw_source, "topic", source_type)
+            topic=_required_string(raw_source, "topic", source_type),
+            rate=rate,
         )
 
     config_logger.debug("unsupported source type source_type={}", source_type)
@@ -233,11 +240,16 @@ def _resolve_source_config(
         return CameraSourceConfig(device=device)
     if isinstance(override, SimulationSourceConfigOverrides):
         topic = override.topic
+        rate = override.rate
         if isinstance(current, SimulationSourceConfig):
             topic = topic if topic is not None else current.topic
+            rate = rate if rate is not None else current.rate
         if topic is None:
             return current
-        return SimulationSourceConfig(topic=topic)
+        return SimulationSourceConfig(
+            topic=topic,
+            rate=rate if rate is not None else DEFAULT_SIMULATION_RATE,
+        )
     return override
 
 
@@ -247,6 +259,14 @@ def validate_config(config: AppConfig) -> AppConfig:
         config_logger.debug("config validation failed reason=missing-source")
         raise ConfigError("source config is required")
     if isinstance(config.source, FileSourceConfig):
+        if isinstance(config.source.rate, bool) or not isinstance(
+            config.source.rate,
+            int,
+        ):
+            raise ConfigError("source.rate must be an int")
+        if config.source.rate <= 0:
+            raise ConfigError("source.rate must be greater than 0")
+    if isinstance(config.source, SimulationSourceConfig):
         if isinstance(config.source.rate, bool) or not isinstance(
             config.source.rate,
             int,
@@ -317,3 +337,17 @@ def _optional_file_rate(raw_source: dict[str, Any]) -> int:
             raise ConfigError("source.framerate must be an int")
         return rate
     return DEFAULT_FILE_RATE
+
+
+def _optional_simulation_rate(raw_source: dict[str, Any]) -> int:
+    if "rate" in raw_source:
+        rate = _optional_int(raw_source, "rate")
+        if rate is None:
+            raise ConfigError("source.rate must be an int")
+        return rate
+    if "framerate" in raw_source:
+        rate = _optional_int(raw_source, "framerate")
+        if rate is None:
+            raise ConfigError("source.framerate must be an int")
+        return rate
+    return DEFAULT_SIMULATION_RATE

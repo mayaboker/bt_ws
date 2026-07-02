@@ -1,6 +1,10 @@
 from loguru import logger
 
 from bt_gst.config import AppConfig
+from bt_gst.gst_environment import (
+    register_local_python_elements,
+    remove_local_python_plugin_paths_from_gst_scan,
+)
 from bt_gst.pipeline_builder import PipelineBuildError, build_pipeline_description
 
 pipeline_runner_logger = logger.bind(component="bt_gst.pipeline_runner")
@@ -18,6 +22,7 @@ def run_pipeline(config: AppConfig) -> int:
     pipeline_runner_logger.info(
         "starting GStreamer pipeline pipeline={}", pipeline_description
     )
+    remove_local_python_plugin_paths_from_gst_scan()
 
     try:
         import gi
@@ -31,6 +36,11 @@ def run_pipeline(config: AppConfig) -> int:
         ) from exc
 
     Gst.init(None)
+    try:
+        register_local_python_elements(Gst)
+    except Exception as exc:
+        raise PipelineRunError(f"GStreamer Python plugins could not be registered: {exc}") from exc
+
     try:
         pipeline = Gst.parse_launch(pipeline_description)
     except Exception as exc:

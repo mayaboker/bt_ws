@@ -23,8 +23,15 @@ from bt_gst.config import (
     validate_config,
 )
 from bt_gst import app as app_module
+from bt_gst import pipeline_runner
+from bt_gst.gst_environment import (
+    GST_PLUGIN_PATH as ACTIVE_GST_PLUGIN_PATH,
+    PYTHON_PLUGIN_PATH,
+    configure_gst_plugin_path as configure_active_gst_plugin_path,
+    register_local_python_elements,
+    remove_local_python_plugin_paths_from_gst_scan,
+)
 from bt_gst.pipeline_builder import (
-    PipelineBuildError,
     build_pipeline_description,
     build_source_pipeline_description,
 )
@@ -247,6 +254,21 @@ def test_load_config_reads_simulation_source_yaml(tmp_path: Path) -> None:
     )
 
 
+def test_load_config_reads_simulation_source_rate_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: simulation\n"
+        "  topic: /camera\n"
+        "  rate: 12\n",
+        encoding="utf-8",
+    )
+
+    assert load_config(config_path) == AppConfig(
+        source=SimulationSourceConfig(topic="/camera", rate=12)
+    )
+
+
 def test_merge_config_uses_cli_overrides() -> None:
     assert merge_config(
         AppConfig(
@@ -308,6 +330,26 @@ def test_cli_source_override_preserves_yaml_stream_settings(tmp_path: Path) -> N
         host="192.0.2.10",
         port=6000,
         mtu=900,
+    )
+
+
+def test_cli_simulation_topic_override_preserves_yaml_rate(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: simulation\n"
+        "  topic: /config-camera\n"
+        "  rate: 12\n",
+        encoding="utf-8",
+    )
+
+    assert app_module.resolve_command_config(
+        config_path,
+        AppConfigOverrides(
+            source=SimulationSourceConfigOverrides(topic="/cli-camera")
+        ),
+    ) == AppConfig(
+        source=SimulationSourceConfig(topic="/cli-camera", rate=12),
     )
 
 
@@ -394,6 +436,31 @@ def test_load_config_rejects_invalid_file_source_rate(tmp_path: Path) -> None:
         load_config(config_path)
 
 
+def test_load_config_rejects_invalid_simulation_source_rate(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: simulation\n"
+        "  topic: /camera\n"
+        "  rate: not-an-int\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="rate must be an int"):
+        load_config(config_path)
+
+    config_path.write_text(
+        "source:\n"
+        "  type: simulation\n"
+        "  topic: /camera\n"
+        "  rate: 0\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="source.rate must be greater than 0"):
+        load_config(config_path)
+
+
 def test_validate_config_rejects_invalid_stream_values() -> None:
     with pytest.raises(ConfigError, match="source.rate must be greater than 0"):
         validate_config(
@@ -416,6 +483,8 @@ def test_validate_config_rejects_invalid_stream_values() -> None:
         validate_config(
             AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")), mtu=0)
         )
+    with pytest.raises(ConfigError, match="source.rate must be greater than 0"):
+        validate_config(AppConfig(source=SimulationSourceConfig(topic="/camera", rate=0)))
 
 
 def test_build_pipeline_description_for_file_source() -> None:
@@ -427,11 +496,12 @@ def test_build_pipeline_description_for_file_source() -> None:
         "filesrc location=data/vtest.avi ! decodebin ! videorate ! "
         "video/x-raw,framerate=20/1 ! videoconvert ! tee name=video_tee"
     )
-    assert "x264enc tune=zerolatency speed-preset=ultrafast" in pipeline
+    assert "x264enc bitrate=1500 tune=zerolatency speed-preset=ultrafast" in pipeline
     assert "h264parse config-interval=1" in pipeline
     assert "rtph264pay pt=96 mtu=1200" in pipeline
+    assert "aggregate-mode=zero-latency" in pipeline
     assert "udpsink host=127.0.0.1 port=5000 sync=false async=false" in pipeline
-    assert "fpsdisplaysink sync=true" in pipeline
+    assert "fpsdisplaysink video-sink=glimagesink sync=true" in pipeline
 
 
 def test_build_pipeline_description_quotes_file_path_with_spaces() -> None:
@@ -475,12 +545,25 @@ def test_build_pipeline_description_omits_debug_branch_when_disabled() -> None:
     assert "rtph264pay pt=96 mtu=900" in pipeline
 
 
-def test_build_pipeline_description_rejects_simulation_source() -> None:
-    with pytest.raises(
-        PipelineBuildError,
-        match="simulation source pipeline is not implemented yet",
-    ):
-        build_source_pipeline_description(SimulationSourceConfig(topic="/camera"))
+def test_build_pipeline_description_for_simulation_source() -> None:
+    pipeline = build_pipeline_description(
+        AppConfig(source=SimulationSourceConfig(topic="/camera", rate=12))
+    )
+
+    assert pipeline.startswith(
+        "gzimagesrc topic=/camera fps=12 ! videoconvert ! tee name=video_tee"
+    )
+    assert "x264enc bitrate=1500 tune=zerolatency speed-preset=ultrafast" in pipeline
+    assert "video/x-raw,format=I420,width=640,height=480,framerate=12/1" in pipeline
+    assert "rtph264pay pt=96 mtu=1200" in pipeline
+    assert "aggregate-mode=zero-latency" in pipeline
+    assert "udpsink host=127.0.0.1 port=5000 sync=false async=false" in pipeline
+
+
+def test_build_pipeline_description_quotes_simulation_topic() -> None:
+    assert build_source_pipeline_description(
+        SimulationSourceConfig(topic="/world/default/camera image", rate=30)
+    ) == "gzimagesrc topic='/world/default/camera image' fps=30"
 
 
 def test_build_video_pipeline_description_uses_explicit_gtksink_pipeline() -> None:
@@ -934,6 +1017,127 @@ def test_configure_gst_plugin_path_preserves_existing_entries(monkeypatch) -> No
     )
 
 
+def test_active_configure_gst_plugin_path_sets_plugin_folder(monkeypatch) -> None:
+    monkeypatch.delenv("GST_PLUGIN_PATH", raising=False)
+
+    configure_active_gst_plugin_path()
+
+    assert os.environ["GST_PLUGIN_PATH"] == str(ACTIVE_GST_PLUGIN_PATH)
+
+
+def test_active_configure_gst_plugin_path_preserves_existing_entries(monkeypatch) -> None:
+    existing_path = os.pathsep.join(["/tmp/gst-a", "/tmp/gst-b"])
+    monkeypatch.setenv("GST_PLUGIN_PATH", existing_path)
+
+    configure_active_gst_plugin_path()
+
+    assert os.environ["GST_PLUGIN_PATH"] == os.pathsep.join(
+        [str(ACTIVE_GST_PLUGIN_PATH), existing_path]
+    )
+
+
+def test_remove_local_python_plugin_paths_from_gst_scan(monkeypatch) -> None:
+    existing_path = os.pathsep.join(
+        ["/tmp/gst-a", str(ACTIVE_GST_PLUGIN_PATH), str(PYTHON_PLUGIN_PATH)]
+    )
+    monkeypatch.setenv("GST_PLUGIN_PATH", existing_path)
+
+    remove_local_python_plugin_paths_from_gst_scan()
+
+    assert os.environ["GST_PLUGIN_PATH"] == "/tmp/gst-a"
+
+
+def test_run_pipeline_registers_local_python_elements_before_parse(monkeypatch) -> None:
+    calls = []
+
+    class FakeMessageType:
+        ERROR = 1
+        EOS = 2
+
+    class FakeState:
+        PLAYING = "playing"
+        NULL = "null"
+
+    class FakeMessage:
+        type = FakeMessageType.EOS
+
+    class FakeBus:
+        def timed_pop_filtered(self, _timeout, _message_types):
+            return FakeMessage()
+
+    class FakePipeline:
+        def get_bus(self):
+            return FakeBus()
+
+        def set_state(self, state):
+            calls.append(("set_state", state))
+
+    class FakeGst:
+        CLOCK_TIME_NONE = object()
+        MessageType = FakeMessageType
+        State = FakeState
+        Rank = type("Rank", (), {"NONE": 0})
+
+        @staticmethod
+        def init(_args):
+            calls.append(("gst_init", None))
+
+        @staticmethod
+        def parse_launch(_pipeline_description):
+            calls.append(("parse_launch", None))
+            return FakePipeline()
+
+    class FakeGi:
+        @staticmethod
+        def require_version(namespace, version):
+            calls.append(("require_version", namespace, version))
+
+    class FakeRepository:
+        Gst = FakeGst
+
+    def fake_register_local_python_elements(_gst):
+        calls.append(("register_local_python_elements", None))
+
+    def fake_remove_local_python_plugin_paths_from_gst_scan():
+        calls.append(("remove_local_python_plugin_paths_from_gst_scan", None))
+
+    monkeypatch.setitem(sys.modules, "gi", FakeGi)
+    monkeypatch.setitem(sys.modules, "gi.repository", FakeRepository)
+    monkeypatch.setattr(
+        pipeline_runner,
+        "remove_local_python_plugin_paths_from_gst_scan",
+        fake_remove_local_python_plugin_paths_from_gst_scan,
+    )
+    monkeypatch.setattr(
+        pipeline_runner,
+        "register_local_python_elements",
+        fake_register_local_python_elements,
+    )
+
+    assert pipeline_runner.run_pipeline(
+        AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")))
+    ) == 0
+    assert calls.index(
+        ("remove_local_python_plugin_paths_from_gst_scan", None)
+    ) < calls.index(("gst_init", None))
+    assert calls.index(("register_local_python_elements", None)) < calls.index(
+        ("parse_launch", None)
+    )
+
+
+def test_register_local_python_elements_registers_gzimagesrc() -> None:
+    gi = pytest.importorskip("gi")
+    gi.require_version("Gst", "1.0")
+    from gi.repository import Gst
+
+    Gst.init(None)
+    register_local_python_elements(Gst)
+
+    factory = Gst.ElementFactory.find("gzimagesrc")
+    assert factory is not None
+    assert factory.get_metadata("long-name") == "Gazebo Image Source"
+
+
 def test_console_version_command() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "bt_gst.app", "version"],
@@ -968,11 +1172,53 @@ def test_console_show_command_prints_pipeline() -> None:
 
     assert result.returncode == 0
     assert "filesrc location=data/vtest.avi" in result.stdout
-    assert "x264enc tune=zerolatency speed-preset=ultrafast" in result.stdout
-    assert "rtph264pay pt=96 mtu=1200" in result.stdout
-    assert "udpsink host=127.0.0.1 port=5000 sync=false async=false" in result.stdout
-    assert "fpsdisplaysink sync=true" in result.stdout
+    assert "x264enc bitrate=1500 tune=zerolatency speed-preset=ultrafast" in result.stdout
+    assert "rtph264pay pt=96 mtu=800" in result.stdout
+    assert "udpsink host=127.0.0.1 port=5600 sync=false async=false" in result.stdout
+    assert "fpsdisplaysink video-sink=glimagesink sync=true" in result.stdout
     assert "bt_optical_flow" not in result.stdout
+
+
+def test_console_show_command_prints_simulation_pipeline() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "bt_gst.app",
+            "show",
+            "-s",
+            "simulation",
+            "--topic",
+            "/camera",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.startswith("gzimagesrc topic=/camera fps=30")
+    assert "rtph264pay pt=96 mtu=1200" in result.stdout
+
+
+def test_console_show_command_prints_simulation_config_pipeline() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "bt_gst.app",
+            "show",
+            "-c",
+            "config.simulation.example.yaml",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.startswith("gzimagesrc topic=/camera fps=30")
+    assert "udpsink host=127.0.0.1 port=5600 sync=false async=false" in result.stdout
 
 
 def test_run_command_dispatches_to_pipeline_runner(monkeypatch) -> None:
@@ -986,7 +1232,30 @@ def test_run_command_dispatches_to_pipeline_runner(monkeypatch) -> None:
 
     assert app_module.main(["run", "-c", "config.example.yaml"]) == 7
     assert calls == [
-        AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi"), rate=10))
+        AppConfig(
+            source=FileSourceConfig(path=Path("data/vtest.avi"), rate=10),
+            port=5600,
+            mtu=800,
+        )
+    ]
+
+
+def test_run_command_dispatches_simulation_config_to_pipeline_runner(monkeypatch) -> None:
+    calls = []
+
+    def fake_run_pipeline(config: AppConfig) -> int:
+        calls.append(config)
+        return 7
+
+    monkeypatch.setattr(app_module, "run_pipeline", fake_run_pipeline)
+
+    assert app_module.main(["run", "-c", "config.simulation.example.yaml"]) == 7
+    assert calls == [
+        AppConfig(
+            source=SimulationSourceConfig(topic="/camera", rate=30),
+            port=5600,
+            mtu=800,
+        )
     ]
 
 
