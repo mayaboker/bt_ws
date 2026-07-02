@@ -17,6 +17,7 @@ dependencies = [
     "pyyaml",
     "pyzmq",
     "msgpack",
+    "pymavlink>=2.4.49",
 ]
 
 [project.optional-dependencies]

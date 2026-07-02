@@ -18,13 +18,15 @@ from bt_app.context import Context
 from bt_app.rc_utils import matching
 from bt_app.vehicle_config import VehicleConfig
 from bt_app.msp_adapter import MSPAdapter
+from bt_app.mavlink_wrapper import MavlinkService
 from bt_app.common import RobotState
 from bt_app.parameters.generated import ParameterKey
 from bt_app.common import (
     FREQ_HZ
 )
 from bt_app.msp.bt_v2 import (
-    RC_MAX
+    RC_MAX,
+    RC_MIN
 )
 from bt_app.common import AETR1234
 from bt_app.parameters import Parameters
@@ -42,6 +44,7 @@ class App:
         self.config = self.__handle_config()
         # hold application state
         self.ctx = Context()
+        self.mavlink_service = MavlinkService(context=self.ctx)
         # state macine
         self.robot_sm = Robot_StateMachine(self.ctx, self.config)
         self.robot_sm.on_before_state_changed += self.__handle_before_state_changed
@@ -54,6 +57,7 @@ class App:
         
         self.__load_drone_interface()
         self.__load_controllers()
+        self.mavlink_service.start()
         
         log.info("Application Start")
 
@@ -100,6 +104,8 @@ class App:
         handle interrupt that register as joy action
         """
         # TODO: create interrupt action list
+        if name == "arm":
+            log.warning(f"--------arm interrupt {value}")
         if name == "takeoff":
             self.ctx.takeoff_interrupt = value == RC_MAX
             log.warning(f"--------takeoff interrupt {value}")
@@ -126,6 +132,7 @@ class App:
         # TODO: convert to const and mapping
         joy_adapter.register_interrupt(AETR1234.AUX4, "takeoff")
         joy_adapter.register_interrupt(AETR1234.AUX5, "force_manual")
+        joy_adapter.register_interrupt(AETR1234.AUX1, "arm")
         self.controllers[RobotState.MANUAL] = joy_adapter
         log.info("load joy adapter")
         #endregion
@@ -171,6 +178,7 @@ class App:
         self.ctx.drone_rc = self.drone_adapter.get_rc()
 
         # log.info(self.ctx.state, self.ctx.armable, self.ctx.takeoff_interrupt)
+    
     def _takeoff_handler(self):
         """
         take off logic
@@ -184,6 +192,19 @@ class App:
         self.ctx.takeoff_reach = self.controllers[RobotState.TAKEOFF].time_in_alt > 4
         return rc
 
+    def _search_handler(self):
+        """
+        TODO: TBD
+        search logic
+        - get rc from search controller
+        """
+        
+        setpoint = self.__params.get(ParameterKey.TAKEOFF_ALTITUDE)
+        rc = self.controllers[RobotState.SEARCH].update(setpoint, self.ctx.drone_alt)
+        
+        return rc
+
+
     def __resolve_rc(self):
         if self.ctx.state == RobotState.MANUAL:
             channels = self.controllers[RobotState.MANUAL].update()
@@ -196,11 +217,11 @@ class App:
         elif self.ctx.state == RobotState.TAKEOFF:
             return self._takeoff_handler() 
         elif self.ctx.state == RobotState.IDLE:
-            return [1000]*8
+            return [RC_MIN]*8
         elif self.ctx.state == RobotState.ARM:
             return self.controllers[RobotState.ARM].update()
         elif self.ctx.state == RobotState.SEARCH:
-            return self.controllers[RobotState.SEARCH].update()
+            return self._search_handler()
         else:
             log.error(f"RC selector not implemented for state {self.ctx.state}")
             raise NotImplementedError(f"RC selector not implemented for state {self.ctx.state}")
@@ -229,6 +250,8 @@ class App:
                 time.sleep(1/FREQ_HZ)
         except KeyboardInterrupt:
             log.warning("Stopping...")
+        finally:
+            self.mavlink_service.stop()
 
 def main():
     app = App()
