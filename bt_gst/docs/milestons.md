@@ -9,3 +9,10 @@
 # milestone #2
 - [x] add main gst loop that load the pipe and play it
 - [x] create module the has responsibility to build the pipe
+
+
+# milestone #3
+- [x] add H.264 RTP/UDP stream branch
+- [x] add optional local debug video branch controlled by config
+- [x] add stream config fields: video_local, codec, host, port, mtu
+- [x] keep tracker/ATR and metadata bridge branches deferred

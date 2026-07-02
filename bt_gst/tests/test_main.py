@@ -155,7 +155,61 @@ def test_load_config_reads_file_source_yaml(tmp_path: Path) -> None:
     )
 
     assert load_config(config_path) == AppConfig(
-        source=FileSourceConfig(path=Path("data/vtest.avi"))
+        source=FileSourceConfig(path=Path("data/vtest.avi"), rate=10)
+    )
+
+
+def test_load_config_reads_file_source_rate_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: file\n"
+        "  path: data/vtest.avi\n"
+        "  rate: 24\n",
+        encoding="utf-8",
+    )
+
+    assert load_config(config_path) == AppConfig(
+        source=FileSourceConfig(path=Path("data/vtest.avi"), rate=24)
+    )
+
+
+def test_load_config_accepts_file_source_framerate_alias(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: file\n"
+        "  path: data/vtest.avi\n"
+        "  framerate: 24\n",
+        encoding="utf-8",
+    )
+
+    assert load_config(config_path) == AppConfig(
+        source=FileSourceConfig(path=Path("data/vtest.avi"), rate=24)
+    )
+
+
+def test_load_config_reads_stream_settings_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: file\n"
+        "  path: data/vtest.avi\n"
+        "video_local: false\n"
+        "codec: h264\n"
+        "host: 192.0.2.10\n"
+        "port: 6000\n"
+        "mtu: 900\n",
+        encoding="utf-8",
+    )
+
+    assert load_config(config_path) == AppConfig(
+        source=FileSourceConfig(path=Path("data/vtest.avi"), rate=10),
+        video_local=False,
+        codec="h264",
+        host="192.0.2.10",
+        port=6000,
+        mtu=900,
     )
 
 
@@ -189,9 +243,21 @@ def test_load_config_reads_simulation_source_yaml(tmp_path: Path) -> None:
 
 def test_merge_config_uses_cli_overrides() -> None:
     assert merge_config(
-        AppConfig(source=FileSourceConfig(path=Path("config.avi"))),
+        AppConfig(
+            source=FileSourceConfig(path=Path("config.avi")),
+            video_local=False,
+            host="192.0.2.10",
+            port=6000,
+            mtu=900,
+        ),
         AppConfig(source=FileSourceConfig(path=Path("cli.avi"))),
-    ) == AppConfig(source=FileSourceConfig(path=Path("cli.avi")))
+    ) == AppConfig(
+        source=FileSourceConfig(path=Path("cli.avi")),
+        video_local=False,
+        host="192.0.2.10",
+        port=6000,
+        mtu=900,
+    )
 
 
 def test_validate_config_requires_source() -> None:
@@ -211,32 +277,135 @@ def test_load_config_rejects_unsupported_source_type(tmp_path: Path) -> None:
         load_config(config_path)
 
 
-def test_build_pipeline_description_for_file_source() -> None:
-    assert (
-        build_pipeline_description(
-            AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")))
-        )
-        == "filesrc location=data/vtest.avi ! decodebin ! videoconvert ! autovideosink"
+def test_load_config_rejects_invalid_stream_field_types(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: file\n"
+        "  path: data/vtest.avi\n"
+        "port: not-a-port\n",
+        encoding="utf-8",
     )
+
+    with pytest.raises(ConfigError, match="port must be an int"):
+        load_config(config_path)
+
+    config_path.write_text(
+        "source:\n"
+        "  type: file\n"
+        "  path: data/vtest.avi\n"
+        "mtu: not-an-mtu\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="mtu must be an int"):
+        load_config(config_path)
+
+
+def test_load_config_rejects_invalid_file_source_rate(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: file\n"
+        "  path: data/vtest.avi\n"
+        "  rate: not-an-int\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="rate must be an int"):
+        load_config(config_path)
+
+    config_path.write_text(
+        "source:\n"
+        "  type: file\n"
+        "  path: data/vtest.avi\n"
+        "  rate: 0\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="source.rate must be greater than 0"):
+        load_config(config_path)
+
+
+def test_validate_config_rejects_invalid_stream_values() -> None:
+    with pytest.raises(ConfigError, match="source.rate must be greater than 0"):
+        validate_config(
+            AppConfig(
+                source=FileSourceConfig(
+                    path=Path("data/vtest.avi"),
+                    rate=0,
+                )
+            )
+        )
+    with pytest.raises(ConfigError, match="unsupported codec: h265"):
+        validate_config(
+            AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")), codec="h265")
+        )
+    with pytest.raises(ConfigError, match="port must be between 1 and 65535"):
+        validate_config(
+            AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")), port=0)
+        )
+    with pytest.raises(ConfigError, match="mtu must be greater than 0"):
+        validate_config(
+            AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")), mtu=0)
+        )
+
+
+def test_build_pipeline_description_for_file_source() -> None:
+    pipeline = build_pipeline_description(
+        AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")))
+    )
+
+    assert pipeline.startswith(
+        "filesrc location=data/vtest.avi ! decodebin ! videorate ! "
+        "video/x-raw,framerate=10/1 ! videoconvert ! tee name=video_tee"
+    )
+    assert "x264enc tune=zerolatency speed-preset=ultrafast" in pipeline
+    assert "h264parse config-interval=1" in pipeline
+    assert "rtph264pay pt=96 mtu=1200" in pipeline
+    assert "udpsink host=127.0.0.1 port=5000 sync=false async=false" in pipeline
+    assert "autovideosink sync=false" in pipeline
 
 
 def test_build_pipeline_description_quotes_file_path_with_spaces() -> None:
-    assert (
-        build_pipeline_description(
-            AppConfig(source=FileSourceConfig(path=Path("data/video with spaces.avi")))
+    pipeline = build_pipeline_description(
+        AppConfig(
+            source=FileSourceConfig(
+                path=Path("data/video with spaces.avi"),
+                rate=24,
+            )
         )
-        == "filesrc location='data/video with spaces.avi' ! decodebin ! "
-        "videoconvert ! autovideosink"
+    )
+
+    assert pipeline.startswith(
+        "filesrc location='data/video with spaces.avi' ! decodebin ! "
+        "videorate ! video/x-raw,framerate=24/1"
     )
 
 
 def test_build_pipeline_description_for_camera_source() -> None:
-    assert (
-        build_pipeline_description(
-            AppConfig(source=CameraSourceConfig(device="/dev/video0"))
-        )
-        == "v4l2src device=/dev/video0 ! videoconvert ! autovideosink"
+    pipeline = build_pipeline_description(
+        AppConfig(source=CameraSourceConfig(device="/dev/video0"))
     )
+
+    assert pipeline.startswith("v4l2src device=/dev/video0 ! videoconvert")
+    assert "rtph264pay" in pipeline
+
+
+def test_build_pipeline_description_omits_debug_branch_when_disabled() -> None:
+    pipeline = build_pipeline_description(
+        AppConfig(
+            source=FileSourceConfig(path=Path("data/vtest.avi")),
+            video_local=False,
+            host="192.0.2.10",
+            port=6000,
+            mtu=900,
+        )
+    )
+
+    assert "autovideosink" not in pipeline
+    assert "udpsink host=192.0.2.10 port=6000 sync=false async=false" in pipeline
+    assert "rtph264pay pt=96 mtu=900" in pipeline
 
 
 def test_build_pipeline_description_rejects_simulation_source() -> None:
@@ -732,6 +901,10 @@ def test_console_show_command_prints_pipeline() -> None:
 
     assert result.returncode == 0
     assert "filesrc location=data/vtest.avi" in result.stdout
+    assert "x264enc tune=zerolatency speed-preset=ultrafast" in result.stdout
+    assert "rtph264pay pt=96 mtu=1200" in result.stdout
+    assert "udpsink host=127.0.0.1 port=5000 sync=false async=false" in result.stdout
+    assert "autovideosink sync=false" in result.stdout
     assert "bt_optical_flow" not in result.stdout
 
 
