@@ -33,11 +33,12 @@ sudo apt install \
 bt-gst --help
 bt-gst version
 bt-gst show -c config.example.yaml
+bt-gst run -c config.example.yaml
 ```
 
 The `show` command loads YAML config, merges CLI overrides, and prints the
-resolved starter GStreamer pipeline. The `run` command is intentionally a clean
-stub until the main GStreamer loop is added.
+resolved starter GStreamer pipeline. The `run` command starts the resolved
+pipeline and exits on EOS, error, or Ctrl+C.
 
 To inspect the bundled pass-through plugin manually:
 

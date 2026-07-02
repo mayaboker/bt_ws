@@ -7,5 +7,5 @@
 
 
 # milestone #2
-- [] add main gst loop that load the pipe and play it
-- [] create module the has responsibility to build the pipe
+- [x] add main gst loop that load the pipe and play it
+- [x] create module the has responsibility to build the pipe

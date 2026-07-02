@@ -3,8 +3,8 @@ import time
 
 import pytest
 
-from bt_gst.zmq_io import ZmqTrackerIoAdapter
-from bt_gst.zmq_models import (
+from bt_gst.bridge.zmq_io import ZmqTrackerIoAdapter
+from bt_gst.bridge.zmq_models import (
     TrackerDataMessage,
     TrackerDebugMessage,
     TrackResizeRequest,

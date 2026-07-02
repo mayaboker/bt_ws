@@ -4,7 +4,7 @@ from typing import Protocol
 
 from loguru import logger
 
-from bt_gst.zmq_models import (
+from bt_gst.bridge.zmq_models import (
     TrackRequest,
     TrackerDataMessage,
     TrackerDebugMessage,

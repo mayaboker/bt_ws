@@ -47,8 +47,8 @@ from bt_gst.optical_flow_tracker import (
     TRACK_REQUEST_TYPE_RESIZE_ROI,
     TRACK_REQUEST_TYPE_STOP,
 )
-from bt_gst.zmq_io import TrackerIoAdapter, ZmqTrackerIoAdapter
-from bt_gst.zmq_models import (
+from bt_gst.bridge.zmq_io import TrackerIoAdapter, ZmqTrackerIoAdapter
+from bt_gst.bridge.zmq_models import (
     TrackAdjustmentRequest,
     TrackResizeRequest,
     TrackStartRequest,

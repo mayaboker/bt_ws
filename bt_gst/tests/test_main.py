@@ -16,6 +16,12 @@ from bt_gst.config import (
     merge_config,
     validate_config,
 )
+from bt_gst import app as app_module
+from bt_gst.pipeline_builder import (
+    PipelineBuildError,
+    build_pipeline_description,
+    build_source_pipeline_description,
+)
 from bt_gst.tracker_app_backup import (
     GST_PLUGIN_PATH,
     SYNTHETIC_VIDEO_FPS,
@@ -70,7 +76,7 @@ from bt_gst.optical_flow_tracker import (
     compute_roi_offset,
     compute_tracker_score,
 )
-from bt_gst.zmq_models import (
+from bt_gst.bridge.zmq_models import (
     TrackAdjustmentRequest,
     TrackResizeRequest,
     TrackStartRequest,
@@ -203,6 +209,42 @@ def test_load_config_rejects_unsupported_source_type(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="unsupported source type: other"):
         load_config(config_path)
+
+
+def test_build_pipeline_description_for_file_source() -> None:
+    assert (
+        build_pipeline_description(
+            AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")))
+        )
+        == "filesrc location=data/vtest.avi ! decodebin ! videoconvert ! autovideosink"
+    )
+
+
+def test_build_pipeline_description_quotes_file_path_with_spaces() -> None:
+    assert (
+        build_pipeline_description(
+            AppConfig(source=FileSourceConfig(path=Path("data/video with spaces.avi")))
+        )
+        == "filesrc location='data/video with spaces.avi' ! decodebin ! "
+        "videoconvert ! autovideosink"
+    )
+
+
+def test_build_pipeline_description_for_camera_source() -> None:
+    assert (
+        build_pipeline_description(
+            AppConfig(source=CameraSourceConfig(device="/dev/video0"))
+        )
+        == "v4l2src device=/dev/video0 ! videoconvert ! autovideosink"
+    )
+
+
+def test_build_pipeline_description_rejects_simulation_source() -> None:
+    with pytest.raises(
+        PipelineBuildError,
+        match="simulation source pipeline is not implemented yet",
+    ):
+        build_source_pipeline_description(SimulationSourceConfig(topic="/camera"))
 
 
 def test_build_video_pipeline_description_uses_explicit_gtksink_pipeline() -> None:
@@ -693,16 +735,17 @@ def test_console_show_command_prints_pipeline() -> None:
     assert "bt_optical_flow" not in result.stdout
 
 
-def test_console_run_command_is_clean_stub() -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "bt_gst.app", "run", "-c", "config.example.yaml"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+def test_run_command_dispatches_to_pipeline_runner(monkeypatch) -> None:
+    calls = []
 
-    assert result.returncode == 1
-    assert "run is not implemented yet for file source" in result.stderr
+    def fake_run_pipeline(config: AppConfig) -> int:
+        calls.append(config)
+        return 7
+
+    monkeypatch.setattr(app_module, "run_pipeline", fake_run_pipeline)
+
+    assert app_module.main(["run", "-c", "config.example.yaml"]) == 7
+    assert calls == [AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")))]
 
 
 def test_console_play_command_fails() -> None:
