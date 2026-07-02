@@ -12,10 +12,13 @@ class ConfigError(ValueError):
     """Raised when an app config cannot be loaded or validated."""
 
 
+DEFAULT_FILE_RATE = 20
+
+
 @dataclass(frozen=True)
 class FileSourceConfig:
     path: Path
-    rate: int = 20
+    rate: int = DEFAULT_FILE_RATE
     type: str = "file"
 
     @property
@@ -37,6 +40,31 @@ class SimulationSourceConfig:
 
 SourceConfig: TypeAlias = FileSourceConfig | CameraSourceConfig | SimulationSourceConfig
 
+
+@dataclass(frozen=True)
+class FileSourceConfigOverrides:
+    path: Path | None = None
+    rate: int | None = None
+    type: str = "file"
+
+
+@dataclass(frozen=True)
+class CameraSourceConfigOverrides:
+    device: str | None = None
+    type: str = "camera"
+
+
+@dataclass(frozen=True)
+class SimulationSourceConfigOverrides:
+    topic: str | None = None
+    type: str = "simulation"
+
+
+SourceConfigOverride: TypeAlias = (
+    FileSourceConfigOverrides | CameraSourceConfigOverrides | SimulationSourceConfigOverrides
+)
+SourceOverride: TypeAlias = SourceConfig | SourceConfigOverride
+
 DEFAULT_VIDEO_LOCAL = True
 DEFAULT_CODEC = "h264"
 DEFAULT_HOST = "127.0.0.1"
@@ -55,7 +83,21 @@ class AppConfig:
     mtu: int = DEFAULT_MTU
 
 
+@dataclass(frozen=True)
+class AppConfigOverrides:
+    source: SourceOverride | None = None
+    video_local: bool | None = None
+    codec: str | None = None
+    host: str | None = None
+    port: int | None = None
+    mtu: int | None = None
+
+
 def load_config(path: Path) -> AppConfig:
+    return resolve_config(AppConfig(), load_config_overrides(path))
+
+
+def load_config_overrides(path: Path) -> AppConfigOverrides:
     config_logger.trace("loading config path={}", path)
     try:
         raw_config = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -68,15 +110,19 @@ def load_config(path: Path) -> AppConfig:
 
     if raw_config is None:
         config_logger.trace("config is empty path={}", path)
-        return AppConfig()
+        return AppConfigOverrides()
     if not isinstance(raw_config, dict):
         config_logger.debug("config root is not mapping type={}", type(raw_config).__name__)
         raise ConfigError("config root must be a mapping")
 
-    return app_config_from_mapping(raw_config)
+    return app_config_overrides_from_mapping(raw_config)
 
 
 def app_config_from_mapping(raw_config: dict[str, Any]) -> AppConfig:
+    return resolve_config(AppConfig(), app_config_overrides_from_mapping(raw_config))
+
+
+def app_config_overrides_from_mapping(raw_config: dict[str, Any]) -> AppConfigOverrides:
     config_logger.trace("mapping app config keys={}", sorted(raw_config.keys()))
     raw_source = raw_config.get("source")
     source = None
@@ -88,13 +134,13 @@ def app_config_from_mapping(raw_config: dict[str, Any]) -> AppConfig:
     else:
         source = source_config_from_mapping(raw_source)
 
-    return AppConfig(
+    return AppConfigOverrides(
         source=source,
-        video_local=_optional_bool(raw_config, "video_local", DEFAULT_VIDEO_LOCAL),
-        codec=_optional_string(raw_config, "codec", DEFAULT_CODEC),
-        host=_optional_string(raw_config, "host", DEFAULT_HOST),
-        port=_optional_int(raw_config, "port", DEFAULT_PORT),
-        mtu=_optional_int(raw_config, "mtu", DEFAULT_MTU),
+        video_local=_optional_bool(raw_config, "video_local"),
+        codec=_optional_string(raw_config, "codec"),
+        host=_optional_string(raw_config, "host"),
+        port=_optional_int(raw_config, "port"),
+        mtu=_optional_int(raw_config, "mtu"),
     )
 
 
@@ -126,18 +172,73 @@ def source_config_from_mapping(raw_source: dict[str, Any]) -> SourceConfig:
     raise ConfigError(f"unsupported source type: {source_type}")
 
 
-def merge_config(base: AppConfig | None, overrides: AppConfig) -> AppConfig:
+def resolve_config(
+    defaults: AppConfig | None = None,
+    *overrides: AppConfigOverrides,
+) -> AppConfig:
+    config = defaults if defaults is not None else AppConfig()
+    config_logger.trace("resolving config defaults={!r} overrides={!r}", config, overrides)
+    for override in overrides:
+        config = AppConfig(
+            source=_resolve_source_config(config.source, override.source),
+            video_local=(
+                override.video_local
+                if override.video_local is not None
+                else config.video_local
+            ),
+            codec=override.codec if override.codec is not None else config.codec,
+            host=override.host if override.host is not None else config.host,
+            port=override.port if override.port is not None else config.port,
+            mtu=override.mtu if override.mtu is not None else config.mtu,
+        )
+    return config
+
+
+def merge_config(
+    base: AppConfig | None,
+    overrides: AppConfigOverrides | AppConfig,
+) -> AppConfig:
     config_logger.trace("merging config base={!r} overrides={!r}", base, overrides)
-    if base is None:
-        return overrides
-    return AppConfig(
-        source=overrides.source if overrides.source is not None else base.source,
-        video_local=base.video_local,
-        codec=base.codec,
-        host=base.host,
-        port=base.port,
-        mtu=base.mtu,
-    )
+    if isinstance(overrides, AppConfig):
+        overrides = AppConfigOverrides(source=overrides.source)
+    return resolve_config(base or AppConfig(), overrides)
+
+
+def _resolve_source_config(
+    current: SourceConfig | None,
+    override: SourceOverride | None,
+) -> SourceConfig | None:
+    if override is None:
+        return current
+    if isinstance(override, SourceConfig):
+        return override
+    if isinstance(override, FileSourceConfigOverrides):
+        path = override.path
+        rate = override.rate
+        if isinstance(current, FileSourceConfig):
+            path = path if path is not None else current.path
+            rate = rate if rate is not None else current.rate
+        if path is None:
+            return current
+        return FileSourceConfig(
+            path=path,
+            rate=rate if rate is not None else DEFAULT_FILE_RATE,
+        )
+    if isinstance(override, CameraSourceConfigOverrides):
+        device = override.device
+        if isinstance(current, CameraSourceConfig):
+            device = device if device is not None else current.device
+        if device is None:
+            return current
+        return CameraSourceConfig(device=device)
+    if isinstance(override, SimulationSourceConfigOverrides):
+        topic = override.topic
+        if isinstance(current, SimulationSourceConfig):
+            topic = topic if topic is not None else current.topic
+        if topic is None:
+            return current
+        return SimulationSourceConfig(topic=topic)
+    return override
 
 
 def validate_config(config: AppConfig) -> AppConfig:
@@ -177,22 +278,28 @@ def _required_path(raw_source: dict[str, Any], field: str, source_type: str) -> 
     return Path(_required_string(raw_source, field, source_type))
 
 
-def _optional_bool(raw_config: dict[str, Any], field: str, default: bool) -> bool:
-    value = raw_config.get(field, default)
+def _optional_bool(raw_config: dict[str, Any], field: str) -> bool | None:
+    if field not in raw_config:
+        return None
+    value = raw_config[field]
     if not isinstance(value, bool):
         raise ConfigError(f"{field} must be a bool")
     return value
 
 
-def _optional_string(raw_config: dict[str, Any], field: str, default: str) -> str:
-    value = raw_config.get(field, default)
+def _optional_string(raw_config: dict[str, Any], field: str) -> str | None:
+    if field not in raw_config:
+        return None
+    value = raw_config[field]
     if not isinstance(value, str) or not value:
         raise ConfigError(f"{field} must be a non-empty string")
     return value
 
 
-def _optional_int(raw_config: dict[str, Any], field: str, default: int) -> int:
-    value = raw_config.get(field, default)
+def _optional_int(raw_config: dict[str, Any], field: str) -> int | None:
+    if field not in raw_config:
+        return None
+    value = raw_config[field]
     if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigError(f"{field} must be an int")
     return value
@@ -200,7 +307,13 @@ def _optional_int(raw_config: dict[str, Any], field: str, default: int) -> int:
 
 def _optional_file_rate(raw_source: dict[str, Any]) -> int:
     if "rate" in raw_source:
-        return _optional_int(raw_source, "rate", 10)
+        rate = _optional_int(raw_source, "rate")
+        if rate is None:
+            raise ConfigError("source.rate must be an int")
+        return rate
     if "framerate" in raw_source:
-        return _optional_int(raw_source, "framerate", 10)
-    return 10
+        rate = _optional_int(raw_source, "framerate")
+        if rate is None:
+            raise ConfigError("source.framerate must be an int")
+        return rate
+    return DEFAULT_FILE_RATE

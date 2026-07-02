@@ -8,9 +8,10 @@ from bt_gst import __version__
 from bt_gst.cli import RunCommand, ShowCommand, VersionCommand, parse_args
 from bt_gst.config import (
     AppConfig,
+    AppConfigOverrides,
     ConfigError,
-    load_config,
-    merge_config,
+    load_config_overrides,
+    resolve_config,
     validate_config,
 )
 from bt_gst.pipeline_builder import PipelineBuildError, build_pipeline_description
@@ -45,15 +46,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def resolve_command_config(
     config_path: Path | None,
-    overrides: AppConfig,
+    overrides: AppConfigOverrides,
 ) -> AppConfig:
     app_logger.trace(
         "resolving command config config_path={} overrides={!r}",
         config_path,
         overrides,
     )
-    base = load_config(config_path) if config_path is not None else None
-    return validate_config(merge_config(base, overrides))
+    yaml_overrides = (
+        load_config_overrides(config_path)
+        if config_path is not None
+        else AppConfigOverrides()
+    )
+    return validate_config(resolve_config(AppConfig(), yaml_overrides, overrides))
 
 
 def run_config(config: AppConfig) -> int:

@@ -7,10 +7,10 @@ import click
 from loguru import logger
 
 from bt_gst.config import (
-    AppConfig,
-    CameraSourceConfig,
-    FileSourceConfig,
-    SimulationSourceConfig,
+    AppConfigOverrides,
+    CameraSourceConfigOverrides,
+    FileSourceConfigOverrides,
+    SimulationSourceConfigOverrides,
 )
 
 DEFAULT_VIDEO = Path(__file__).resolve().parents[1] / "data" / "vtest.avi"
@@ -26,13 +26,13 @@ class VersionCommand:
 @dataclass(frozen=True)
 class ShowCommand:
     config_path: Path | None
-    overrides: AppConfig
+    overrides: AppConfigOverrides
 
 
 @dataclass(frozen=True)
 class RunCommand:
     config_path: Path | None
-    overrides: AppConfig
+    overrides: AppConfigOverrides
 
 
 Command: TypeAlias = VersionCommand | ShowCommand | RunCommand | int
@@ -100,7 +100,7 @@ def _build_cli_overrides(
     topic: str | None,
     device: str | None,
     file_path: Path | None,
-) -> AppConfig:
+) -> AppConfigOverrides:
     cli_logger.trace(
         "building CLI overrides source={} topic={} device={} file_path={}",
         source,
@@ -114,28 +114,28 @@ def _build_cli_overrides(
             raise click.ClickException(
                 "-s/--source is required when source options are provided"
             )
-        return AppConfig()
+        return AppConfigOverrides()
 
     if source == "simulation":
         if topic is None:
             cli_logger.debug("simulation source missing topic")
             raise click.ClickException("--topic is required for simulation source")
         _reject_unused_source_options(source, device=device, file_path=file_path)
-        return AppConfig(source=SimulationSourceConfig(topic=topic))
+        return AppConfigOverrides(source=SimulationSourceConfigOverrides(topic=topic))
 
     if source == "camera":
         if device is None:
             cli_logger.debug("camera source missing device")
             raise click.ClickException("--device is required for camera source")
         _reject_unused_source_options(source, topic=topic, file_path=file_path)
-        return AppConfig(source=CameraSourceConfig(device=device))
+        return AppConfigOverrides(source=CameraSourceConfigOverrides(device=device))
 
     if source == "file":
         if file_path is None:
             cli_logger.debug("file source missing path")
             raise click.ClickException("--path is required for file source")
         _reject_unused_source_options(source, topic=topic, device=device)
-        return AppConfig(source=FileSourceConfig(path=file_path))
+        return AppConfigOverrides(source=FileSourceConfigOverrides(path=file_path))
 
     raise click.ClickException(f"unsupported source type: {source}")
 

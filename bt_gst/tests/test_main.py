@@ -8,12 +8,18 @@ import pytest
 from bt_gst.cli import RunCommand, ShowCommand, VersionCommand, parse_args
 from bt_gst.config import (
     AppConfig,
+    AppConfigOverrides,
     CameraSourceConfig,
+    CameraSourceConfigOverrides,
     ConfigError,
     FileSourceConfig,
+    FileSourceConfigOverrides,
     SimulationSourceConfig,
+    SimulationSourceConfigOverrides,
     load_config,
+    load_config_overrides,
     merge_config,
+    resolve_config,
     validate_config,
 )
 from bt_gst import app as app_module
@@ -96,7 +102,7 @@ def test_parse_show_command_accepts_config_path() -> None:
 
     assert parse_args(["show", "-c", str(config_path)]) == ShowCommand(
         config_path=config_path,
-        overrides=AppConfig(),
+        overrides=AppConfigOverrides(),
     )
 
 
@@ -105,7 +111,7 @@ def test_parse_show_command_accepts_cli_file_override() -> None:
 
     assert parse_args(["show", "-s", "file", "--path", str(video)]) == ShowCommand(
         config_path=None,
-        overrides=AppConfig(source=FileSourceConfig(path=video)),
+        overrides=AppConfigOverrides(source=FileSourceConfigOverrides(path=video)),
     )
 
 
@@ -114,7 +120,7 @@ def test_parse_run_command_accepts_file_source() -> None:
 
     assert parse_args(["run", "-s", "file", "--path", str(video)]) == RunCommand(
         config_path=None,
-        overrides=AppConfig(source=FileSourceConfig(path=video)),
+        overrides=AppConfigOverrides(source=FileSourceConfigOverrides(path=video)),
     )
 
 
@@ -123,21 +129,21 @@ def test_parse_run_command_accepts_config_path() -> None:
 
     assert parse_args(["run", "-c", str(config_path)]) == RunCommand(
         config_path=config_path,
-        overrides=AppConfig(),
+        overrides=AppConfigOverrides(),
     )
 
 
 def test_parse_run_command_accepts_camera_source() -> None:
     assert parse_args(["run", "-s", "camera", "--device", "/dev/video0"]) == RunCommand(
         config_path=None,
-        overrides=AppConfig(source=CameraSourceConfig(device="/dev/video0")),
+        overrides=AppConfigOverrides(source=CameraSourceConfigOverrides(device="/dev/video0")),
     )
 
 
 def test_parse_run_command_accepts_simulation_source() -> None:
     assert parse_args(["run", "-s", "simulation", "--topic", "/camera"]) == RunCommand(
         config_path=None,
-        overrides=AppConfig(source=SimulationSourceConfig(topic="/camera")),
+        overrides=AppConfigOverrides(source=SimulationSourceConfigOverrides(topic="/camera")),
     )
 
 
@@ -155,7 +161,7 @@ def test_load_config_reads_file_source_yaml(tmp_path: Path) -> None:
     )
 
     assert load_config(config_path) == AppConfig(
-        source=FileSourceConfig(path=Path("data/vtest.avi"), rate=10)
+        source=FileSourceConfig(path=Path("data/vtest.avi"))
     )
 
 
@@ -204,7 +210,7 @@ def test_load_config_reads_stream_settings_yaml(tmp_path: Path) -> None:
     )
 
     assert load_config(config_path) == AppConfig(
-        source=FileSourceConfig(path=Path("data/vtest.avi"), rate=10),
+        source=FileSourceConfig(path=Path("data/vtest.avi")),
         video_local=False,
         codec="h264",
         host="192.0.2.10",
@@ -250,13 +256,74 @@ def test_merge_config_uses_cli_overrides() -> None:
             port=6000,
             mtu=900,
         ),
-        AppConfig(source=FileSourceConfig(path=Path("cli.avi"))),
+        AppConfigOverrides(source=FileSourceConfig(path=Path("cli.avi"))),
     ) == AppConfig(
         source=FileSourceConfig(path=Path("cli.avi")),
         video_local=False,
         host="192.0.2.10",
         port=6000,
         mtu=900,
+    )
+
+
+def test_resolve_config_applies_yaml_overrides_after_defaults() -> None:
+    assert resolve_config(
+        AppConfig(source=FileSourceConfig(path=Path("default.avi"))),
+        AppConfigOverrides(
+            source=FileSourceConfig(path=Path("yaml.avi"), rate=7),
+            video_local=False,
+            host="192.0.2.20",
+            port=7000,
+            mtu=800,
+        ),
+    ) == AppConfig(
+        source=FileSourceConfig(path=Path("yaml.avi"), rate=7),
+        video_local=False,
+        host="192.0.2.20",
+        port=7000,
+        mtu=800,
+    )
+
+
+def test_cli_source_override_preserves_yaml_stream_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: file\n"
+        "  path: config.avi\n"
+        "  rate: 12\n"
+        "video_local: false\n"
+        "host: 192.0.2.10\n"
+        "port: 6000\n"
+        "mtu: 900\n",
+        encoding="utf-8",
+    )
+
+    assert app_module.resolve_command_config(
+        config_path,
+        AppConfigOverrides(source=FileSourceConfigOverrides(path=Path("cli.avi"))),
+    ) == AppConfig(
+        source=FileSourceConfig(path=Path("cli.avi"), rate=12),
+        video_local=False,
+        host="192.0.2.10",
+        port=6000,
+        mtu=900,
+    )
+
+
+def test_load_config_overrides_keeps_only_explicit_yaml_values(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: file\n"
+        "  path: data/vtest.avi\n"
+        "host: 192.0.2.10\n",
+        encoding="utf-8",
+    )
+
+    assert load_config_overrides(config_path) == AppConfigOverrides(
+        source=FileSourceConfig(path=Path("data/vtest.avi")),
+        host="192.0.2.10",
     )
 
 
@@ -358,13 +425,13 @@ def test_build_pipeline_description_for_file_source() -> None:
 
     assert pipeline.startswith(
         "filesrc location=data/vtest.avi ! decodebin ! videorate ! "
-        "video/x-raw,framerate=10/1 ! videoconvert ! tee name=video_tee"
+        "video/x-raw,framerate=20/1 ! videoconvert ! tee name=video_tee"
     )
     assert "x264enc tune=zerolatency speed-preset=ultrafast" in pipeline
     assert "h264parse config-interval=1" in pipeline
     assert "rtph264pay pt=96 mtu=1200" in pipeline
     assert "udpsink host=127.0.0.1 port=5000 sync=false async=false" in pipeline
-    assert "autovideosink sync=false" in pipeline
+    assert "fpsdisplaysink sync=true" in pipeline
 
 
 def test_build_pipeline_description_quotes_file_path_with_spaces() -> None:
@@ -904,7 +971,7 @@ def test_console_show_command_prints_pipeline() -> None:
     assert "x264enc tune=zerolatency speed-preset=ultrafast" in result.stdout
     assert "rtph264pay pt=96 mtu=1200" in result.stdout
     assert "udpsink host=127.0.0.1 port=5000 sync=false async=false" in result.stdout
-    assert "autovideosink sync=false" in result.stdout
+    assert "fpsdisplaysink sync=true" in result.stdout
     assert "bt_optical_flow" not in result.stdout
 
 
@@ -918,7 +985,9 @@ def test_run_command_dispatches_to_pipeline_runner(monkeypatch) -> None:
     monkeypatch.setattr(app_module, "run_pipeline", fake_run_pipeline)
 
     assert app_module.main(["run", "-c", "config.example.yaml"]) == 7
-    assert calls == [AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")))]
+    assert calls == [
+        AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi"), rate=10))
+    ]
 
 
 def test_console_play_command_fails() -> None:
