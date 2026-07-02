@@ -68,6 +68,7 @@ dependencies = [
     { name = "opencv-python-headless" },
     { name = "pycairo" },
     { name = "pygobject" },
+    { name = "pyyaml" },
     { name = "pyzmq" },
     { name = "uvicorn" },
 ]
@@ -90,6 +91,7 @@ requires-dist = [
     { name = "pycairo", specifier = ">=1.25" },
     { name = "pygobject", specifier = ">=3.48" },
     { name = "pytest", marker = "extra == 'dev'" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "pyzmq" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "uvicorn" },

@@ -388,6 +388,7 @@ class BtOpticalFlow(GstBase.BaseTransform):
         self._previous_gray: object | None = None
         self._feature_points: object | None = None
         self._needs_feature_init = False
+        self._preserve_roi_on_feature_failure = False
         self._frame_number = 0
 
     # region do methods
@@ -467,6 +468,7 @@ class BtOpticalFlow(GstBase.BaseTransform):
             return True
 
         self._pending_point = (int(x), int(y))
+        self._preserve_roi_on_feature_failure = False
         logger.info("track request received on frame ID: {}", self._frame_number)
         self._activate_pending_roi()
         return True
@@ -490,6 +492,7 @@ class BtOpticalFlow(GstBase.BaseTransform):
             frame_width=self._frame_width,
             frame_height=self._frame_height,
         )
+        self._preserve_roi_on_feature_failure = True
         self._mark_reacquire_needed()
         logger.info(
             "track resize request received width={} height={} roi_x={} roi_y={} "
@@ -520,6 +523,7 @@ class BtOpticalFlow(GstBase.BaseTransform):
             frame_width=self._frame_width,
             frame_height=self._frame_height,
         )
+        self._preserve_roi_on_feature_failure = True
         self._mark_reacquire_needed()
         logger.info(
             "track adjust request received delta_x={} delta_y={} roi_x={} roi_y={} "
@@ -623,7 +627,11 @@ class BtOpticalFlow(GstBase.BaseTransform):
         self._needs_feature_init = False
         min_features = int(self._property_values[PROP_MIN_FEATURES])
         if features is None or len(features) < min_features:
-            self._reset_tracking(clear_roi=True, previous_gray=gray)
+            self._reset_tracking(
+                clear_roi=not self._preserve_roi_on_feature_failure,
+                previous_gray=gray,
+            )
+            self._preserve_roi_on_feature_failure = False
             logger.info(
                 "feature init failed feature_count={} min_features={}",
                 0 if features is None else len(features),
@@ -631,6 +639,7 @@ class BtOpticalFlow(GstBase.BaseTransform):
             )
             return 0, 0, 0.0, STATUS_BREAK
 
+        self._preserve_roi_on_feature_failure = False
         features = features.astype(np.float32)
         features[:, 0, 0] += float(roi.x)
         features[:, 0, 1] += float(roi.y)
@@ -756,6 +765,7 @@ class BtOpticalFlow(GstBase.BaseTransform):
         self._previous_gray = previous_gray
         self._feature_points = None
         self._needs_feature_init = False
+        self._preserve_roi_on_feature_failure = False
 
     def _mark_reacquire_needed(self) -> None:
         self._previous_gray = None

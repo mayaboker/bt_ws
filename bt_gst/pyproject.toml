@@ -16,6 +16,7 @@ dependencies = [
     "opencv-python-headless>=4.6",
     "pycairo>=1.25",
     "PyGObject>=3.48",
+    "PyYAML>=6.0",
     "uvicorn",
     "pyzmq",
     "bt-joy",
@@ -28,7 +29,7 @@ dev = [
 ]
 
 [project.scripts]
-bt-gst = "bt_gst.main:main"
+bt-gst = "bt_gst.app:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

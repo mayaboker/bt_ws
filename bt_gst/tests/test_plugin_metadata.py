@@ -303,7 +303,7 @@ def test_plugin_draws_adjusted_roi() -> None:
 def test_plugin_clears_roi_and_keeps_break_status() -> None:
     import gi
 
-    from bt_gst.main import read_tracker_meta
+    from bt_gst.tracker_app_backup import read_tracker_meta
 
     gi.require_version("Gst", "1.0")
     from gi.repository import Gst
@@ -345,7 +345,7 @@ def test_plugin_point_request_initializes_features_and_tracks() -> None:
     pytest.importorskip("cv2")
     import gi
 
-    from bt_gst.main import read_tracker_meta
+    from bt_gst.tracker_app_backup import read_tracker_meta
 
     gi.require_version("Gst", "1.0")
     from gi.repository import Gst
@@ -382,7 +382,7 @@ def test_plugin_too_few_features_emits_break() -> None:
     pytest.importorskip("cv2")
     import gi
 
-    from bt_gst.main import read_tracker_meta
+    from bt_gst.tracker_app_backup import read_tracker_meta
 
     gi.require_version("Gst", "1.0")
     from gi.repository import Gst
@@ -418,7 +418,7 @@ def test_plugin_shifted_frame_moves_roi_and_updates_offset() -> None:
     pytest.importorskip("cv2")
     import gi
 
-    from bt_gst.main import read_tracker_meta
+    from bt_gst.tracker_app_backup import read_tracker_meta
 
     gi.require_version("Gst", "1.0")
     from gi.repository import Gst
@@ -840,7 +840,7 @@ def test_plugin_resize_and_adjust_mark_feature_reacquisition() -> None:
 def test_disabled_plugin_does_not_draw_roi() -> None:
     import gi
 
-    from bt_gst.main import read_tracker_meta
+    from bt_gst.tracker_app_backup import read_tracker_meta
 
     gi.require_version("Gst", "1.0")
     from gi.repository import Gst
@@ -865,7 +865,7 @@ def test_disabled_plugin_does_not_draw_roi() -> None:
 def test_plugin_stop_request_prevents_roi_drawing() -> None:
     import gi
 
-    from bt_gst.main import read_tracker_meta
+    from bt_gst.tracker_app_backup import read_tracker_meta
 
     gi.require_version("Gst", "1.0")
     from gi.repository import Gst

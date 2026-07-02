@@ -5,7 +5,7 @@ The application sends user tracking commands to `bt_optical_flow` as custom
 downstream GStreamer events. The event payload is a `Gst.Structure` named
 `bt-track-request`.
 
-The app side creates the request structure in `bt_gst/main.py`, wraps it in a
+The app side creates the request structure in `bt_gst/app.py`, wraps it in a
 `Gst.EventType.CUSTOM_DOWNSTREAM` event, and sends it directly to the tracker
 element's `sink` pad. The plugin receives the event in `do_sink_event(...)` and
 dispatches it to `_handle_track_request(...)`.
@@ -15,7 +15,7 @@ dispatches it to `_handle_track_request(...)`.
 sequenceDiagram
     participant User
     participant Gtk as GTK video widget/window
-    participant App as bt_gst.main
+    participant App as bt_gst.app
     participant Gst as GStreamer event system
     participant Pad as tracker sink pad
     participant Plugin as bt_optical_flow

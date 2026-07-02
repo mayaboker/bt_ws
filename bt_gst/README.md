@@ -32,13 +32,12 @@ sudo apt install \
 ```bash
 bt-gst --help
 bt-gst version
-bt-gst play
-bt-gst play data/vtest.avi
+bt-gst show -c config.example.yaml
 ```
 
-The default `bt-gst play` command opens `data/vtest.avi` with a GTK window using
-GStreamer's `gtksink`. The command sets `GST_PLUGIN_PATH` automatically so
-GStreamer can find the Python plugins in `plugins/python`.
+The `show` command loads YAML config, merges CLI overrides, and prints the
+resolved starter GStreamer pipeline. The `run` command is intentionally a clean
+stub until the main GStreamer loop is added.
 
 To inspect the bundled pass-through plugin manually:
 

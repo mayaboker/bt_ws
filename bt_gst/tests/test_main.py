@@ -3,8 +3,20 @@ import subprocess
 import sys
 from pathlib import Path
 
-from bt_gst.cli import DEFAULT_VIDEO, PlayCommand, VersionCommand, parse_args
-from bt_gst.main import (
+import pytest
+
+from bt_gst.cli import RunCommand, ShowCommand, VersionCommand, parse_args
+from bt_gst.config import (
+    AppConfig,
+    CameraSourceConfig,
+    ConfigError,
+    FileSourceConfig,
+    SimulationSourceConfig,
+    load_config,
+    merge_config,
+    validate_config,
+)
+from bt_gst.tracker_app_backup import (
     GST_PLUGIN_PATH,
     SYNTHETIC_VIDEO_FPS,
     SYNTHETIC_VIDEO_HEIGHT,
@@ -73,14 +85,124 @@ def test_parse_version_command() -> None:
     assert parse_args(["version"]) == VersionCommand()
 
 
-def test_parse_play_command_defaults_to_data_video() -> None:
-    assert parse_args(["play"]) == PlayCommand(video=DEFAULT_VIDEO)
+def test_parse_show_command_accepts_config_path() -> None:
+    config_path = Path("config.example.yaml")
+
+    assert parse_args(["show", "-c", str(config_path)]) == ShowCommand(
+        config_path=config_path,
+        overrides=AppConfig(),
+    )
 
 
-def test_parse_play_command_accepts_video_path() -> None:
+def test_parse_show_command_accepts_cli_file_override() -> None:
     video = Path("data/vtest.avi")
 
-    assert parse_args(["play", str(video)]) == PlayCommand(video=video)
+    assert parse_args(["show", "-s", "file", "--path", str(video)]) == ShowCommand(
+        config_path=None,
+        overrides=AppConfig(source=FileSourceConfig(path=video)),
+    )
+
+
+def test_parse_run_command_accepts_file_source() -> None:
+    video = Path("data/vtest.avi")
+
+    assert parse_args(["run", "-s", "file", "--path", str(video)]) == RunCommand(
+        config_path=None,
+        overrides=AppConfig(source=FileSourceConfig(path=video)),
+    )
+
+
+def test_parse_run_command_accepts_config_path() -> None:
+    config_path = Path("config.example.yaml")
+
+    assert parse_args(["run", "-c", str(config_path)]) == RunCommand(
+        config_path=config_path,
+        overrides=AppConfig(),
+    )
+
+
+def test_parse_run_command_accepts_camera_source() -> None:
+    assert parse_args(["run", "-s", "camera", "--device", "/dev/video0"]) == RunCommand(
+        config_path=None,
+        overrides=AppConfig(source=CameraSourceConfig(device="/dev/video0")),
+    )
+
+
+def test_parse_run_command_accepts_simulation_source() -> None:
+    assert parse_args(["run", "-s", "simulation", "--topic", "/camera"]) == RunCommand(
+        config_path=None,
+        overrides=AppConfig(source=SimulationSourceConfig(topic="/camera")),
+    )
+
+
+def test_parse_play_command_is_removed() -> None:
+    assert parse_args(["play"]) != 0
+
+
+def test_load_config_reads_file_source_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: file\n"
+        "  path: data/vtest.avi\n",
+        encoding="utf-8",
+    )
+
+    assert load_config(config_path) == AppConfig(
+        source=FileSourceConfig(path=Path("data/vtest.avi"))
+    )
+
+
+def test_load_config_reads_camera_source_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: camera\n"
+        "  device: /dev/video0\n",
+        encoding="utf-8",
+    )
+
+    assert load_config(config_path) == AppConfig(
+        source=CameraSourceConfig(device="/dev/video0")
+    )
+
+
+def test_load_config_reads_simulation_source_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: simulation\n"
+        "  topic: /camera\n",
+        encoding="utf-8",
+    )
+
+    assert load_config(config_path) == AppConfig(
+        source=SimulationSourceConfig(topic="/camera")
+    )
+
+
+def test_merge_config_uses_cli_overrides() -> None:
+    assert merge_config(
+        AppConfig(source=FileSourceConfig(path=Path("config.avi"))),
+        AppConfig(source=FileSourceConfig(path=Path("cli.avi"))),
+    ) == AppConfig(source=FileSourceConfig(path=Path("cli.avi")))
+
+
+def test_validate_config_requires_source() -> None:
+    with pytest.raises(ConfigError, match="source config is required"):
+        validate_config(AppConfig())
+
+
+def test_load_config_rejects_unsupported_source_type(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: other\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="unsupported source type: other"):
+        load_config(config_path)
 
 
 def test_build_video_pipeline_description_uses_explicit_gtksink_pipeline() -> None:
@@ -93,7 +215,8 @@ def test_build_video_pipeline_description_uses_explicit_gtksink_pipeline() -> No
     assert "decodebin" not in pipeline
     assert "videoconvert" in pipeline
     assert (
-        "video/x-raw,format=RGBA,width=640,height=480,framerate=10/1"
+        "video/x-raw,format=RGBA,width=640,height=480,"
+        f"framerate={SYNTHETIC_VIDEO_FPS}/1"
         in pipeline
     )
     assert "bt_optical_flow name=tracker" in pipeline
@@ -379,22 +502,22 @@ def test_dispatch_track_request_calls_existing_sender(monkeypatch) -> None:
     tracker = object()
 
     monkeypatch.setattr(
-        "bt_gst.main.send_user_point_request",
+        "bt_gst.tracker_app_backup.send_user_point_request",
         lambda tracker_arg, x, y: calls.append(("start", tracker_arg, x, y)) or True,
     )
     monkeypatch.setattr(
-        "bt_gst.main.send_user_stop_request",
+        "bt_gst.tracker_app_backup.send_user_stop_request",
         lambda tracker_arg: calls.append(("stop", tracker_arg)) or True,
     )
     monkeypatch.setattr(
-        "bt_gst.main.send_user_resize_roi_request",
+        "bt_gst.tracker_app_backup.send_user_resize_roi_request",
         lambda tracker_arg, width, height: calls.append(
             ("resize", tracker_arg, width, height)
         )
         or True,
     )
     monkeypatch.setattr(
-        "bt_gst.main.send_user_adjust_roi_request",
+        "bt_gst.tracker_app_backup.send_user_adjust_roi_request",
         lambda tracker_arg, delta_x, delta_y: calls.append(
             ("adjustment", tracker_arg, delta_x, delta_y)
         )
@@ -535,7 +658,7 @@ def test_configure_gst_plugin_path_preserves_existing_entries(monkeypatch) -> No
 
 def test_console_version_command() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "bt_gst.main", "version"],
+        [sys.executable, "-m", "bt_gst.app", "version"],
         check=False,
         capture_output=True,
         text=True,
@@ -547,7 +670,7 @@ def test_console_version_command() -> None:
 
 def test_console_help_command() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "bt_gst.main", "--help"],
+        [sys.executable, "-m", "bt_gst.app", "--help"],
         check=False,
         capture_output=True,
         text=True,
@@ -555,3 +678,46 @@ def test_console_help_command() -> None:
 
     assert result.returncode == 0
     assert "BT GStreamer command line utilities." in result.stdout
+
+
+def test_console_show_command_prints_pipeline() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "bt_gst.app", "show", "-c", "config.example.yaml"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "filesrc location=data/vtest.avi" in result.stdout
+    assert "bt_optical_flow" not in result.stdout
+
+
+def test_console_run_command_is_clean_stub() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "bt_gst.app", "run", "-c", "config.example.yaml"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "run is not implemented yet for file source" in result.stderr
+
+
+def test_console_play_command_fails() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "bt_gst.app", "play"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "No such command 'play'" in result.stderr
+
+
+def test_project_script_uses_app_entrypoint() -> None:
+    assert 'bt-gst = "bt_gst.app:main"' in Path("pyproject.toml").read_text(
+        encoding="utf-8"
+    )

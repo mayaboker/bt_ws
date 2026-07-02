@@ -10,7 +10,18 @@ from typing import Sequence
 from loguru import logger
 
 from bt_gst import __version__
-from bt_gst.cli import PlayCommand, VersionCommand, parse_args
+from bt_gst.cli import RunCommand, ShowCommand, VersionCommand, parse_args
+from bt_gst.config import (
+    AppConfig,
+    CameraSourceConfig,
+    ConfigError,
+    FileSourceConfig,
+    SimulationSourceConfig,
+    SourceConfig,
+    load_config,
+    merge_config,
+    validate_config,
+)
 from bt_gst.optical_flow_tracker import (
     DEFAULT_REQUEST_SEARCH_SIZE,
     DEFAULT_ROI_ADJUST_STEP_PX,
@@ -53,7 +64,7 @@ GST_PLUGIN_PATH = Path(__file__).resolve().parents[1] / "plugins"
 TRACKER_META_NAME = META_NAME
 SYNTHETIC_VIDEO_WIDTH = 640
 SYNTHETIC_VIDEO_HEIGHT = 480
-SYNTHETIC_VIDEO_FPS = 20
+SYNTHETIC_VIDEO_FPS = 10
 # endregion constants
 
 @dataclass
@@ -212,10 +223,49 @@ def main(argv: Sequence[str] | None = None) -> int:
     if isinstance(command, VersionCommand):
         print(__version__)
         return 0
-    if isinstance(command, PlayCommand):
-        play_video(command.video)
+    if isinstance(command, ShowCommand):
+        config = resolve_command_config(command.config_path, command.overrides)
+        print(build_pipeline_description(config.source))
+        return 0
+    if isinstance(command, RunCommand):
+        config = resolve_command_config(command.config_path, command.overrides)
+        run_config(config)
         return 0
     raise RuntimeError(f"unsupported command: {command!r}")
+
+
+def resolve_command_config(
+    config_path: Path | None,
+    overrides: AppConfig,
+) -> AppConfig:
+    try:
+        base = load_config(config_path) if config_path is not None else None
+        return validate_config(merge_config(base, overrides))
+    except ConfigError as exc:
+        print(f"Config error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+
+def run_config(config: AppConfig) -> None:
+    source = config.source
+    if isinstance(source, FileSourceConfig):
+        play_video(source.path)
+        return
+    if isinstance(source, CameraSourceConfig):
+        raise RuntimeError("camera source runtime is not implemented yet")
+    if isinstance(source, SimulationSourceConfig):
+        raise RuntimeError("simulation source runtime is not implemented yet")
+    raise RuntimeError(f"unsupported source config: {source!r}")
+
+
+def build_pipeline_description(source: SourceConfig | None) -> str:
+    if isinstance(source, FileSourceConfig):
+        return build_video_pipeline_description(source.path)
+    if isinstance(source, CameraSourceConfig):
+        return f"camera source device={source.device} is not implemented yet"
+    if isinstance(source, SimulationSourceConfig):
+        return f"simulation source topic={source.topic} is not implemented yet"
+    raise RuntimeError("source config is required")
 
 
 def build_synthetic_frame_timing(
@@ -678,4 +728,4 @@ def _handle_bus_message(
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
