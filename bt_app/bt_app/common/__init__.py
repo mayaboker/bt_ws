@@ -1,4 +1,4 @@
-from enum import Enum, IntEnum, auto
+from enum import IntEnum, auto
 from bt_app.common.event import Event
 
 TREE_TICK_INTERVAL_S = 0.1
@@ -28,15 +28,15 @@ class AETR1234(IntEnum):
     AUX6 = auto()
     AUX7 = auto()
 
-class RobotState(Enum):
-    IDLE = "IDLE"
-    MANUAL = "MANUAL"
-    TRACKING = "TRACKING"
-    RECOVERY = "RECOVERY"
-    FAILSAFE = "FAILSAFE"
-    TAKEOFF = "TAKEOFF"
-    ARM = "ARM"
-    SEARCH = "SEARCH"
+class RobotState(IntEnum):
+    IDLE = 0
+    MANUAL = 1
+    TRACKING = 2
+    RECOVERY = 3
+    FAILSAFE = 4
+    TAKEOFF = 5
+    ARM = 6
+    SEARCH = 7
 
 __all__ = [
     "FREQ_HZ",
@@ -50,5 +50,5 @@ __all__ = [
     "ZMQ_ULTRASONIC_LIDAR_TOPIC",
     "ZMQ_TRACKER_RESULT_ENDPOINT",
     "ZMQ_TRACKER_RESULT_TOPIC",
-    "State"
+    "RobotState"
 ]

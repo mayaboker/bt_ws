@@ -6,6 +6,19 @@ from bt_app.vehicle_config import VehicleConfig
 from bt_app.context import Context
 
 
+def _coerce_robot_state(state) -> RobotState:
+    if isinstance(state, RobotState):
+        return state
+    if isinstance(state, str):
+        if state in RobotState.__members__:
+            return RobotState[state]
+        member_name = state.rsplit(".", 1)[-1]
+        if member_name in RobotState.__members__:
+            return RobotState[member_name]
+        return RobotState(int(state))
+    return RobotState(state)
+
+
 
 
 class Robot_StateMachine:
@@ -108,8 +121,8 @@ class Robot_StateMachine:
         """
         """
         # TODO: move to app logic
-        previous_state = event.transition.source
-        new_state = event.transition.dest
+        previous_state = _coerce_robot_state(event.transition.source)
+        new_state = _coerce_robot_state(event.transition.dest)
         self.ctx.state = new_state
         log.info(f"State changed: {previous_state} -> {new_state}")
 
@@ -178,5 +191,4 @@ class Robot_StateMachine:
         )
 
     
-
 

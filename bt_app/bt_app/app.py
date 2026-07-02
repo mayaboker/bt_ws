@@ -185,21 +185,21 @@ class App:
         return rc
 
     def __resolve_rc(self):
-        if self.ctx.state == RobotState.MANUAL.value:
+        if self.ctx.state == RobotState.MANUAL:
             channels = self.controllers[RobotState.MANUAL].update()
             if self.ctx.auto_arm:
                 channels[AETR1234.AUX1] = RC_MAX
             return channels
-        elif self.ctx.state == RobotState.FAILSAFE.value:
+        elif self.ctx.state == RobotState.FAILSAFE:
             fs_alt = self.__params.get("fail_safe.alt")
             return self.controllers[RobotState.FAILSAFE].update(fs_alt, self.ctx.drone_alt)
-        elif self.ctx.state == RobotState.TAKEOFF.value:
+        elif self.ctx.state == RobotState.TAKEOFF:
             return self._takeoff_handler() 
-        elif self.ctx.state == RobotState.IDLE.value:
+        elif self.ctx.state == RobotState.IDLE:
             return [1000]*8
-        elif self.ctx.state == RobotState.ARM.value:
+        elif self.ctx.state == RobotState.ARM:
             return self.controllers[RobotState.ARM].update()
-        elif self.ctx.state == RobotState.SEARCH.value:
+        elif self.ctx.state == RobotState.SEARCH:
             return self.controllers[RobotState.SEARCH].update()
         else:
             log.error(f"RC selector not implemented for state {self.ctx.state}")

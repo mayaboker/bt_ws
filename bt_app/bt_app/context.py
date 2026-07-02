@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 @dataclass(init=False)
 class Context:
     # current state machine state update when state changed
-    state: RobotState = field(default=RobotState.IDLE.value)
+    state: RobotState = field(default=RobotState.IDLE)
     force_manual_mode: bool = field(default=False)
     # drone state arm disabled update at 1hz
     arming_disable_flags: list = field(default_factory=list)
