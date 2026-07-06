@@ -3,10 +3,10 @@ from __future__ import annotations
 import threading
 import time
 
-from .cancellation import CancellationRegistry
-from .commands import BasicSchedulerContext, Command, ScheduledCommand, SchedulerContext
-from .scheduler_queue import TimedCommandQueue
-from .worker import ErrorCallback, SchedulerWorker
+from bt_app.scheduler.cancellation import CancellationRegistry
+from bt_app.scheduler.commands import BasicSchedulerContext, Command, ScheduledCommand, SchedulerContext
+from bt_app.scheduler.scheduler_queue import TimedCommandQueue
+from bt_app.scheduler.worker import ErrorCallback, SchedulerWorker
 
 
 class CommandScheduler:

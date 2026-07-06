@@ -1,13 +1,17 @@
-import time
-
 import pytest
 from pymavlink import mavutil
 
 import bt_app.app as app_module
+import bt_app.mavlink_wrapper as mavlink_module
 from bt_app.app import App
 from bt_app.common import RobotState
 from bt_app.context import Context
-from bt_app.mavlink_wrapper import MavlinkService, make_base_mode
+from bt_app.mavlink_wrapper import (
+    HeartbeatCommand,
+    MavlinkService,
+    ReceivePendingCommand,
+    make_base_mode,
+)
 from bt_app.vehicle_config import VehicleConfig
 
 
@@ -50,6 +54,27 @@ class FakeMavlinkService:
 
     def stop(self):
         self.stopped = True
+
+
+class FakeScheduler:
+    instances = []
+
+    def __init__(self, *, context, on_error=None):
+        self.context = context
+        self.on_error = on_error
+        self.started = False
+        self.stopped = False
+        self.scheduled = []
+        FakeScheduler.instances.append(self)
+
+    def start(self):
+        self.started = True
+
+    def stop(self, timeout=2.0):
+        self.stopped = True
+
+    def schedule(self, command, interval_s, delay_s=0.0, key=None):
+        self.scheduled.append((command, interval_s, delay_s, key))
 
 
 def decode_mavlink(payload):
@@ -95,39 +120,78 @@ def test_heartbeat_reads_context_state_and_armed_flag():
     assert msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
 
 
-def test_start_is_idempotent_and_uses_named_daemon_thread():
+def test_start_is_idempotent_and_starts_scheduler_once(monkeypatch):
+    FakeScheduler.instances = []
+    monkeypatch.setattr(mavlink_module, "CommandScheduler", FakeScheduler)
+
     class WaitingService(MavlinkService):
         def __init__(self, *, context):
             super().__init__(context=context)
-            self.run_count = 0
+            self.open_count = 0
 
-        def _run(self):
-            self.run_count += 1
-            self._stop_event.wait(1.0)
+        def _open_socket(self):
+            self.open_count += 1
+            self._socket = FakeSocket()
 
     service = WaitingService(context=Context())
 
     service.start()
     service.start()
-    time.sleep(0.05)
 
-    assert service.run_count == 1
-    assert service._thread is not None
-    assert service._thread.name == "mavlink-service"
-    assert service._thread.daemon
+    scheduler = FakeScheduler.instances[0]
+    assert service.open_count == 1
+    assert scheduler.started
+    assert len(scheduler.scheduled) == 2
+    assert isinstance(scheduler.scheduled[0][0], HeartbeatCommand)
+    assert scheduler.scheduled[0][1] == service.heartbeat_interval_s
+    assert scheduler.scheduled[0][3] == HeartbeatCommand.key
+    assert isinstance(scheduler.scheduled[1][0], ReceivePendingCommand)
+    assert scheduler.scheduled[1][1] == service.poll_interval_s
+    assert scheduler.scheduled[1][3] == ReceivePendingCommand.key
 
     service.stop()
+    assert not service._started
 
 
-def test_stop_closes_existing_socket():
+def test_stop_closes_existing_socket_and_stops_scheduler(monkeypatch):
+    FakeScheduler.instances = []
+    monkeypatch.setattr(mavlink_module, "CommandScheduler", FakeScheduler)
     service = MavlinkService(context=Context())
     socket = FakeSocket()
     service._socket = socket
 
     service.stop()
 
+    assert FakeScheduler.instances[0].stopped
     assert socket.closed
     assert service._socket is None
+    assert not service._started
+
+
+def test_heartbeat_command_sends_heartbeat():
+    service = MavlinkService(context=Context())
+    socket = FakeSocket()
+    service._socket = socket
+
+    HeartbeatCommand(service).execute(service.context)
+
+    assert socket.sent
+
+
+def test_receive_pending_command_calls_receive_pending():
+    class WaitingService(MavlinkService):
+        def __init__(self, *, context):
+            super().__init__(context=context)
+            self.receive_count = 0
+
+        def _receive_pending(self):
+            self.receive_count += 1
+
+    service = WaitingService(context=Context())
+
+    ReceivePendingCommand(service).execute(service.context)
+
+    assert service.receive_count == 1
 
 
 def test_app_starts_mavlink_service_with_shared_context(monkeypatch):

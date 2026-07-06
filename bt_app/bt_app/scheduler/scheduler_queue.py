@@ -5,7 +5,7 @@ import itertools
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .commands import Command
+from bt_app.scheduler.commands import Command
 
 
 @dataclass(order=True)

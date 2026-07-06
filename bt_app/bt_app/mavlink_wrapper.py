@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 
 import socket
-import threading
 import time
+from dataclasses import dataclass
+from typing import ClassVar
 
 from loguru import logger as log
 from pymavlink import mavutil
 
 from bt_app.context import Context
+from bt_app.scheduler import Command, CommandScheduler, SchedulerContext
 
 
 QOPENHD_ADDR = ("127.0.0.1", 14550)
@@ -22,6 +24,24 @@ def make_base_mode(armed: bool) -> int:
     if armed:
         base_mode |= mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
     return base_mode
+
+
+@dataclass
+class HeartbeatCommand(Command):
+    key: ClassVar[str | None] = "mavlink_heartbeat"
+    service: "MavlinkService"
+
+    def execute(self, context: SchedulerContext) -> None:
+        self.service._send_heartbeat()
+
+
+@dataclass
+class ReceivePendingCommand(Command):
+    key: ClassVar[str | None] = "mavlink_receive_pending"
+    service: "MavlinkService"
+
+    def execute(self, context: SchedulerContext) -> None:
+        self.service._receive_pending()
 
 
 class MavlinkService:
@@ -39,52 +59,46 @@ class MavlinkService:
         self.local_addr = local_addr
         self.heartbeat_interval_s = heartbeat_interval_s
         self.poll_interval_s = poll_interval_s
-        self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._started = False
         self._socket = None
         self._mav = mavutil.mavlink.MAVLink(None, srcSystem=SYS_ID, srcComponent=COMP_ID)
         self._parser = mavutil.mavlink.MAVLink(None)
+        self._scheduler = CommandScheduler(
+            context=self.context,
+            on_error=lambda exc, command: log.exception(
+                "MAVLink scheduler command {} failed: {}",
+                command.__class__.__name__,
+                exc,
+            ),
+        )
 
     def start(self) -> None:
-        if self._thread is not None and self._thread.is_alive():
+        if self._started:
             return
 
-        self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self._run,
-            name="mavlink-service",
-            daemon=True,
-        )
-        self._thread.start()
-
-    def stop(self, timeout: float | None = 2.0) -> None:
-        self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=timeout)
-            if not self._thread.is_alive():
-                self._thread = None
-        self._close_socket()
-
-    def _run(self) -> None:
         self._open_socket()
-        last_heartbeat = 0.0
+        self._scheduler.start()
+        self._scheduler.schedule(
+            HeartbeatCommand(self),
+            interval_s=self.heartbeat_interval_s,
+            key=HeartbeatCommand.key,
+        )
+        self._scheduler.schedule(
+            ReceivePendingCommand(self),
+            interval_s=self.poll_interval_s,
+            key=ReceivePendingCommand.key,
+        )
+        self._started = True
         log.info(
             "MAVLink service started on {} -> {}",
             self.local_addr,
             self.qopenhd_addr,
         )
 
-        try:
-            while not self._stop_event.is_set():
-                now = time.monotonic()
-                if now - last_heartbeat >= self.heartbeat_interval_s:
-                    self._send_heartbeat()
-                    last_heartbeat = now
-
-                self._receive_pending()
-                time.sleep(self.poll_interval_s)
-        finally:
-            self._close_socket()
+    def stop(self, timeout: float | None = 2.0) -> None:
+        self._scheduler.stop(timeout=timeout)
+        self._close_socket()
+        self._started = False
 
     def _open_socket(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

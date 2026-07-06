@@ -44,7 +44,7 @@ class App:
         self.config = self.__handle_config()
         # hold application state
         self.ctx = Context()
-        self.mavlink_service = MavlinkService(context=self.ctx)
+        
         # state macine
         self.robot_sm = Robot_StateMachine(self.ctx, self.config)
         self.robot_sm.on_before_state_changed += self.__handle_before_state_changed
@@ -57,6 +57,7 @@ class App:
         
         self.__load_drone_interface()
         self.__load_controllers()
+        self.mavlink_service = MavlinkService(context=self.ctx)
         self.mavlink_service.start()
         
         log.info("Application Start")

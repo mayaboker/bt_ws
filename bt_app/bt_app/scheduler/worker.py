@@ -4,9 +4,9 @@ import threading
 import time
 from collections.abc import Callable
 
-from .cancellation import CancellationRegistry
-from .commands import Command, SchedulerContext
-from .scheduler_queue import QueuedCommand, TimedCommandQueue
+from bt_app.scheduler.cancellation import CancellationRegistry
+from bt_app.scheduler.commands import Command, SchedulerContext
+from bt_app.scheduler.scheduler_queue import QueuedCommand, TimedCommandQueue
 
 
 ErrorCallback = Callable[[BaseException, Command], None]
