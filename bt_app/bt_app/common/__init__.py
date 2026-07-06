@@ -1,4 +1,4 @@
-from enum import IntEnum, auto
+from enum import IntEnum, auto, StrEnum
 from bt_app.common.event import Event
 
 TREE_TICK_INTERVAL_S = 0.1
@@ -11,6 +11,11 @@ ZMQ_ULTRASONIC_LIDAR_ENDPOINT = "ipc:///tmp/bt_app.ultrasonic_lidar"
 ZMQ_ULTRASONIC_LIDAR_TOPIC = b"ultrasonic_lidar.scan"
 ZMQ_TRACKER_RESULT_ENDPOINT = "ipc:///tmp/bt_app.tracker_result"
 ZMQ_TRACKER_RESULT_TOPIC = b"tracker_result"
+
+class JoyInterrupt(StrEnum):
+    TAKEOFF_REQUEST = "takeoff"
+    FORCE_MANUAL_REQUEST = "force_manual"
+    ARM = "arm"
 
 class AETR1234(IntEnum):
     """

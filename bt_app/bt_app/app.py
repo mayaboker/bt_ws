@@ -19,7 +19,7 @@ from bt_app.rc_utils import matching
 from bt_app.vehicle_config import VehicleConfig
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.mavlink_wrapper import MavlinkService
-from bt_app.common import RobotState
+from bt_app.common import RobotState, JoyInterrupt
 from bt_app.parameters.generated import ParameterKey
 from bt_app.common import (
     FREQ_HZ
@@ -104,13 +104,13 @@ class App:
         handle interrupt that register as joy action
         """
         # TODO: create interrupt action list
-        if name == "arm":
+        if name == JoyInterrupt.ARM:
             log.warning(f"--------arm interrupt {value}")
-        if name == "takeoff":
+        if name == JoyInterrupt.TAKEOFF_REQUEST:
             self.ctx.takeoff_interrupt = value == RC_MAX
             log.warning(f"--------takeoff interrupt {value}")
 
-        if name == "force_manual":
+        if name == JoyInterrupt.FORCE_MANUAL_REQUEST:
             log.warning(f"--------force manual interrupt {value}")
             self.ctx.force_manual_interrupt = value == RC_MAX
 
@@ -130,9 +130,9 @@ class App:
         joy_adapter.on_failsafe_exit += self.__joystick_fs_exit
         joy_adapter.on_interrupt += self.__handle_joy_interrupt
         # TODO: convert to const and mapping
-        joy_adapter.register_interrupt(AETR1234.AUX4, "takeoff")
-        joy_adapter.register_interrupt(AETR1234.AUX5, "force_manual")
-        joy_adapter.register_interrupt(AETR1234.AUX1, "arm")
+        joy_adapter.register_interrupt(AETR1234.AUX4, JoyInterrupt.TAKEOFF_REQUEST)
+        joy_adapter.register_interrupt(AETR1234.AUX5, JoyInterrupt.FORCE_MANUAL_REQUEST)
+        joy_adapter.register_interrupt(AETR1234.AUX1, JoyInterrupt.ARM)
         self.controllers[RobotState.MANUAL] = joy_adapter
         log.info("load joy adapter")
         #endregion
