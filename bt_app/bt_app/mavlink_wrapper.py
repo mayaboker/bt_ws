@@ -44,6 +44,17 @@ class ReceivePendingCommand(Command):
         self.service._receive_pending()
 
 
+@dataclass
+class SendTextToGcsCommand(Command):
+    key: ClassVar[str | None] = None
+    service: "MavlinkService"
+    text: str
+    severity: int = mavutil.mavlink.MAV_SEVERITY_INFO
+
+    def execute(self, context: SchedulerContext) -> None:
+        self.service._send_text_to_gcs(self.text, self.severity)
+
+
 class MavlinkService:
     def __init__(
         self,
@@ -100,6 +111,13 @@ class MavlinkService:
         self._close_socket()
         self._started = False
 
+    def send_text_to_gcs(
+        self,
+        text: str,
+        severity: int = mavutil.mavlink.MAV_SEVERITY_INFO,
+    ) -> None:
+        self._scheduler.submit(SendTextToGcsCommand(self, text, severity))
+
     def _open_socket(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind(self.local_addr)
@@ -117,6 +135,17 @@ class MavlinkService:
             int(self.context.state),
             mavutil.mavlink.MAV_STATE_ACTIVE,
         )
+        self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
+
+    def _send_text_to_gcs(
+        self,
+        text: str,
+        severity: int = mavutil.mavlink.MAV_SEVERITY_INFO,
+    ) -> None:
+        if self._socket is None:
+            return
+
+        msg = self._mav.statustext_encode(severity, text.encode("utf-8")[:50])
         self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
 
     def _receive_pending(self) -> None:

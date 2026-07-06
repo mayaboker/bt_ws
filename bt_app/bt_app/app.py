@@ -59,7 +59,7 @@ class App:
         self.__load_controllers()
         self.mavlink_service = MavlinkService(context=self.ctx)
         self.mavlink_service.start()
-        
+        self.mavlink_service.send_text_to_gcs("Application started")
         log.info("Application Start")
 
 
