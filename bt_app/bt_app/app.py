@@ -94,10 +94,13 @@ class App:
             self.controllers[RobotState.TAKEOFF].reset()
 
         elif next == RobotState.IDLE:
+            log.warning("reset all controllers")
             self.controllers[RobotState.ARM].reset()
             self.controllers[RobotState.TAKEOFF].reset()
-            self.controllers[RobotState.HOVER].reset()
             self.ctx.armed_allowed = False
+            self.ctx.joy_arm_requested = False
+            self.ctx.joy_takeoff_request = False
+            self.ctx.armed = False
 
 
 
@@ -160,7 +163,7 @@ class App:
 
     def _update_state_from_joystick(self):
         """
-        update the context / blackborad from joystick zmq adapter
+        update the context / blackboard from joystick zmq adapter
         the context contain variable for state machine condition
         """
         # region read joystick state for arm request
@@ -170,6 +173,7 @@ class App:
         self.ctx.request_rc = current.copy()
         throttle_for_arm = current[AETR1234.THROTTLE] < 1050
         yaw_for_arm = 1450 < current[AETR1234.YAW] < 1550
+        # one time manover
         roll_for_arm = current[AETR1234.ROLL] < 1050
         pitch_for_arm = current[AETR1234.PITCH] < 1050
         if all([roll_for_arm, pitch_for_arm]):#, roll_for_arm, pitch_for_arm]):
@@ -212,8 +216,8 @@ class App:
         
         setpoint = self.__params.get(ParameterKey.TAKEOFF_ALTITUDE)
         rc = self.controllers[RobotState.TAKEOFF].update(setpoint, self.ctx.drone_alt)
-        
-        self.ctx.takeoff_reach = self.controllers[RobotState.TAKEOFF].time_in_alt > 4
+        # time 
+        self.ctx.takeoff_reach = self.controllers[RobotState.TAKEOFF].time_in_alt >= 1
         return rc
 
     def hover(self):
@@ -229,7 +233,11 @@ class App:
         return rc
 
 
-    def __resolve_rc(self):
+    def _resolve_rc(self):
+        """
+        rc loop
+        ------
+        resolve rc channels from the active state controller"""
         if self.ctx.state == RobotState.MANUAL:
             channels = self.controllers[RobotState.MANUAL].update()
             if self.ctx.armed:
@@ -266,7 +274,7 @@ class App:
             while True:
                 self.__update_state()
                 self.robot_sm.resolve()
-                rc_channels = self.__resolve_rc()
+                rc_channels = self._resolve_rc()
                 rc_channels = matching(self.ctx, rc_channels, self.config)
                 if not rc_channels:
                     log.error(f"rc not valid: {rc_channels} in state {self.ctx.state}")

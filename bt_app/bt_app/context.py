@@ -20,6 +20,7 @@ class Context:
     armable: bool = field(default=False)
     # is drone armed update 1hz
     armed: bool = field(default=False)
+    # flag true: if we make the arm sequence
     armed_allowed: bool = field(default=False)
     joy_fail_safe: bool = field(default=False)
     take_control: bool = field(default=False)

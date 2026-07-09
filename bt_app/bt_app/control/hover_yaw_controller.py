@@ -61,7 +61,7 @@ class HoverYawController:
         channels[RCChannel.THROTTLE] = max(RC_MIN, min(RC_MAX, throttle))
         channels[RCChannel.YAW] = max(RC_MIN, min(RC_MAX, yaw))
         channels[RCChannel.ARM] = RC_MAX
-
+        channels[RCChannel.ANGLE] = RC_MAX
         return channels
 
     def on_parameter_changed(self, name: str, value: Any) -> None:

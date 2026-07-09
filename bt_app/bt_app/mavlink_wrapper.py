@@ -17,6 +17,8 @@ LOCAL_ADDR = ("0.0.0.0", 14551)
 
 SYS_ID = 1
 COMP_ID = mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1
+GLOBAL_POSITION_INT_INTERVAL_S = 0.5
+UNKNOWN_GLOBAL_POSITION_HEADING = 65535
 
 
 def make_base_mode(armed: bool) -> int:
@@ -33,6 +35,15 @@ class HeartbeatCommand(Command):
 
     def execute(self, context: SchedulerContext) -> None:
         self.service._send_heartbeat()
+
+
+@dataclass
+class GlobalPositionIntCommand(Command):
+    key: ClassVar[str | None] = "mavlink_global_position_int"
+    service: "MavlinkService"
+
+    def execute(self, context: SchedulerContext) -> None:
+        self.service._send_global_position_int()
 
 
 @dataclass
@@ -63,15 +74,18 @@ class MavlinkService:
         qopenhd_addr=QOPENHD_ADDR,
         local_addr=LOCAL_ADDR,
         heartbeat_interval_s: float = 1.0,
+        global_position_interval_s: float = GLOBAL_POSITION_INT_INTERVAL_S,
         poll_interval_s: float = 0.01,
     ) -> None:
         self.context = context
         self.qopenhd_addr = qopenhd_addr
         self.local_addr = local_addr
         self.heartbeat_interval_s = heartbeat_interval_s
+        self.global_position_interval_s = global_position_interval_s
         self.poll_interval_s = poll_interval_s
         self._started = False
         self._socket = None
+        self._boot_time_s = time.monotonic()
         self._mav = mavutil.mavlink.MAVLink(None, srcSystem=SYS_ID, srcComponent=COMP_ID)
         self._parser = mavutil.mavlink.MAVLink(None)
         self._scheduler = CommandScheduler(
@@ -93,6 +107,11 @@ class MavlinkService:
             HeartbeatCommand(self),
             interval_s=self.heartbeat_interval_s,
             key=HeartbeatCommand.key,
+        )
+        self._scheduler.schedule(
+            GlobalPositionIntCommand(self),
+            interval_s=self.global_position_interval_s,
+            key=GlobalPositionIntCommand.key,
         )
         self._scheduler.schedule(
             ReceivePendingCommand(self),
@@ -137,6 +156,24 @@ class MavlinkService:
         )
         self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
 
+    def _send_global_position_int(self) -> None:
+        if self._socket is None:
+            return
+
+        alt_mm = int(float(getattr(self.context, "drone_alt", 0.0)) * 1000.0)
+        msg = self._mav.global_position_int_encode(
+            self._time_boot_ms(),
+            0,
+            0,
+            alt_mm,
+            alt_mm,
+            0,
+            0,
+            0,
+            UNKNOWN_GLOBAL_POSITION_HEADING,
+        )
+        self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
+
     def _send_text_to_gcs(
         self,
         text: str,
@@ -161,6 +198,9 @@ class MavlinkService:
             msg = self._parser.parse_char(bytes([byte]))
             # if msg is not None:
             #     log.debug("Received MAVLink: {} from {}", msg.get_type(), addr)
+
+    def _time_boot_ms(self) -> int:
+        return int((time.monotonic() - self._boot_time_s) * 1000.0) & 0xFFFFFFFF
 
     def _close_socket(self) -> None:
         sock = self._socket

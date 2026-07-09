@@ -1,5 +1,6 @@
 from typing import Any
 import time
+from bt_app.parameters.generated.keys import ParameterKey
 from bt_app.control import PID
 from bt_app.msp.bt_v2 import (
     RC_MAX,
@@ -23,10 +24,10 @@ class TakeoffController:
 
     def _setup(self):
         self.alt_pid = PID(
-            kp=self.params.get("altitude.kp"),
-            ki=self.params.get("altitude.ki"),
-            kd=self.params.get("altitude.kd"),
-            output_limits=self.params.get("altitude.output_limits")
+            kp=self.params.get(ParameterKey.ALTITUDE_KP),
+            ki=self.params.get(ParameterKey.ALTITUDE_KI),
+            kd=self.params.get(ParameterKey.ALTITUDE_KD),
+            output_limits=self.params.get(ParameterKey.ALTITUDE_OUTPUT_LIMITS)
         )
 
     # region properties
@@ -62,13 +63,13 @@ class TakeoffController:
     
     def on_parameter_changed(self, name: str, value: Any) -> None:
         log.info("Parameter changed: {} = {}", name, value)
-        if name == "altitude.kp":
+        if name == ParameterKey.ALTITUDE_KP:
             self.alt_pid.kp = value
-        elif name == "altitude.ki":
+        elif name == ParameterKey.ALTITUDE_KI:
             self.alt_pid.ki = value
-        elif name == "altitude.kd":
+        elif name == ParameterKey.ALTITUDE_KD:
             self.alt_pid.kd = value
-        elif name == "altitude.output_limits":
+        elif name == ParameterKey.ALTITUDE_OUTPUT_LIMITS:
             self.alt_pid.set_output_limits(value)
 
 

@@ -72,10 +72,13 @@ class Robot_StateMachine:
         )
 
         #region from manual
+        # TODO: add ToF ground
+        # TODO: not safe to exit manual and close throttle, check if may be accelerometer can help if we are on ground
         self.machine.add_transition(
             "resolve",
             RobotState.MANUAL,
             RobotState.IDLE,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.MANUAL, RobotState.IDLE),
             conditions=[self.enter_idle_from_manual],
         )
         #endregion from manual
@@ -89,12 +92,14 @@ class Robot_StateMachine:
         )
         # endregion from TAKEOFF
 
-        # self.machine.add_transition(
-        #     "resolve",
-        #     RobotState.TRACKING,
-        #     RobotState.RECOVERY,
-        #     conditions=[self.target_lost_but_can_retry],
-        # )
+        # region from HOVER
+        self.machine.add_transition(
+            "resolve",
+            RobotState.HOVER,
+            RobotState.MANUAL,
+            conditions=[self.enter_manual_mode_from_hover],
+        )
+        # endregion from HOVER
 
         # self.machine.add_transition(
         #     "resolve",
@@ -116,6 +121,9 @@ class Robot_StateMachine:
 
     # ------------------
     def enter_idle_from_manual(self, event):
+        """
+        close manual request and throttle low to enter idle
+        """
         ok = all([
             not self.ctx.joy_manual_request,
             self.ctx.request_rc[AETR1234.THROTTLE] < 1050
@@ -146,6 +154,10 @@ class Robot_StateMachine:
 
     
     def enter_arm(self, event):
+        """
+        joy_arm_requested: true if joy request arm combination, reset when disarmed or arm failed
+        self.ctx.armable: true if drone can be armed
+        """
         s1_or_s4 = self.ctx.joy_takeoff_request != self.ctx.joy_manual_request
         ok = all([
             s1_or_s4,
@@ -164,6 +176,14 @@ class Robot_StateMachine:
         ])
         return  ok
 
+    def enter_failsafe(self, event):
+        # TODO: Add on air
+        return (
+            self.ctx.armable
+            and self.ctx.joy_fail_safe
+        )
+    
+    # region manual mode
     def enter_manual_mode_from_arm(self, event):
         s1_or_s4 = self.ctx.joy_takeoff_request != self.ctx.joy_manual_request
         ok = all([
@@ -173,12 +193,10 @@ class Robot_StateMachine:
         ])
         return ok
 
-    def enter_failsafe(self, event):
-        # TODO: Add on air
-        return (
-            self.ctx.armable
-            and self.ctx.joy_fail_safe
-        )
-
-    
-
+    def enter_manual_mode_from_hover(self, event):
+        ok = all([
+            self.ctx.joy_manual_request,
+            self.ctx.armed
+        ])
+        return ok
+    #endregion manual mode

@@ -7,6 +7,7 @@ from bt_app.app import App
 from bt_app.common import RobotState
 from bt_app.context import Context
 from bt_app.mavlink_wrapper import (
+    GlobalPositionIntCommand,
     HeartbeatCommand,
     MavlinkService,
     ReceivePendingCommand,
@@ -54,6 +55,10 @@ class FakeMavlinkService:
 
     def stop(self):
         self.stopped = True
+
+    def send_text_to_gcs(self, text, severity=mavutil.mavlink.MAV_SEVERITY_INFO):
+        self.text = text
+        self.severity = severity
 
 
 class FakeScheduler:
@@ -141,13 +146,16 @@ def test_start_is_idempotent_and_starts_scheduler_once(monkeypatch):
     scheduler = FakeScheduler.instances[0]
     assert service.open_count == 1
     assert scheduler.started
-    assert len(scheduler.scheduled) == 2
+    assert len(scheduler.scheduled) == 3
     assert isinstance(scheduler.scheduled[0][0], HeartbeatCommand)
     assert scheduler.scheduled[0][1] == service.heartbeat_interval_s
     assert scheduler.scheduled[0][3] == HeartbeatCommand.key
-    assert isinstance(scheduler.scheduled[1][0], ReceivePendingCommand)
-    assert scheduler.scheduled[1][1] == service.poll_interval_s
-    assert scheduler.scheduled[1][3] == ReceivePendingCommand.key
+    assert isinstance(scheduler.scheduled[1][0], GlobalPositionIntCommand)
+    assert scheduler.scheduled[1][1] == 0.5
+    assert scheduler.scheduled[1][3] == GlobalPositionIntCommand.key
+    assert isinstance(scheduler.scheduled[2][0], ReceivePendingCommand)
+    assert scheduler.scheduled[2][1] == service.poll_interval_s
+    assert scheduler.scheduled[2][3] == ReceivePendingCommand.key
 
     service.stop()
     assert not service._started
@@ -174,6 +182,40 @@ def test_heartbeat_command_sends_heartbeat():
     service._socket = socket
 
     HeartbeatCommand(service).execute(service.context)
+
+    assert socket.sent
+
+
+def test_global_position_int_reads_context_altitude():
+    ctx = Context()
+    ctx.drone_alt = 12.5
+    service = MavlinkService(context=ctx)
+    socket = FakeSocket()
+    service._socket = socket
+
+    service._send_global_position_int()
+
+    assert socket.sent
+    payload, addr = socket.sent[0]
+    msg = decode_mavlink(payload)
+    assert addr == service.qopenhd_addr
+    assert msg.get_type() == "GLOBAL_POSITION_INT"
+    assert msg.lat == 0
+    assert msg.lon == 0
+    assert msg.alt == 12500
+    assert msg.relative_alt == 12500
+    assert msg.vx == 0
+    assert msg.vy == 0
+    assert msg.vz == 0
+    assert msg.hdg == 65535
+
+
+def test_global_position_int_command_sends_global_position():
+    service = MavlinkService(context=Context())
+    socket = FakeSocket()
+    service._socket = socket
+
+    GlobalPositionIntCommand(service).execute(service.context)
 
     assert socket.sent
 
