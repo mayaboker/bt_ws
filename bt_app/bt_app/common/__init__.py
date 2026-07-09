@@ -12,10 +12,11 @@ ZMQ_ULTRASONIC_LIDAR_TOPIC = b"ultrasonic_lidar.scan"
 ZMQ_TRACKER_RESULT_ENDPOINT = "ipc:///tmp/bt_app.tracker_result"
 ZMQ_TRACKER_RESULT_TOPIC = b"tracker_result"
 
+NO_RC_CHANNELS = 8
+
 class JoyInterrupt(StrEnum):
-    TAKEOFF_REQUEST = "takeoff"
-    FORCE_MANUAL_REQUEST = "force_manual"
-    ARM = "arm"
+    TAKEOFF_REQUEST = "takeoff_request"
+    MANUAL_REQUEST = "manual_request"
 
 class AETR1234(IntEnum):
     """
@@ -41,7 +42,25 @@ class RobotState(IntEnum):
     FAILSAFE = 4
     TAKEOFF = 5
     ARM = 6
-    SEARCH = 7
+    HOVER = 7
+
+
+def print_channels(channels: list[int]):
+    """
+    print rc channels
+    """
+    if not channels:
+        return
+
+    for index, channel in enumerate(AETR1234):
+        if index >= len(channels):
+            break
+        print(f"{channel.name}: {channels[index]}")
+
+    aux_count = sum(1 for channel in AETR1234 if channel.name.startswith("AUX"))
+    for extra_index, channel_value in enumerate(channels[len(AETR1234):], start=aux_count + 1):
+        print(f"AUX{extra_index}: {channel_value}")
+
 
 __all__ = [
     "FREQ_HZ",

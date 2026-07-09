@@ -53,11 +53,10 @@ class JoyZmqAdapter:
 
         for i, name in self.__interrupt_mask:
             try:
-                
                 if self.last_rc_channels[i] != current[i]:
                     self.on_interrupt.emit(name, current[i])
             except Exception as e:
-                log.error(e)
+                log.error("failed to emit interrupt event index={} name={} error={}".format(i, name, e))
                 
 
 
@@ -72,7 +71,7 @@ class JoyZmqAdapter:
         self.__event_queue.put((key, value))
 
     def update(self):
-        return self.last_rc_channels
+        return self.last_rc_channels.copy()
 
     #region encoding/decoding helpers
     def encode_payload(self, msgpack_module: object, payload: dict[str, object]) -> bytes:
@@ -132,7 +131,7 @@ class JoyZmqAdapter:
                 if topic == SUB_STATE_TOPIC:
                     current = payload["channels"]
                     self.__check_for_interrupt(current)
-                    self.last_rc_channels = current
+                    self.last_rc_channels = current.copy()
                 if topic == SUB_FAILSAFE_TOPIC:
                     
                     failsafe_active = payload.get("active", True)

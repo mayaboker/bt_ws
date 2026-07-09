@@ -10,16 +10,18 @@ from dataclasses import dataclass, field
 class Context:
     # current state machine state update when state changed
     state: RobotState = field(default=RobotState.IDLE)
-    force_manual_mode: bool = field(default=False)
+    joy_takeoff_request: bool = field(default=False)
+    joy_manual_request: bool = field(default=False)
+    # true: if joy request arm combination, reset when disarmed or arm failed
+    joy_arm_requested: bool = field(default=False)
     # drone state arm disabled update at 1hz
     arming_disable_flags: list = field(default_factory=list)
-    # drone state if drone can armed update at 1hz
+    # drone state - if drone can armed update at 1hz
     armable: bool = field(default=False)
     # is drone armed update 1hz
     armed: bool = field(default=False)
+    armed_allowed: bool = field(default=False)
     joy_fail_safe: bool = field(default=False)
-    takeoff_interrupt: bool = field(default=False)
-    force_manual_interrupt: bool = field(default=False)
     take_control: bool = field(default=False)
     # allow automatic arm without joy AUX1 set to high
     auto_arm: bool = field(default=False)
@@ -29,6 +31,7 @@ class Context:
     drone_alt: float = 0.0
     #current rc read from drone (use to switch between external and internal pilot and controller switch)
     drone_rc: list = field(default_factory=list)
+    request_rc: list = field(default_factory=list)
 
 
 

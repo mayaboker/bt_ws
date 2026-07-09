@@ -53,7 +53,7 @@ def test_robot_state_uses_stable_integer_values():
     assert RobotState.FAILSAFE.value == 4
     assert RobotState.TAKEOFF.value == 5
     assert RobotState.ARM.value == 6
-    assert RobotState.SEARCH.value == 7
+    assert RobotState.HOVER.value == 7
 
 
 def test_context_state_defaults_to_robot_state_member():
@@ -66,7 +66,7 @@ def test_state_machine_transition_assigns_robot_state_member():
     config = VehicleConfig()
     machine = Robot_StateMachine(ctx, config)
 
-    ctx.force_manual_mode = True
+    ctx.joy_manual_request = True
     machine.resolve()
 
     assert ctx.state == RobotState.MANUAL
@@ -78,7 +78,7 @@ def test_state_machine_transition_assigns_robot_state_member():
     [
         (RobotState.MANUAL, RobotState.MANUAL),
         (RobotState.ARM, RobotState.ARM),
-        (RobotState.SEARCH, RobotState.SEARCH),
+        (RobotState.HOVER, RobotState.HOVER),
         (RobotState.FAILSAFE, RobotState.FAILSAFE),
         (RobotState.TAKEOFF, RobotState.TAKEOFF),
     ],

@@ -4,7 +4,7 @@ from transitions import Machine
 from bt_app.common import Event
 from bt_app.vehicle_config import VehicleConfig
 from bt_app.context import Context
-
+from bt_app.common import AETR1234
 
 def _coerce_robot_state(state) -> RobotState:
     if isinstance(state, RobotState):
@@ -37,12 +37,32 @@ class Robot_StateMachine:
             after_state_change=self.on_state_changed,
         )
 
+        # region from IDLE
         self.machine.add_transition(
             "resolve",
             RobotState.IDLE,
-            RobotState.MANUAL,
-            conditions=[self.enter_manual_mode],
+            RobotState.ARM,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.IDLE, RobotState.ARM),
+            conditions=[self.enter_arm]
         )
+        # endregion from IDLE
+
+
+        # region from ARM
+        self.machine.add_transition(
+            "resolve",
+            RobotState.ARM,
+            RobotState.MANUAL,
+            conditions=[self.enter_manual_mode_from_arm],
+        )
+
+        self.machine.add_transition(
+            "resolve",
+            RobotState.ARM,
+            RobotState.TAKEOFF,
+            conditions=[self.enter_takeoff_from_arm]
+        )
+        # endregion
 
         self.machine.add_transition(
             "resolve",
@@ -51,57 +71,23 @@ class Robot_StateMachine:
             conditions=[self.enter_failsafe],
         )
 
-        # self.machine.add_transition(
-        #     "resolve",
-        #     RobotState.IDLE,
-        #     RobotState.TAKEOFF,
-        #     conditions=[self.enter_takeoff]
-        # )
-
-        self.machine.add_transition(
-            "resolve",
-            RobotState.IDLE,
-            RobotState.ARM,
-            before=lambda x: self.on_before_state_changed.emit(RobotState.IDLE, RobotState.ARM),
-            conditions=[self.enter_arm]
-        )
-
-        self.machine.add_transition(
-            "resolve",
-            RobotState.ARM,
-            RobotState.TAKEOFF,
-            before=lambda x: self.on_before_state_changed.emit(RobotState.ARM, RobotState.TAKEOFF),
-            conditions=[self.enter_takeoff_from_arm]
-        )
-
-        self.machine.add_transition(
-            "resolve",
-            RobotState.IDLE,
-            RobotState.MANUAL,
-            conditions=[self.enter_manual_from_idle]
-        )
-
+        #region from manual
         self.machine.add_transition(
             "resolve",
             RobotState.MANUAL,
             RobotState.IDLE,
-            conditions=[self.enter_idle_from_manual]
+            conditions=[self.enter_idle_from_manual],
         )
+        #endregion from manual
 
+        # region from TAKEOFF
         self.machine.add_transition(
             "resolve",
             RobotState.TAKEOFF,
-            RobotState.MANUAL,
-            before=lambda x: self.on_before_state_changed.emit(RobotState.TAKEOFF, RobotState.MANUAL),
-            conditions=[self.enter_manual_from_takeoff]
+            RobotState.HOVER,
+            conditions=[self.enter_hover_from_takeoff]
         )
-
-        self.machine.add_transition(
-            "resolve",
-            RobotState.TAKEOFF,
-            RobotState.SEARCH,
-            conditions=[self.enter_search_from_takeoff]
-        )
+        # endregion from TAKEOFF
 
         # self.machine.add_transition(
         #     "resolve",
@@ -124,64 +110,68 @@ class Robot_StateMachine:
         previous_state = _coerce_robot_state(event.transition.source)
         new_state = _coerce_robot_state(event.transition.dest)
         self.ctx.state = new_state
-        log.info(f"State changed: {previous_state} -> {new_state}")
+        log.info(f"State changed: {event.transition.source} -> {event.transition.dest}")
 
-        if new_state == RobotState.IDLE:
-            self.ctx.auto_arm = True
-
+        
 
     # ------------------
-    
-    def enter_search_from_takeoff(self, event) :
+    def enter_idle_from_manual(self, event):
+        ok = all([
+            not self.ctx.joy_manual_request,
+            self.ctx.request_rc[AETR1234.THROTTLE] < 1050
+        ])
+        return ok
+
+    def enter_hover_from_takeoff(self, event) :
         """
         
         """
         ok = all([
-            self.config.auto_search_after_takeoff,
             self.ctx.takeoff_reach
             
         ])
 
         return ok
     
-    def enter_manual_from_takeoff(self, event):
+    # def enter_manual_from_takeoff(self, event):
+    #     ok = all([
+    #         self.ctx.armed,
+    #         self.ctx.force_manual_interrupt
+    #     ])
+    #     return ok
+    
+   
+    # def enter_idle_from_manual(self, event):
+    #     return not self.ctx.joy_manual_request and not self.ctx.takeoff_interrupt and not self.ctx.armable
+
+    
+    def enter_arm(self, event):
+        s1_or_s4 = self.ctx.joy_takeoff_request != self.ctx.joy_manual_request
         ok = all([
-            self.ctx.armed,
-            self.ctx.force_manual_interrupt
+            s1_or_s4,
+            self.ctx.armable,
+            not self.ctx.armed,
+            self.ctx.joy_arm_requested
         ])
-        return ok
+        return  ok
     
     def enter_takeoff_from_arm(self, event):
+        s1_or_s4 = self.ctx.joy_takeoff_request != self.ctx.joy_manual_request
         ok = all([
-            self.ctx.armed
+            s1_or_s4,
+            self.ctx.armed,
+            self.ctx.joy_takeoff_request,
+        ])
+        return  ok
+
+    def enter_manual_mode_from_arm(self, event):
+        s1_or_s4 = self.ctx.joy_takeoff_request != self.ctx.joy_manual_request
+        ok = all([
+            s1_or_s4,
+            self.ctx.armed,
+            self.ctx.joy_manual_request
         ])
         return ok
-    
-    def enter_idle_from_manual(self, event):
-        return not self.ctx.force_manual_interrupt and not self.ctx.takeoff_interrupt and not self.ctx.armable
-
-    def enter_manual_from_idle(self, event):
-        return self.ctx.force_manual_interrupt and not self.ctx.takeoff_interrupt
-
-    def enter_arm(self, event):
-        ok = all([
-            self.ctx.takeoff_interrupt,
-            not self.ctx.force_manual_interrupt
-        ])
-        return  ok
-    
-    def enter_takeoff(self, event):
-        # print(event)
-        ok = all([
-            self.ctx.takeoff_interrupt,
-            not self.ctx.force_manual_interrupt
-        ])
-        return  ok
-
-    def enter_manual_mode(self, event):
-        return (
-            self.ctx.force_manual_mode
-        )
 
     def enter_failsafe(self, event):
         # TODO: Add on air

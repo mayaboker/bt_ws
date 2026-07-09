@@ -19,7 +19,7 @@ from bt_app.rc_utils import matching
 from bt_app.vehicle_config import VehicleConfig
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.mavlink_wrapper import MavlinkService
-from bt_app.common import RobotState, JoyInterrupt
+from bt_app.common import NO_RC_CHANNELS, RobotState, JoyInterrupt
 from bt_app.parameters.generated import ParameterKey
 from bt_app.common import (
     FREQ_HZ
@@ -90,13 +90,15 @@ class App:
             log.warning("reset arm controller ")
             self.controllers[RobotState.ARM].reset()
 
-        elif prev == RobotState.TAKEOFF and next == RobotState.MANUAL:
-            log.warning("Reset take control")
-            self.ctx.take_control = False
-            self.ctx.auto_arm = True
-
         elif next == RobotState.TAKEOFF:
             self.controllers[RobotState.TAKEOFF].reset()
+
+        elif next == RobotState.IDLE:
+            self.controllers[RobotState.ARM].reset()
+            self.controllers[RobotState.TAKEOFF].reset()
+            self.controllers[RobotState.HOVER].reset()
+            self.ctx.armed_allowed = False
+
 
 
 
@@ -105,15 +107,14 @@ class App:
         handle interrupt that register as joy action
         """
         # TODO: create interrupt action list
-        if name == JoyInterrupt.ARM:
-            log.warning(f"--------arm interrupt {value}")
+        
         if name == JoyInterrupt.TAKEOFF_REQUEST:
-            self.ctx.takeoff_interrupt = value == RC_MAX
+            self.ctx.joy_takeoff_request = value == RC_MAX
             log.warning(f"--------takeoff interrupt {value}")
 
-        if name == JoyInterrupt.FORCE_MANUAL_REQUEST:
-            log.warning(f"--------force manual interrupt {value}")
-            self.ctx.force_manual_interrupt = value == RC_MAX
+        if name == JoyInterrupt.MANUAL_REQUEST:
+            self.ctx.joy_manual_request = value == RC_MAX
+            log.warning(f"manual request {self.ctx.joy_manual_request}")
 
     def __load_controllers(self):
         """
@@ -132,8 +133,7 @@ class App:
         joy_adapter.on_interrupt += self.__handle_joy_interrupt
         # TODO: convert to const and mapping
         joy_adapter.register_interrupt(AETR1234.AUX4, JoyInterrupt.TAKEOFF_REQUEST)
-        joy_adapter.register_interrupt(AETR1234.AUX5, JoyInterrupt.FORCE_MANUAL_REQUEST)
-        joy_adapter.register_interrupt(AETR1234.AUX1, JoyInterrupt.ARM)
+        joy_adapter.register_interrupt(AETR1234.AUX1, JoyInterrupt.MANUAL_REQUEST)
         self.controllers[RobotState.MANUAL] = joy_adapter
         log.info("load joy adapter")
         #endregion
@@ -148,7 +148,7 @@ class App:
         self.controllers[RobotState.ARM] = ARMController(self.__params)
 
         # search controller
-        self.controllers[RobotState.SEARCH] = HoverYawController(self.__params)
+        self.controllers[RobotState.HOVER] = HoverYawController(self.__params)
 
     def __joystick_fs_enter(self):
         log.warning("Joystick Failsafe Entered")
@@ -158,12 +158,35 @@ class App:
         log.warning("Joystick Failsafe Exited")
         self.ctx.joy_fail_safe = False
 
+    def _update_state_from_joystick(self):
+        """
+        update the context / blackborad from joystick zmq adapter
+        the context contain variable for state machine condition
+        """
+        # region read joystick state for arm request
+        current = self.controllers[RobotState.MANUAL].last_rc_channels
+        if not current:
+            return
+        self.ctx.request_rc = current.copy()
+        throttle_for_arm = current[AETR1234.THROTTLE] < 1050
+        yaw_for_arm = 1450 < current[AETR1234.YAW] < 1550
+        roll_for_arm = current[AETR1234.ROLL] < 1050
+        pitch_for_arm = current[AETR1234.PITCH] < 1050
+        if all([roll_for_arm, pitch_for_arm]):#, roll_for_arm, pitch_for_arm]):
+            log.warning("Joystick arm request detected")
+            self.ctx.armed_allowed = True
+
+        self.ctx.joy_arm_requested = all([throttle_for_arm, yaw_for_arm, self.ctx.armed_allowed])#, roll_for_arm, pitch_for_arm])
+        # end region
+
     def __update_state(self):
         """
         update the context / blackborad from drone and other sensors
         the context contain variable for state machine condition
         """
         # region read drone state
+        self._update_state_from_joystick()
+
         vehicle_state =self.drone_adapter.get_state()
         if vehicle_state:
             #TODO: move to consts
@@ -193,7 +216,7 @@ class App:
         self.ctx.takeoff_reach = self.controllers[RobotState.TAKEOFF].time_in_alt > 4
         return rc
 
-    def _search_handler(self):
+    def hover(self):
         """
         TODO: TBD
         search logic
@@ -201,7 +224,7 @@ class App:
         """
         
         setpoint = self.__params.get(ParameterKey.TAKEOFF_ALTITUDE)
-        rc = self.controllers[RobotState.SEARCH].update(setpoint, self.ctx.drone_alt)
+        rc = self.controllers[RobotState.HOVER].update(setpoint, self.ctx.drone_alt)
         
         return rc
 
@@ -209,8 +232,9 @@ class App:
     def __resolve_rc(self):
         if self.ctx.state == RobotState.MANUAL:
             channels = self.controllers[RobotState.MANUAL].update()
-            if self.ctx.auto_arm:
+            if self.ctx.armed:
                 channels[AETR1234.AUX1] = RC_MAX
+                channels[AETR1234.AUX2] = RC_MAX
             return channels
         elif self.ctx.state == RobotState.FAILSAFE:
             fs_alt = self.__params.get("fail_safe.alt")
@@ -218,11 +242,11 @@ class App:
         elif self.ctx.state == RobotState.TAKEOFF:
             return self._takeoff_handler() 
         elif self.ctx.state == RobotState.IDLE:
-            return [RC_MIN]*8
+            return [RC_MIN] * NO_RC_CHANNELS
         elif self.ctx.state == RobotState.ARM:
             return self.controllers[RobotState.ARM].update()
-        elif self.ctx.state == RobotState.SEARCH:
-            return self._search_handler()
+        elif self.ctx.state == RobotState.HOVER:
+            return self.hover()
         else:
             log.error(f"RC selector not implemented for state {self.ctx.state}")
             raise NotImplementedError(f"RC selector not implemented for state {self.ctx.state}")
