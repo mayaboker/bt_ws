@@ -11,6 +11,7 @@ from bt_app.mavlink_wrapper import (
     HeartbeatCommand,
     MavlinkService,
     ReceivePendingCommand,
+    SysStatusCommand,
     make_base_mode,
 )
 from bt_app.vehicle_config import VehicleConfig
@@ -146,16 +147,19 @@ def test_start_is_idempotent_and_starts_scheduler_once(monkeypatch):
     scheduler = FakeScheduler.instances[0]
     assert service.open_count == 1
     assert scheduler.started
-    assert len(scheduler.scheduled) == 3
+    assert len(scheduler.scheduled) == 4
     assert isinstance(scheduler.scheduled[0][0], HeartbeatCommand)
     assert scheduler.scheduled[0][1] == service.heartbeat_interval_s
     assert scheduler.scheduled[0][3] == HeartbeatCommand.key
     assert isinstance(scheduler.scheduled[1][0], GlobalPositionIntCommand)
     assert scheduler.scheduled[1][1] == 0.5
     assert scheduler.scheduled[1][3] == GlobalPositionIntCommand.key
-    assert isinstance(scheduler.scheduled[2][0], ReceivePendingCommand)
-    assert scheduler.scheduled[2][1] == service.poll_interval_s
-    assert scheduler.scheduled[2][3] == ReceivePendingCommand.key
+    assert isinstance(scheduler.scheduled[2][0], SysStatusCommand)
+    assert scheduler.scheduled[2][1] == 2.0
+    assert scheduler.scheduled[2][3] == SysStatusCommand.key
+    assert isinstance(scheduler.scheduled[3][0], ReceivePendingCommand)
+    assert scheduler.scheduled[3][1] == service.poll_interval_s
+    assert scheduler.scheduled[3][3] == ReceivePendingCommand.key
 
     service.stop()
     assert not service._started
@@ -216,6 +220,51 @@ def test_global_position_int_command_sends_global_position():
     service._socket = socket
 
     GlobalPositionIntCommand(service).execute(service.context)
+
+    assert socket.sent
+
+
+def test_sys_status_reads_context_battery_voltage():
+    ctx = Context()
+    ctx.battery_voltage = 16.1
+    service = MavlinkService(context=ctx)
+    socket = FakeSocket()
+    service._socket = socket
+
+    service._send_sys_status()
+
+    assert socket.sent
+    payload, addr = socket.sent[0]
+    msg = decode_mavlink(payload)
+    assert addr == service.qopenhd_addr
+    assert msg.get_type() == "SYS_STATUS"
+    assert msg.voltage_battery == 16100
+    assert msg.current_battery == -1
+    assert msg.battery_remaining == -1
+    assert msg.drop_rate_comm == 0
+    assert msg.errors_comm == 0
+
+
+def test_sys_status_clamps_voltage_to_uint16():
+    ctx = Context()
+    ctx.battery_voltage = 2016.1
+    service = MavlinkService(context=ctx)
+    socket = FakeSocket()
+    service._socket = socket
+
+    service._send_sys_status()
+
+    payload, _addr = socket.sent[0]
+    msg = decode_mavlink(payload)
+    assert msg.voltage_battery == 65535
+
+
+def test_sys_status_command_sends_sys_status():
+    service = MavlinkService(context=Context())
+    socket = FakeSocket()
+    service._socket = socket
+
+    SysStatusCommand(service).execute(service.context)
 
     assert socket.sent
 

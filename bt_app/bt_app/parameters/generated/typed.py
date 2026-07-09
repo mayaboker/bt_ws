@@ -47,6 +47,22 @@ class TypedParameters:
         return cast(Literal['stabilize', 'altitude', 'position'], self._parameters.get(ParameterKey.FLIGHT_MODE))
 
     @property
+    def hover_kd(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HOVER_KD))
+
+    @property
+    def hover_ki(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HOVER_KI))
+
+    @property
+    def hover_kp(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HOVER_KP))
+
+    @property
+    def hover_output_limits(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HOVER_OUTPUT_LIMITS))
+
+    @property
     def hover_yaw_altitude(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.HOVER_YAW_ALTITUDE))
 

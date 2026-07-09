@@ -102,8 +102,9 @@ class App:
             self.ctx.joy_takeoff_request = False
             self.ctx.armed = False
 
-
-
+        elif next == RobotState.HOVER:
+            # self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[AETR1234.THROTTLE])
+            self.controllers[RobotState.HOVER].setpoint = self.ctx.drone_alt
 
     def __handle_joy_interrupt(self, name, value):
         """
@@ -204,8 +205,12 @@ class App:
         self.ctx.drone_alt = self.drone_adapter.get_altitude()
         ## read last drone rc
         self.ctx.drone_rc = self.drone_adapter.get_rc()
-
         # log.info(self.ctx.state, self.ctx.armable, self.ctx.takeoff_interrupt)
+
+        battery = self.drone_adapter.dispatcher.last_battery
+        if battery and "voltage_v" in battery:
+            self.ctx.battery_voltage = battery["voltage_v"] + 20.0 #TODO: remove this hack, the voltage is not correct in betaflight 4.4.1
+
     
     def _takeoff_handler(self):
         """
@@ -227,11 +232,15 @@ class App:
         - get rc from search controller
         """
         
-        setpoint = self.__params.get(ParameterKey.TAKEOFF_ALTITUDE)
+        setpoint = self.controllers[RobotState.HOVER].setpoint
         rc = self.controllers[RobotState.HOVER].update(setpoint, self.ctx.drone_alt)
         
         return rc
 
+    def _update_controllers(self):
+        if self.ctx.drone_rc is not None:
+            #TODO: to understand why base 3
+            self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE 
 
     def _resolve_rc(self):
         """
@@ -273,6 +282,7 @@ class App:
         try:
             while True:
                 self.__update_state()
+                self._update_controllers()
                 self.robot_sm.resolve()
                 rc_channels = self._resolve_rc()
                 rc_channels = matching(self.ctx, rc_channels, self.config)

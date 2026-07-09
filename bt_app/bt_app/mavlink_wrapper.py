@@ -18,7 +18,11 @@ LOCAL_ADDR = ("0.0.0.0", 14551)
 SYS_ID = 1
 COMP_ID = mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1
 GLOBAL_POSITION_INT_INTERVAL_S = 0.5
+SYS_STATUS_INTERVAL_S = 2.0
 UNKNOWN_GLOBAL_POSITION_HEADING = 65535
+MAX_UINT16 = 65535
+UNKNOWN_CURRENT_BATTERY = 5
+UNKNOWN_BATTERY_REMAINING = 100
 
 
 def make_base_mode(armed: bool) -> int:
@@ -44,6 +48,15 @@ class GlobalPositionIntCommand(Command):
 
     def execute(self, context: SchedulerContext) -> None:
         self.service._send_global_position_int()
+
+
+@dataclass
+class SysStatusCommand(Command):
+    key: ClassVar[str | None] = "mavlink_sys_status"
+    service: "MavlinkService"
+
+    def execute(self, context: SchedulerContext) -> None:
+        self.service._send_sys_status()
 
 
 @dataclass
@@ -75,6 +88,7 @@ class MavlinkService:
         local_addr=LOCAL_ADDR,
         heartbeat_interval_s: float = 1.0,
         global_position_interval_s: float = GLOBAL_POSITION_INT_INTERVAL_S,
+        sys_status_interval_s: float = SYS_STATUS_INTERVAL_S,
         poll_interval_s: float = 0.01,
     ) -> None:
         self.context = context
@@ -82,6 +96,7 @@ class MavlinkService:
         self.local_addr = local_addr
         self.heartbeat_interval_s = heartbeat_interval_s
         self.global_position_interval_s = global_position_interval_s
+        self.sys_status_interval_s = sys_status_interval_s
         self.poll_interval_s = poll_interval_s
         self._started = False
         self._socket = None
@@ -112,6 +127,11 @@ class MavlinkService:
             GlobalPositionIntCommand(self),
             interval_s=self.global_position_interval_s,
             key=GlobalPositionIntCommand.key,
+        )
+        self._scheduler.schedule(
+            SysStatusCommand(self),
+            interval_s=self.sys_status_interval_s,
+            key=SysStatusCommand.key,
         )
         self._scheduler.schedule(
             ReceivePendingCommand(self),
@@ -171,6 +191,32 @@ class MavlinkService:
             0,
             0,
             UNKNOWN_GLOBAL_POSITION_HEADING,
+        )
+        self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
+
+    def _send_sys_status(self) -> None:
+        """
+        TODO: calc the voltage and current against real FC
+        """
+        if self._socket is None:
+            return
+
+        voltage_mv = int(float(getattr(self.context, "battery_voltage", 0.0)) * 1000.0)
+        voltage_mv = max(0, min(voltage_mv, MAX_UINT16))
+        msg = self._mav.sys_status_encode(
+            0,
+            0,
+            0,
+            0,
+            voltage_mv,
+            UNKNOWN_CURRENT_BATTERY,
+            UNKNOWN_BATTERY_REMAINING,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         )
         self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
 

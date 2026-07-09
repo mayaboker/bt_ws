@@ -2,6 +2,7 @@ from bt_app.msp.bt_v2 import (
     MSP_ALTITUDE,
     MSP_API_VERSION,
     MSP_ATTITUDE,
+    MSP_BATTERY_STATE,
     MSP_MOTOR,
     MSP_RAW_IMU,
     MSP_RC,
@@ -11,6 +12,7 @@ from bt_app.msp.bt_v2 import (
     ARMING_DISABLE_FLAGS,
     BetaflightMspClient,
     decode_arming_mask,
+    parse_battery_state,
     parse_status_ex,
 )
 from bt_app.msp.command_dispatcher import (
@@ -20,6 +22,7 @@ from bt_app.msp.command_dispatcher import (
     RawRcCommand,
     RcCommandDispatcher,
     ReadAltitudeCommand,
+    ReadBatteryCommand,
     ReadStateCommand,
     ScheduledCommand,
 )
@@ -38,6 +41,7 @@ __all__ = [
     "RawRcCommand",
     "RcCommandDispatcher",
     "ReadAltitudeCommand",
+    "ReadBatteryCommand",
     "ReadStateCommand",
     "ScheduledCommand",
     "SerialMspTransport",
@@ -46,6 +50,7 @@ __all__ = [
     "MSP_ALTITUDE",
     "MSP_API_VERSION",
     "MSP_ATTITUDE",
+    "MSP_BATTERY_STATE",
     "MSP_MOTOR",
     "MSP_RAW_IMU",
     "MSP_RC",
@@ -54,5 +59,6 @@ __all__ = [
     "MSP_STATUS_EX",
     "ARMING_DISABLE_FLAGS",
     "decode_arming_mask",
+    "parse_battery_state",
     "parse_status_ex",
 ]

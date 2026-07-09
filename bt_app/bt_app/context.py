@@ -33,6 +33,7 @@ class Context:
     #current rc read from drone (use to switch between external and internal pilot and controller switch)
     drone_rc: list = field(default_factory=list)
     request_rc: list = field(default_factory=list)
+    battery_voltage: float = 0.0
 
 
 

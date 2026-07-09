@@ -54,7 +54,7 @@ class MSPAdapter:
         self.msp.open()
         self.dispatcher.schedule_state(interval_s=1.0)
         self.dispatcher.schedule_altitude(interval_s=0.1)
+        self.dispatcher.schedule_battery(interval_s=2.0)
         self.dispatcher.schedule_rc(interval_s=1.0)
         
         self.dispatcher.start()
-

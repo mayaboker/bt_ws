@@ -40,6 +40,7 @@ MSP_MOTOR = 104
 MSP_RC = 105
 MSP_ATTITUDE = 108
 MSP_ALTITUDE = 109
+MSP_BATTERY_STATE = 130
 MSP_STATUS_EX = 150
 MSP_SET_RAW_RC = 200
 
@@ -160,6 +161,10 @@ class BetaflightMspClient:
             "vertical_speed_m_s": vario_cm_s / 100.0,
         }
 
+    def read_battery_state(self, timeout: float = 0.5) -> dict[str, int | float]:
+        payload = self.request(MSP_BATTERY_STATE, timeout=timeout)
+        return parse_battery_state(payload)
+
     def read_raw_imu(self, timeout: float = 0.5) -> dict[str, tuple[int, ...]]:
         payload = self.request(MSP_RAW_IMU, timeout=timeout)
         values = struct.unpack_from("<9h", payload)
@@ -177,6 +182,42 @@ class BetaflightMspClient:
 def unpack_u16_list(payload: bytes) -> list[int]:
     count = len(payload) // 2
     return list(struct.unpack_from("<" + "H" * count, payload))
+
+
+def parse_battery_state(payload: bytes) -> dict[str, int | float]:
+    if len(payload) < 11:
+        raise ValueError(f"MSP_BATTERY_STATE payload too short: {len(payload)} bytes")
+
+    (
+        cell_count,
+        capacity_mah,
+        legacy_voltage_deci_volts,
+        consumed_mah,
+        current_ca,
+        battery_state,
+        voltage_cv,
+    ) = struct.unpack_from("<BHBHhBH", payload)
+
+    remaining_percent = -1
+    if capacity_mah > 0:
+        remaining_percent = max(
+            0,
+            min(100, int(100 * (capacity_mah - consumed_mah) / capacity_mah)),
+        )
+
+    return {
+        "cell_count": cell_count,
+        "capacity_mah": capacity_mah,
+        "legacy_voltage_deci_volts": legacy_voltage_deci_volts,
+        "consumed_mah": consumed_mah,
+        "current_ca": current_ca,
+        "current_a": current_ca / 100.0,
+        "battery_state": battery_state,
+        "voltage_cv": voltage_cv,
+        "voltage_v": voltage_cv / 100.0,
+        "voltage_mv": voltage_cv * 10,
+        "remaining_percent": remaining_percent,
+    }
 
 
 def decode_arming_mask(mask: int) -> list[str]:

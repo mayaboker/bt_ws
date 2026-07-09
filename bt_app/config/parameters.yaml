@@ -30,9 +30,33 @@ parameters:
     limits:
       min: 0.0
       max: 500.0
+  hover.kp:
+    type: float
+    default: 80.0
+    limits:
+      min: 0.0
+      max: 200.0
+  hover.ki:
+    type: float
+    default: 10.0
+    limits:
+      min: 0.0
+      max: 200.0
+  hover.kd:
+    type: float
+    default: 20.0
+    limits:
+      min: 0.0
+      max: 200.0
+  hover.output_limits:
+    type: float
+    default: 400.0
+    limits:
+      min: 0.0
+      max: 500.0
   takeoff_altitude:
     type: float
-    default: 3.0
+    default: 2.0
     limits:
       min: 0.0
       max: 200.0

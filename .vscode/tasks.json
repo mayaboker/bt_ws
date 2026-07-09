@@ -102,6 +102,22 @@
         }
         ,
         {
+            "label": "generate: parameter types",
+            "type": "shell",
+            "command": "python3",
+            "args": [
+                "scripts/generate_parameter_types.py"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
             "label": "build: bt_joy",
             "type": "shell",
             "command": "python3",

@@ -14,6 +14,10 @@ class ParameterKey:
     BETAFLIGHT_YAW_RATE_FULL_STICK_DPS: Final[Literal['betaflight_yaw_rate_full_stick_dps']] = 'betaflight_yaw_rate_full_stick_dps'
     FAIL_SHAPE_ALT: Final[Literal['fail_shape.alt']] = 'fail_shape.alt'
     FLIGHT_MODE: Final[Literal['flight.mode']] = 'flight.mode'
+    HOVER_KD: Final[Literal['hover.kd']] = 'hover.kd'
+    HOVER_KI: Final[Literal['hover.ki']] = 'hover.ki'
+    HOVER_KP: Final[Literal['hover.kp']] = 'hover.kp'
+    HOVER_OUTPUT_LIMITS: Final[Literal['hover.output_limits']] = 'hover.output_limits'
     HOVER_YAW_ALTITUDE: Final[Literal['hover_yaw.altitude']] = 'hover_yaw.altitude'
     HOVER_YAW_YAW_RATE: Final[Literal['hover_yaw.yaw_rate']] = 'hover_yaw.yaw_rate'
     TAKEOFF_ALTITUDE: Final[Literal['takeoff_altitude']] = 'takeoff_altitude'
@@ -35,6 +39,10 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'betaflight_yaw_rate_full_stick_dps',
     'fail_shape.alt',
     'flight.mode',
+    'hover.kd',
+    'hover.ki',
+    'hover.kp',
+    'hover.output_limits',
     'hover_yaw.altitude',
     'hover_yaw.yaw_rate',
     'takeoff_altitude',

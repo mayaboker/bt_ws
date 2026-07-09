@@ -88,6 +88,7 @@ class Robot_StateMachine:
             "resolve",
             RobotState.TAKEOFF,
             RobotState.HOVER,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.TAKEOFF, RobotState.HOVER),
             conditions=[self.enter_hover_from_takeoff]
         )
         # endregion from TAKEOFF
