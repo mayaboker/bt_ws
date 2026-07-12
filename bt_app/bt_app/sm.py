@@ -97,6 +97,7 @@ class Robot_StateMachine:
             "resolve",
             RobotState.MANUAL,
             RobotState.HOVER,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.MANUAL, RobotState.HOVER),
             conditions=[self.enter_hover_from_manual],
         )
         #endregion from manual

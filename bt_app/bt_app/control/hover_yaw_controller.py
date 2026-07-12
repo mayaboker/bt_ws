@@ -48,6 +48,7 @@ class HoverYawController:
     
     @setpoint.setter
     def setpoint(self, value: float) -> None:
+        log.info(f"setpoint {value}")
         self._setpoint = value
     
     def set_baseline (self, current_throttle: float):
@@ -59,9 +60,12 @@ class HoverYawController:
         if controller is not enabled, do nothing. On first run, initialize hover altitude from current altitude.
          Then read current altitude, compute throttle output from PID, compute yaw output from yaw_rate parameter, and send RC commands to MSP.
         """
+        CHANGE_SIGN = -1
         throttle_output = int(self.alt_pid.update(setpoint, current))
+        print(f"--{setpoint} {current}, {throttle_output}")
+        # throttle_output *= CHANGE_SIGN
         throttle_output += self._baseline
-
+        
         rc_yaw = self.rc_mapper.yaw_rate_to_rc(self.yaw_rate)
 
         # keep altitude/throttle and send yaw command

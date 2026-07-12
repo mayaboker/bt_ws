@@ -48,7 +48,7 @@ class App:
         
         # state macine
         self.robot_sm = Robot_StateMachine(self.ctx, self.config)
-        self.robot_sm.on_before_state_changed += self.__handle_before_state_changed
+        self.robot_sm.on_before_state_changed += self._handle_before_state_changed
         self.robot_sm.on_state_changed += self._state_changed_handler
         # drone iterface (msp)
         self.drone_adapter = None
@@ -103,10 +103,11 @@ class App:
             # we need  toggle return to manual
             self.ctx.joy_manual_request = False
         
-    def __handle_before_state_changed(self, prev, next):
+    def _handle_before_state_changed(self, prev, next):
         """
         run before the state change, one time on change
         """
+        print(f"aaaaaaaaaaaaaa{next}aaaaaaaaaaaaaaaaaaaaaaa")
         if prev == RobotState.IDLE and next == RobotState.ARM:
             log.warning("reset arm controller ")
             self.controllers[RobotState.ARM].reset()
@@ -125,6 +126,7 @@ class App:
 
         elif next == RobotState.HOVER:
             # self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[AETR1234.THROTTLE])
+            print(f"aaaaaaaaaaappppppppppppppppppp{self.ctx.drone_alt}")
             self.controllers[RobotState.HOVER].setpoint = self.ctx.drone_alt
 
         elif next == RobotState.FAILSAFE:
@@ -143,6 +145,7 @@ class App:
 
         if name == JoyInterrupt.MANUAL_REQUEST:
             self.ctx.joy_manual_request = value == RC_MAX
+            self.ctx.armed_allowed = False
             log.warning(f"manual request {self.ctx.joy_manual_request}")
 
     def __load_controllers(self):
@@ -278,9 +281,10 @@ class App:
         TODO: think about queue and other service handle it, for know we  only user scheduler submit it like queue"""
         if self.ctx.state == RobotState.ARM:
             if self.ctx.arming_disable_flags:
-                print(self.ctx.arming_disable_flags)
+                pass
+                # print(self.ctx.arming_disable_flags)
 
-        log.info(self.ctx)
+        # log.info(self.ctx)
 
     def _update_controllers(self):
         """
