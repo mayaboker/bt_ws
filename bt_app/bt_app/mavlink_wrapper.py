@@ -19,8 +19,10 @@ SYS_ID = 1
 COMP_ID = mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1
 GLOBAL_POSITION_INT_INTERVAL_S = 0.5
 SYS_STATUS_INTERVAL_S = 2.0
+RC_CHANNELS_INTERVAL_S = 0.5
 UNKNOWN_GLOBAL_POSITION_HEADING = 65535
 MAX_UINT16 = 65535
+UNKNOWN_RSSI = 255
 UNKNOWN_CURRENT_BATTERY = 5
 UNKNOWN_BATTERY_REMAINING = 100
 
@@ -60,6 +62,15 @@ class SysStatusCommand(Command):
 
 
 @dataclass
+class SendRcChannelsCommand(Command):
+    key: ClassVar[str | None] = "mavlink_rc_channels"
+    service: "MavlinkService"
+
+    def execute(self, context: SchedulerContext) -> None:
+        self.service._send_rc_channels()
+
+
+@dataclass
 class ReceivePendingCommand(Command):
     key: ClassVar[str | None] = "mavlink_receive_pending"
     service: "MavlinkService"
@@ -89,6 +100,7 @@ class MavlinkService:
         heartbeat_interval_s: float = 1.0,
         global_position_interval_s: float = GLOBAL_POSITION_INT_INTERVAL_S,
         sys_status_interval_s: float = SYS_STATUS_INTERVAL_S,
+        rc_channels_interval_s: float = RC_CHANNELS_INTERVAL_S,
         poll_interval_s: float = 0.01,
     ) -> None:
         self.context = context
@@ -97,6 +109,7 @@ class MavlinkService:
         self.heartbeat_interval_s = heartbeat_interval_s
         self.global_position_interval_s = global_position_interval_s
         self.sys_status_interval_s = sys_status_interval_s
+        self.rc_channels_interval_s = rc_channels_interval_s
         self.poll_interval_s = poll_interval_s
         self._started = False
         self._socket = None
@@ -132,6 +145,11 @@ class MavlinkService:
             SysStatusCommand(self),
             interval_s=self.sys_status_interval_s,
             key=SysStatusCommand.key,
+        )
+        self._scheduler.schedule(
+            SendRcChannelsCommand(self),
+            interval_s=self.rc_channels_interval_s,
+            key=SendRcChannelsCommand.key,
         )
         self._scheduler.schedule(
             ReceivePendingCommand(self),
@@ -217,6 +235,22 @@ class MavlinkService:
             0,
             0,
             0,
+        )
+        self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
+
+    def _send_rc_channels(self) -> None:
+        if self._socket is None:
+            return
+
+        channels = tuple(int(channel) for channel in getattr(self.context, "drone_rc", ()))
+        channel_count = min(len(channels), 4)
+        raw_channels = [MAX_UINT16] * 18
+        raw_channels[:channel_count] = channels[:channel_count]
+        msg = self._mav.rc_channels_encode(
+            self._time_boot_ms(),
+            channel_count,
+            *raw_channels,
+            UNKNOWN_RSSI,
         )
         self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
 
