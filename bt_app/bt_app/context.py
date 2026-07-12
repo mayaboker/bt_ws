@@ -4,6 +4,7 @@ The context is a singleton class that holds the current state of the drone. It i
 """
 from bt_app.common import RobotState
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 
 @dataclass(init=False)
@@ -39,8 +40,8 @@ class Context:
 
 
     # region singleton
-    _instance = None
-    _initialized = False
+    _instance: ClassVar["Context | None"] = None
+    _initialized: ClassVar[bool] = False
 
     def __new__(cls):
         if cls._instance is None:
@@ -48,6 +49,25 @@ class Context:
         return cls._instance
 
     def __init__(self):
-        if not self._initialized:
-            self._initialized = True
+        if self._initialized:
+            return
+
+        self.state = RobotState.IDLE
+        self.joy_takeoff_request = False
+        self.joy_manual_request = False
+        self.joy_arm_requested = False
+        self.arming_disable_flags = []
+        self.armable = False
+        self.armed = False
+        self.armed_allowed = False
+        self.joy_fail_safe = False
+        self.take_control = False
+        self.auto_arm = False
+        self.takeoff_reach = False
+        self.drone_alt = 0.0
+        self.drone_rc = []
+        self.request_rc = []
+        self.battery_voltage = 0.0
+
+        self._initialized = True
     # endregion

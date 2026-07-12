@@ -89,12 +89,24 @@ class App:
 
 
     def _state_changed_handler(self, previous_state, new_state):
+        """
+        Run one time when the state change
+        """
         self.mavlink_service.send_text_to_gcs(
             f"State changed: {previous_state} -> {new_state}",
             MavSeverity.INFO,
         )
+
+        if all([previous_state == RobotState.MANUAL,
+                new_state == RobotState.FAILSAFE]):
+            # set manual_request to false, fail safe return to hold
+            # we need  toggle return to manual
+            self.ctx.joy_manual_request = False
         
     def __handle_before_state_changed(self, prev, next):
+        """
+        run before the state change, one time on change
+        """
         if prev == RobotState.IDLE and next == RobotState.ARM:
             log.warning("reset arm controller ")
             self.controllers[RobotState.ARM].reset()
@@ -261,7 +273,19 @@ class App:
         
         return rc
 
+    def _notification_center(self):
+        """
+        TODO: think about queue and other service handle it, for know we  only user scheduler submit it like queue"""
+        if self.ctx.state == RobotState.ARM:
+            if self.ctx.arming_disable_flags:
+                print(self.ctx.arming_disable_flags)
+
+        log.info(self.ctx)
+
     def _update_controllers(self):
+        """
+        update/keep the controllers with the current context
+        """
         if self.ctx.drone_rc is not None:
             #TODO: to understand why base 3
             # AETR - roll, pitch, throttle, yaw, aux1, aux2, aux3, aux4
@@ -306,13 +330,14 @@ class App:
             - update state from drone and other sources
             - run the active state controller
             - validate and inforce rc output before send to drone
-            - send via dispather
+            - send via dispatcher
         """
 
         try:
             while True:
                 self.__update_state()
                 self._update_controllers()
+                self._notification_center()
                 self.robot_sm.resolve()
                 rc_channels = self._resolve_rc()
                 rc_channels = matching(self.ctx, rc_channels, self.config)

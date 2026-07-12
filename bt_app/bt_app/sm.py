@@ -134,8 +134,10 @@ class Robot_StateMachine:
         """
         ok = all([
             not self.ctx.joy_manual_request,
-            self.ctx.request_rc[AETR1234.THROTTLE] < 1050
+            self.ctx.request_rc[AETR1234.THROTTLE] < 1050,
+            self.ctx.request_rc[AETR1234.YAW] > 1950,
         ])
+        
         return ok
 
     def enter_hover_from_takeoff(self, event) :
@@ -186,7 +188,7 @@ class Robot_StateMachine:
 
     def enter_failsafe(self, event):
         # TODO: decide when active failsafe, manual -> fs, hover, takeoff -> ??
-        # TODO: Add on air
+        # TODO: Must to Add on air
         ok = all([
             self.ctx.armed,
             self.ctx.joy_fail_safe
