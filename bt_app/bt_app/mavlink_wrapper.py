@@ -8,6 +8,7 @@ from typing import ClassVar
 from loguru import logger as log
 from pymavlink import mavutil
 
+from bt_app.common import MavSeverity
 from bt_app.context import Context
 from bt_app.scheduler import Command, CommandScheduler, SchedulerContext
 
@@ -84,7 +85,7 @@ class SendTextToGcsCommand(Command):
     key: ClassVar[str | None] = None
     service: "MavlinkService"
     text: str
-    severity: int = mavutil.mavlink.MAV_SEVERITY_INFO
+    severity: int = MavSeverity.INFO
 
     def execute(self, context: SchedulerContext) -> None:
         self.service._send_text_to_gcs(self.text, self.severity)
@@ -171,7 +172,7 @@ class MavlinkService:
     def send_text_to_gcs(
         self,
         text: str,
-        severity: int = mavutil.mavlink.MAV_SEVERITY_INFO,
+        severity: int = MavSeverity.INFO,
     ) -> None:
         self._scheduler.submit(SendTextToGcsCommand(self, text, severity))
 
@@ -242,9 +243,11 @@ class MavlinkService:
         if self._socket is None:
             return
 
+        AETR_CHANNELS = 4
+        COMMAND_CHANNELS = 18
         channels = tuple(int(channel) for channel in getattr(self.context, "drone_rc", ()))
-        channel_count = min(len(channels), 4)
-        raw_channels = [MAX_UINT16] * 18
+        channel_count = min(len(channels), AETR_CHANNELS)
+        raw_channels = [MAX_UINT16] * COMMAND_CHANNELS
         raw_channels[:channel_count] = channels[:channel_count]
         msg = self._mav.rc_channels_encode(
             self._time_boot_ms(),
@@ -257,12 +260,12 @@ class MavlinkService:
     def _send_text_to_gcs(
         self,
         text: str,
-        severity: int = mavutil.mavlink.MAV_SEVERITY_INFO,
+        severity: int = MavSeverity.INFO,
     ) -> None:
         if self._socket is None:
             return
 
-        msg = self._mav.statustext_encode(severity, text.encode("utf-8")[:50])
+        msg = self._mav.statustext_encode(int(severity), text.encode("utf-8")[:50])
         self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
 
     def _receive_pending(self) -> None:

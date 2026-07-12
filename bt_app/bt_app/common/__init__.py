@@ -1,5 +1,6 @@
 from enum import IntEnum, auto, StrEnum
 from bt_app.common.event import Event
+from bt_app.common.mavlink import MavSeverity
 
 TREE_TICK_INTERVAL_S = 0.1
 FREQ_HZ = 50.0
@@ -66,6 +67,7 @@ __all__ = [
     "FREQ_HZ",
     "TREE_TICK_INTERVAL_S",
     "Event",
+    "MavSeverity",
     "GAZEBO_CAMERA_TOPIC",
     "GAZEBO_ULTRASONIC_LIDAR_TOPIC",
     "ZMQ_CAMERA_ENDPOINT",

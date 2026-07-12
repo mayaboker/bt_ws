@@ -28,13 +28,14 @@ class Robot_StateMachine:
         self.ctx: Context = ctx
         self.config: VehicleConfig = config
         self.on_before_state_changed = Event()
+        self.on_state_changed = Event()
         self.machine = Machine(
             model=self,
             states=self.states,
             initial=RobotState.IDLE,
             ignore_invalid_triggers=True,
             send_event=True,
-            after_state_change=self.on_state_changed,
+            after_state_change=self.on_state_changed_handler,
         )
 
         # region from IDLE
@@ -114,7 +115,7 @@ class Robot_StateMachine:
 
 
 
-    def on_state_changed(self, event):
+    def on_state_changed_handler(self, event):
         """
         """
         # TODO: move to app logic
@@ -122,6 +123,7 @@ class Robot_StateMachine:
         new_state = _coerce_robot_state(event.transition.dest)
         self.ctx.state = new_state
         log.info(f"State changed: {event.transition.source} -> {event.transition.dest}")
+        self.on_state_changed.emit(event.transition.source, event.transition.dest)
 
         
 

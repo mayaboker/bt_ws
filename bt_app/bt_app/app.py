@@ -19,7 +19,7 @@ from bt_app.rc_utils import matching
 from bt_app.vehicle_config import VehicleConfig
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.mavlink_wrapper import MavlinkService
-from bt_app.common import NO_RC_CHANNELS, RobotState, JoyInterrupt
+from bt_app.common import NO_RC_CHANNELS, RobotState, JoyInterrupt, MavSeverity
 from bt_app.parameters.generated import ParameterKey
 from bt_app.common import (
     FREQ_HZ
@@ -49,6 +49,7 @@ class App:
         # state macine
         self.robot_sm = Robot_StateMachine(self.ctx, self.config)
         self.robot_sm.on_before_state_changed += self.__handle_before_state_changed
+        self.robot_sm.on_state_changed += self._state_changed_handler
         # drone iterface (msp)
         self.drone_adapter = None
         
@@ -60,7 +61,7 @@ class App:
         self.__load_controllers()
         self.mavlink_service = MavlinkService(context=self.ctx)
         self.mavlink_service.start()
-        self.mavlink_service.send_text_to_gcs("Application started")
+        self.mavlink_service.send_text_to_gcs("Application started", MavSeverity.INFO)
         log.info("Application Start")
 
 
@@ -86,6 +87,13 @@ class App:
         # handle config
         return config
 
+
+    def _state_changed_handler(self, previous_state, new_state):
+        self.mavlink_service.send_text_to_gcs(
+            f"State changed: {previous_state} -> {new_state}",
+            MavSeverity.INFO,
+        )
+        
     def __handle_before_state_changed(self, prev, next):
         if prev == RobotState.IDLE and next == RobotState.ARM:
             log.warning("reset arm controller ")
