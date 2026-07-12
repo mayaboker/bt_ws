@@ -32,6 +32,7 @@ from bt_app.common import AETR1234
 from bt_app.parameters import Parameters
 from loguru import logger as log
 import time
+from bt_app.common.helper import format_channels
 
 
 class App:
@@ -106,6 +107,10 @@ class App:
             # self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[AETR1234.THROTTLE])
             self.controllers[RobotState.HOVER].setpoint = self.ctx.drone_alt
 
+        elif next == RobotState.FAILSAFE:
+            # set the failsafe controller setpoint to the current altitude
+            self.controllers[RobotState.FAILSAFE].setpoint = self.ctx.drone_alt
+
     def __handle_joy_interrupt(self, name, value):
         """
         handle interrupt that register as joy action
@@ -132,7 +137,7 @@ class App:
         #region joy adapter
         joy_adapter = joy_zmq_adapter.JoyZmqAdapter(self.__params)
         joy_adapter.start()
-        joy_adapter.on_failsafe_enter += self.__joystick_fs_enter
+        joy_adapter.on_failsafe_enter += self._joystick_fs_enter
         joy_adapter.on_failsafe_exit += self.__joystick_fs_exit
         joy_adapter.on_interrupt += self.__handle_joy_interrupt
         # TODO: convert to const and mapping
@@ -154,7 +159,7 @@ class App:
         # search controller
         self.controllers[RobotState.HOVER] = HoverYawController(self.__params)
 
-    def __joystick_fs_enter(self):
+    def _joystick_fs_enter(self):
         log.warning("Joystick Failsafe Entered")
         self.ctx.joy_fail_safe = True
 
@@ -225,7 +230,7 @@ class App:
         self.ctx.takeoff_reach = self.controllers[RobotState.TAKEOFF].time_in_alt >= 1
         return rc
 
-    def hover(self):
+    def hover_handler(self):
         """
         TODO: TBD
         search logic
@@ -236,11 +241,29 @@ class App:
         rc = self.controllers[RobotState.HOVER].update(setpoint, self.ctx.drone_alt)
         
         return rc
+    
+    def failsafe_handler(self):
+        """
+        TODO: decide if we need a separate failsafe controller or just use hover controller
+        TODO: what the altitude setpoint for failsafe? should we use the last known altitude or a predefined altitude?
+        """
+        
+        setpoint = self.controllers[RobotState.FAILSAFE].setpoint
+        rc = self.controllers[RobotState.FAILSAFE].update(setpoint, self.ctx.drone_alt)
+        
+        return rc
 
     def _update_controllers(self):
         if self.ctx.drone_rc is not None:
             #TODO: to understand why base 3
-            self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE 
+            # AETR - roll, pitch, throttle, yaw, aux1, aux2, aux3, aux4
+            # AERT - roll, pitch, yaw, throttle, aux1, aux2, aux3, aux4
+            # print(format_channels(self.ctx.drone_rc, formatter=tuple(AETR1234)))
+            # log.info(f"Drone RC: {self.ctx.drone_rc[3]}")
+            if self.ctx.state != RobotState.HOVER: 
+                self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE
+            if self.ctx.state != RobotState.FAILSAFE: 
+                self.controllers[RobotState.FAILSAFE].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE 
 
     def _resolve_rc(self):
         """
@@ -254,8 +277,7 @@ class App:
                 channels[AETR1234.AUX2] = RC_MAX
             return channels
         elif self.ctx.state == RobotState.FAILSAFE:
-            fs_alt = self.__params.get("fail_safe.alt")
-            return self.controllers[RobotState.FAILSAFE].update(fs_alt, self.ctx.drone_alt)
+            return self.failsafe_handler()
         elif self.ctx.state == RobotState.TAKEOFF:
             return self._takeoff_handler() 
         elif self.ctx.state == RobotState.IDLE:
@@ -263,7 +285,7 @@ class App:
         elif self.ctx.state == RobotState.ARM:
             return self.controllers[RobotState.ARM].update()
         elif self.ctx.state == RobotState.HOVER:
-            return self.hover()
+            return self.hover_handler()
         else:
             log.error(f"RC selector not implemented for state {self.ctx.state}")
             raise NotImplementedError(f"RC selector not implemented for state {self.ctx.state}")

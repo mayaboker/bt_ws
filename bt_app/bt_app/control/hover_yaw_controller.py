@@ -59,7 +59,6 @@ class HoverYawController:
         if controller is not enabled, do nothing. On first run, initialize hover altitude from current altitude.
          Then read current altitude, compute throttle output from PID, compute yaw output from yaw_rate parameter, and send RC commands to MSP.
         """
-        print(setpoint, current)
         throttle_output = int(self.alt_pid.update(setpoint, current))
         throttle_output += self._baseline
 

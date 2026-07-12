@@ -47,7 +47,6 @@ class Robot_StateMachine:
         )
         # endregion from IDLE
 
-
         # region from ARM
         self.machine.add_transition(
             "resolve",
@@ -64,12 +63,23 @@ class Robot_StateMachine:
         )
         # endregion
 
+        # region to FAILSAFE
         self.machine.add_transition(
             "resolve",
             RobotState.MANUAL,
             RobotState.FAILSAFE,
             conditions=[self.enter_failsafe],
         )
+        # endregion to FAILSAFE
+
+        # region from FAILSAFE
+        self.machine.add_transition(
+            "resolve",
+            RobotState.FAILSAFE,
+            RobotState.HOVER,
+            conditions=[self.exit_failsafe],
+        )
+        # endregion to FAILSAFE
 
         #region from manual
         # TODO: add ToF ground
@@ -102,12 +112,7 @@ class Robot_StateMachine:
         )
         # endregion from HOVER
 
-        # self.machine.add_transition(
-        #     "resolve",
-        #     "*",
-        #     RobotState.ERROR,
-        #     conditions=[self.critical_error],
-        # )
+
 
     def on_state_changed(self, event):
         """
@@ -178,11 +183,23 @@ class Robot_StateMachine:
         return  ok
 
     def enter_failsafe(self, event):
+        # TODO: decide when active failsafe, manual -> fs, hover, takeoff -> ??
         # TODO: Add on air
-        return (
-            self.ctx.armable
-            and self.ctx.joy_fail_safe
-        )
+        ok = all([
+            self.ctx.armed,
+            self.ctx.joy_fail_safe
+        ])
+
+        return ok
+    
+    def exit_failsafe(self, event):
+        # TODO: Add on air
+        ok = all([
+            self.ctx.armed,
+            not self.ctx.joy_fail_safe
+        ])
+
+        return ok
     
     # region manual mode
     def enter_manual_mode_from_arm(self, event):
