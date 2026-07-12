@@ -292,7 +292,7 @@ class App:
             # AERT - roll, pitch, yaw, throttle, aux1, aux2, aux3, aux4
             # print(format_channels(self.ctx.drone_rc, formatter=tuple(AETR1234)))
             # log.info(f"Drone RC: {self.ctx.drone_rc[3]}")
-            if self.ctx.state != RobotState.HOVER: 
+            if self.ctx.state != RobotState.HOVER:
                 self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE
             if self.ctx.state != RobotState.FAILSAFE: 
                 self.controllers[RobotState.FAILSAFE].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE 

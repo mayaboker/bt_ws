@@ -92,6 +92,13 @@ class Robot_StateMachine:
             before=lambda x: self.on_before_state_changed.emit(RobotState.MANUAL, RobotState.IDLE),
             conditions=[self.enter_idle_from_manual],
         )
+
+        self.machine.add_transition(
+            "resolve",
+            RobotState.MANUAL,
+            RobotState.HOVER,
+            conditions=[self.enter_hover_from_manual],
+        )
         #endregion from manual
 
         # region from TAKEOFF
@@ -215,6 +222,14 @@ class Robot_StateMachine:
         ])
         return ok
 
+    def enter_hover_from_manual(self, event):
+        ok = all([
+            self.ctx.request_rc[AETR1234.THROTTLE] > 1050,
+            not self.ctx.joy_manual_request,
+            self.ctx.armed
+        ])
+        return ok
+    
     def enter_manual_mode_from_hover(self, event):
         ok = all([
             self.ctx.joy_manual_request,
