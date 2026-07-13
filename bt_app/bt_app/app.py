@@ -2,9 +2,6 @@
 Application entry point
 """
 import pathlib
-from dataclasses import fields
-
-import yaml
 
 from bt_app.control import (
     joy_zmq_adapter
@@ -44,13 +41,13 @@ from bt_app.common.helper import format_channels
 
 
 class App:
-    def __init__(self):
+    def __init__(self, config: VehicleConfig):
         """
         init vehicle context and state machine
         load controllers
         """
         # application configuration
-        self.config = self.__handle_config()
+        self.config = config
         # hold application state
         self.ctx = Context()
         
@@ -86,27 +83,6 @@ class App:
         """Create and start betaflight msp adapter"""
         self.drone_adapter = MSPAdapter(self.config)
         self.drone_adapter.start()
-
-    def __handle_config(self):
-        """
-        merge cli with yaml file and return config object
-        """
-        
-        config = VehicleConfig()
-        config_path = pathlib.Path(__file__).parent.parent.joinpath("config", "vehicle_config.yaml")
-        if config_path.exists():
-            """
-            if file exists load and merge
-            """
-            with config_path.open("r", encoding="utf-8") as config_file:
-                config_data = yaml.safe_load(config_file) or {}
-            config_fields = {field.name for field in fields(VehicleConfig)}
-            for key, value in config_data.items():
-                if key in config_fields:
-                    setattr(config, key, value)
-        
-        # handle config
-        return config
 
     def __load_controllers(self):
         """
@@ -387,10 +363,10 @@ class App:
         finally:
             self.mavlink_service.stop()
 
-def main():
-    app = App()
+def main(config: VehicleConfig):
+    app = App(config=config)
     app.run()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit("Use bt-app run")

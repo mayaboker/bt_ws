@@ -19,6 +19,7 @@ class VehicleConfig():
     drone_eth_port: int = field(default=5761)
     drone_serial_port: str = field(default="/dev/ttyUSB0")
     config_name: str = field(default="parameters.yaml")
+    log_level: str = field(default="INFO")
 
     # region singleton
     _instance = None

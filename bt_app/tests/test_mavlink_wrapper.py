@@ -292,7 +292,7 @@ def test_app_starts_mavlink_service_with_shared_context(monkeypatch):
     monkeypatch.setattr(App, "_App__load_drone_interface", lambda self: None)
     monkeypatch.setattr(App, "_App__load_controllers", lambda self: None)
 
-    app = App()
+    app = App(VehicleConfig())
 
     assert isinstance(app.mavlink_service, FakeMavlinkService)
     assert app.mavlink_service.context is app.ctx
