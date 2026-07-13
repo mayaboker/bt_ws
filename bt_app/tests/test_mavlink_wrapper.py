@@ -45,8 +45,9 @@ class FakeSocket:
 class FakeMavlinkService:
     instances = []
 
-    def __init__(self, *, context):
+    def __init__(self, *, context, qopenhd_addr=None):
         self.context = context
+        self.qopenhd_addr = qopenhd_addr
         self.started = False
         self.stopped = False
         FakeMavlinkService.instances.append(self)
@@ -296,6 +297,7 @@ def test_app_starts_mavlink_service_with_shared_context(monkeypatch):
 
     assert isinstance(app.mavlink_service, FakeMavlinkService)
     assert app.mavlink_service.context is app.ctx
+    assert app.mavlink_service.qopenhd_addr == ("127.0.0.1", 14550)
     assert app.mavlink_service.started
 
 

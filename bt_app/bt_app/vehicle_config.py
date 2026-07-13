@@ -18,6 +18,8 @@ class VehicleConfig():
     drone_eth_host: str = field(default="127.0.0.1")
     drone_eth_port: int = field(default=5761)
     drone_serial_port: str = field(default="/dev/ttyUSB0")
+    gcs_ip: str = field(default="127.0.0.1")
+    gcs_port: int = field(default=14550)
     config_name: str = field(default="parameters.yaml")
     log_level: str = field(default="INFO")
 

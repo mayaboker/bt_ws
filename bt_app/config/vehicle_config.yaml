@@ -13,6 +13,10 @@ drone_eth_port: 5761
 # Serial device path for the FCU when drone_sink is serial.
 drone_serial_port: "/dev/ttyUSB0"
 
+# Ground control station MAVLink destination.
+gcs_ip: "127.0.0.1"
+gcs_port: 14550
+
 # Parameter YAML filename under bt_app/config.
 config_name: "parameters.yaml"
 

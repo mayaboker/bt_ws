@@ -64,7 +64,10 @@ class App:
         
         self.__load_drone_interface()
         self.__load_controllers()
-        self.mavlink_service = MavlinkService(context=self.ctx)
+        self.mavlink_service = MavlinkService(
+            context=self.ctx,
+            qopenhd_addr=(self.config.gcs_ip, self.config.gcs_port),
+        )
         self.mavlink_service.start()
         self.mavlink_service.send_text_to_gcs("Application started", MavSeverity.INFO)
         log.info("Application Start")
@@ -74,8 +77,11 @@ class App:
         """
         init parametrs
         """
-
-        p_path = pathlib.Path(__file__).parent.parent.joinpath("config").joinpath(self.config.config_name)
+        p_path = pathlib.Path(self.config.config_name)
+        if not p_path.is_absolute():
+            p_path = pathlib.Path.cwd().joinpath(p_path)
+        if not p_path.exists():
+            raise FileNotFoundError(f"Parameters config not found: {p_path}")
         log.info("load parameters from: {}", p_path)
         return Parameters(yaml_path=p_path)
 
