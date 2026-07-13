@@ -2,6 +2,9 @@
 Application entry point
 """
 import pathlib
+from dataclasses import fields
+
+import yaml
 
 from bt_app.control import (
     joy_zmq_adapter
@@ -88,7 +91,20 @@ class App:
         """
         merge cli with yaml file and return config object
         """
+        
         config = VehicleConfig()
+        config_path = pathlib.Path(__file__).parent.parent.joinpath("config", "vehicle_config.yaml")
+        if config_path.exists():
+            """
+            if file exists load and merge
+            """
+            with config_path.open("r", encoding="utf-8") as config_file:
+                config_data = yaml.safe_load(config_file) or {}
+            config_fields = {field.name for field in fields(VehicleConfig)}
+            for key, value in config_data.items():
+                if key in config_fields:
+                    setattr(config, key, value)
+        
         # handle config
         return config
 
