@@ -69,7 +69,14 @@ class Robot_StateMachine:
             "resolve",
             RobotState.MANUAL,
             RobotState.FAILSAFE,
-            conditions=[self.enter_failsafe],
+            conditions=[self.enter_failsafe]
+        )
+
+        self.machine.add_transition(
+            "resolve",
+            RobotState.HOVER,
+            RobotState.FAILSAFE,
+            conditions=[self.enter_failsafe]
         )
         # endregion to FAILSAFE
 
