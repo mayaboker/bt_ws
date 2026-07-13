@@ -15,9 +15,15 @@ ZMQ_TRACKER_RESULT_TOPIC = b"tracker_result"
 
 NO_RC_CHANNELS = 8
 
+class AutoModeType(IntEnum):
+    DISABLED = 1000
+    CURSOR = 1500
+    TRACKING = 2000
+
 class JoyInterrupt(StrEnum):
     TAKEOFF_REQUEST = "takeoff_request"
     MANUAL_REQUEST = "manual_request"
+    AUTO_REQUEST = "auto_request"
 
 class AETR1234(IntEnum):
     """

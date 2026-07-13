@@ -19,7 +19,12 @@ from bt_app.rc_utils import matching
 from bt_app.vehicle_config import VehicleConfig
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.mavlink_wrapper import MavlinkService
-from bt_app.common import NO_RC_CHANNELS, RobotState, JoyInterrupt, MavSeverity
+from bt_app.common import (
+    AutoModeType,
+    NO_RC_CHANNELS, 
+    RobotState,
+    JoyInterrupt,
+    MavSeverity)
 from bt_app.parameters.generated import ParameterKey
 from bt_app.common import (
     FREQ_HZ
@@ -87,6 +92,43 @@ class App:
         # handle config
         return config
 
+    def __load_controllers(self):
+        """
+        load controllers
+        each controller implement update method (signature don't force)
+        - joystick zmq adapter
+        - failsafe
+        - arm
+        - takeoff
+        """
+        #region joy adapter
+        joy_adapter = joy_zmq_adapter.JoyZmqAdapter(self.__params)
+        joy_adapter.start()
+        joy_adapter.on_failsafe_enter += self._joystick_fs_enter
+        joy_adapter.on_failsafe_exit += self.__joystick_fs_exit
+        joy_adapter.on_interrupt += self.__handle_joy_interrupt
+        # TODO: convert to const and mapping
+        self.register_joy_interrupt(joy_adapter)
+        self.controllers[RobotState.MANUAL] = joy_adapter
+        log.info("load joy adapter")
+        #endregion
+
+        # fail safe controller
+        self.controllers[RobotState.FAILSAFE] = FailSafeController(self.__params)
+
+        # Takeoff
+        self.controllers[RobotState.TAKEOFF] = TakeoffController(self.__params)
+
+        # arm controller
+        self.controllers[RobotState.ARM] = ARMController(self.__params)
+
+        # search controller
+        self.controllers[RobotState.HOVER] = HoverYawController(self.__params)
+
+    def register_joy_interrupt(self, joy_adapter):
+        joy_adapter.register_interrupt(AETR1234.AUX4, JoyInterrupt.TAKEOFF_REQUEST)
+        joy_adapter.register_interrupt(AETR1234.AUX1, JoyInterrupt.MANUAL_REQUEST)
+        joy_adapter.register_interrupt(AETR1234.AUX2, JoyInterrupt.AUTO_REQUEST)
 
     def _state_changed_handler(self, previous_state, new_state):
         """
@@ -107,7 +149,6 @@ class App:
         """
         run before the state change, one time on change
         """
-        print(f"aaaaaaaaaaaaaa{next}aaaaaaaaaaaaaaaaaaaaaaa")
         if prev == RobotState.IDLE and next == RobotState.ARM:
             log.warning("reset arm controller ")
             self.controllers[RobotState.ARM].reset()
@@ -126,13 +167,13 @@ class App:
 
         elif next == RobotState.HOVER:
             # self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[AETR1234.THROTTLE])
-            print(f"aaaaaaaaaaappppppppppppppppppp{self.ctx.drone_alt}")
             self.controllers[RobotState.HOVER].setpoint = self.ctx.drone_alt
 
         elif next == RobotState.FAILSAFE:
             # set the failsafe controller setpoint to the current altitude
             self.controllers[RobotState.FAILSAFE].setpoint = self.ctx.drone_alt
 
+    #region joystick handlers
     def __handle_joy_interrupt(self, name, value):
         """
         handle interrupt that register as joy action
@@ -143,45 +184,18 @@ class App:
             self.ctx.joy_takeoff_request = value == RC_MAX
             log.warning(f"--------takeoff interrupt {value}")
 
-        if name == JoyInterrupt.MANUAL_REQUEST:
+        elif name == JoyInterrupt.MANUAL_REQUEST:
             self.ctx.joy_manual_request = value == RC_MAX
             self.ctx.armed_allowed = False
             log.warning(f"manual request {self.ctx.joy_manual_request}")
 
-    def __load_controllers(self):
-        """
-        load controllers
-        each controller implement update method (signature don't force)
-        - joystick zmq adapter
-        - failsafe
-        - arm
-        - takeoff
-        """
-        #region joy adapter
-        joy_adapter = joy_zmq_adapter.JoyZmqAdapter(self.__params)
-        joy_adapter.start()
-        joy_adapter.on_failsafe_enter += self._joystick_fs_enter
-        joy_adapter.on_failsafe_exit += self.__joystick_fs_exit
-        joy_adapter.on_interrupt += self.__handle_joy_interrupt
-        # TODO: convert to const and mapping
-        joy_adapter.register_interrupt(AETR1234.AUX4, JoyInterrupt.TAKEOFF_REQUEST)
-        joy_adapter.register_interrupt(AETR1234.AUX1, JoyInterrupt.MANUAL_REQUEST)
-        self.controllers[RobotState.MANUAL] = joy_adapter
-        log.info("load joy adapter")
-        #endregion
+        elif name == JoyInterrupt.AUTO_REQUEST:
+            self.ctx.auto_mode_type = AutoModeType(value)
+            log.warning(f"auto request {self.ctx.auto_mode_type}")
 
-        # fail safe controller
-        self.controllers[RobotState.FAILSAFE] = FailSafeController(self.__params)
+        
 
-        # Takeoff
-        self.controllers[RobotState.TAKEOFF] = TakeoffController(self.__params)
-
-        # arm controller
-        self.controllers[RobotState.ARM] = ARMController(self.__params)
-
-        # search controller
-        self.controllers[RobotState.HOVER] = HoverYawController(self.__params)
-
+    
     def _joystick_fs_enter(self):
         log.warning("Joystick Failsafe Entered")
         self.ctx.joy_fail_safe = True
@@ -202,7 +216,7 @@ class App:
         self.ctx.request_rc = current.copy()
         throttle_for_arm = current[AETR1234.THROTTLE] < 1050
         yaw_for_arm = 1450 < current[AETR1234.YAW] < 1550
-        # one time manover
+        # one time 
         roll_for_arm = current[AETR1234.ROLL] < 1050
         pitch_for_arm = current[AETR1234.PITCH] < 1050
         if all([roll_for_arm, pitch_for_arm]):#, roll_for_arm, pitch_for_arm]):
@@ -211,6 +225,8 @@ class App:
 
         self.ctx.joy_arm_requested = all([throttle_for_arm, yaw_for_arm, self.ctx.armed_allowed])#, roll_for_arm, pitch_for_arm])
         # end region
+
+    #endregion
 
     def __update_state(self):
         """

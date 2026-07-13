@@ -62,8 +62,6 @@ class HoverYawController:
         """
         CHANGE_SIGN = -1
         throttle_output = int(self.alt_pid.update(setpoint, current))
-        print(f"--{setpoint} {current}, {throttle_output}")
-        # throttle_output *= CHANGE_SIGN
         throttle_output += self._baseline
         
         rc_yaw = self.rc_mapper.yaw_rate_to_rc(self.yaw_rate)

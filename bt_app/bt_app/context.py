@@ -5,7 +5,7 @@ The context is a singleton class that holds the current state of the drone. It i
 from bt_app.common import RobotState
 from dataclasses import dataclass, field
 from typing import ClassVar
-
+from bt_app.common import AutoModeType
 
 @dataclass(init=False)
 class Context:
@@ -36,6 +36,8 @@ class Context:
     drone_rc: list = field(default_factory=list)
     request_rc: list = field(default_factory=list)
     battery_voltage: float = 0.0
+    # auto mode state 
+    auto_mode_type: AutoModeType = field(default=AutoModeType.DISABLED)
 
 
 
@@ -68,6 +70,6 @@ class Context:
         self.drone_rc = []
         self.request_rc = []
         self.battery_voltage = 0.0
-
+        self.auto_mode_type = AutoModeType.DISABLED
         self._initialized = True
     # endregion
