@@ -1,7 +1,7 @@
 from typing import Any
 
 from loguru import logger as log
-
+from bt_app.common import NO_RC_CHANNELS
 from bt_app.control.pid import PID
 
 # from bt_app.control.rc_mapper import BetaflightRcMapper
@@ -41,6 +41,7 @@ class FailSafeController:
     
     @setpoint.setter
     def setpoint(self, value: float) -> None:
+        log.info(f"setpoint {value}")
         self._setpoint = value
     # endregion
 
@@ -59,8 +60,7 @@ class FailSafeController:
         return channels
 
     def make_channels(self, throttle: int = 0, yaw: int = 0) -> list[int]:
-        channels = [RC_MID] * 8
-        throttle = RC_MID + int(throttle)
+        channels = [RC_MID] * NO_RC_CHANNELS
 
         channels[RCChannel.THROTTLE] = max(RC_MIN, min(RC_MAX, throttle))
         channels[RCChannel.YAW] = max(RC_MIN, min(RC_MAX, yaw))

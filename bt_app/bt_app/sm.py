@@ -53,6 +53,7 @@ class Robot_StateMachine:
             "resolve",
             RobotState.ARM,
             RobotState.MANUAL,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.ARM, RobotState.MANUAL),
             conditions=[self.enter_manual_mode_from_arm],
         )
 
@@ -60,6 +61,7 @@ class Robot_StateMachine:
             "resolve",
             RobotState.ARM,
             RobotState.TAKEOFF,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.ARM, RobotState.TAKEOFF),
             conditions=[self.enter_takeoff_from_arm]
         )
         # endregion
@@ -69,6 +71,7 @@ class Robot_StateMachine:
             "resolve",
             RobotState.MANUAL,
             RobotState.FAILSAFE,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.MANUAL, RobotState.FAILSAFE),
             conditions=[self.enter_failsafe]
         )
 
@@ -76,6 +79,7 @@ class Robot_StateMachine:
             "resolve",
             RobotState.HOVER,
             RobotState.FAILSAFE,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.HOVER, RobotState.FAILSAFE),
             conditions=[self.enter_failsafe]
         )
         # endregion to FAILSAFE
@@ -85,6 +89,7 @@ class Robot_StateMachine:
             "resolve",
             RobotState.FAILSAFE,
             RobotState.HOVER,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.FAILSAFE, RobotState.HOVER),
             conditions=[self.exit_failsafe],
         )
         # endregion to FAILSAFE
@@ -124,6 +129,7 @@ class Robot_StateMachine:
             "resolve",
             RobotState.HOVER,
             RobotState.MANUAL,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.HOVER, RobotState.MANUAL),
             conditions=[self.enter_manual_mode_from_hover],
         )
         # endregion from HOVER
