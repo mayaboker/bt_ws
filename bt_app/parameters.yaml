@@ -98,7 +98,7 @@ parameters:
       max: 10.0
   hover.throttle_deadband:
     type: int
-    default: 100
+    default: 200
     limits:
       min: 0
       max: 500

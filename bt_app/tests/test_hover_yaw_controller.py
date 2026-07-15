@@ -23,7 +23,7 @@ class FakeParameters:
             ParameterKey.HOVER_KD: 20.0,
             ParameterKey.HOVER_OUTPUT_LIMITS: 400.0,
             ParameterKey.HOVER_ALTITUDE_RATE_M_S: 1.0,
-            ParameterKey.HOVER_THROTTLE_DEADBAND: 100,
+            ParameterKey.HOVER_THROTTLE_DEADBAND: 200,
             ParameterKey.HOVER_MIN_ALTITUDE: 2.0,
             ParameterKey.HOVER_YAW_YAW_RATE: 0,
             ParameterKey.BETAFLIGHT_YAW_RATE_FULL_STICK_DPS: 67.0,
@@ -52,6 +52,16 @@ def test_centered_throttle_does_not_change_setpoint(monkeypatch):
     controller.reset_setpoint(3.0)
 
     controller.update_setpoint_from_throttle(1500)
+
+    assert controller.setpoint == 3.0
+
+
+def test_throttle_inside_enlarged_deadband_does_not_change_setpoint(monkeypatch):
+    controller = controller_with_times(monkeypatch, [0.0, 0.0, 1.0, 2.0])
+    controller.reset_setpoint(3.0)
+
+    controller.update_setpoint_from_throttle(1400)
+    controller.update_setpoint_from_throttle(1600)
 
     assert controller.setpoint == 3.0
 
