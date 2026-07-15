@@ -417,6 +417,7 @@ class App:
         update/keep the controllers with the current context
         """
         if self.ctx.drone_rc is not None:
+            pass
             #TODO: to understand why base 3
             # AETR - roll, pitch, throttle, yaw, aux1, aux2, aux3, aux4
             # AERT - roll, pitch, yaw, throttle, aux1, aux2, aux3, aux4

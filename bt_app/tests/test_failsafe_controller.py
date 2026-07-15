@@ -82,6 +82,18 @@ def test_starts_descent_after_timeout_and_emits_event_once(monkeypatch):
     assert not controller.consume_descent_started_event()
 
 
+def test_zero_hold_time_disables_descent_phase(monkeypatch):
+    controller = controller_with_times(monkeypatch, [0.0, 0.0, 60.0])
+    controller.hold_time_s = 0.0
+    controller.reset(4.0)
+
+    controller.update(current_altitude=4.0, vertical_speed_m_s=0.0)
+
+    assert controller.phase == FailSafePhase.HOLD
+    assert controller.setpoint == 4.0
+    assert not controller.consume_descent_started_event()
+
+
 def test_descent_setpoint_clamps_to_min_altitude(monkeypatch):
     controller = controller_with_times(monkeypatch, [0.0, 0.0, 20.0])
     controller.reset(1.0)

@@ -92,6 +92,14 @@ class Robot_StateMachine:
             before=lambda x: self.on_before_state_changed.emit(RobotState.FAILSAFE, RobotState.HOVER),
             conditions=[self.exit_failsafe],
         )
+
+        self.machine.add_transition(
+            "resolve",
+            RobotState.FAILSAFE,
+            RobotState.IDLE,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.FAILSAFE, RobotState.IDLE),
+            conditions=[self.exit_failsafe_to_idle],
+        )
         # endregion to FAILSAFE
 
         #region from manual
@@ -228,6 +236,16 @@ class Robot_StateMachine:
         ok = all([
             self.ctx.armed,
             not self.ctx.joy_fail_safe
+        ])
+
+        return ok
+    
+    def exit_failsafe_to_idle(self, event):
+        # TODO: Add on air
+        ok = all([
+            not self.ctx.joy_fail_safe,
+            not self.ctx.joy_manual_request,
+            not self.ctx.joy_takeoff_request
         ])
 
         return ok

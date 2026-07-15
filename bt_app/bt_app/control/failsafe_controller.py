@@ -45,6 +45,10 @@ class FailSafeController:
         self.land_confirm_s = self.params.get(ParameterKey.FAILSAFE_LAND_CONFIRM_S)
         self.params.on_parameter_changed.subscribe(self.on_parameter_changed)
         self._setup()
+        self._banner()
+
+    def _banner(self):
+        log.info(f"descend after {self.hold_time_s}")
 
     def _setup(self):
         self.alt_pid = PID(
@@ -116,8 +120,11 @@ class FailSafeController:
         )
 
     def _update_hold_phase(self, now: float) -> None:
+        if float(self.hold_time_s) <= 0.0:
+            return
         if now - self._phase_started_s < float(self.hold_time_s):
             return
+        log.info("--------- enter descend to land phase -----------")
         self.phase = FailSafePhase.DESCEND
         self._phase_started_s = now
         self._descent_started_event = True

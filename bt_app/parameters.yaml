@@ -7,7 +7,7 @@ parameters:
       max: 120
   failsafe.hold_time_s:
     type: float
-    default: 5.0
+    default: 15.0
     limits:
       min: 0.0
       max: 120.0
