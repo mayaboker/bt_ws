@@ -1,4 +1,5 @@
 from typing import Any
+import time
 
 from loguru import logger as log
 
@@ -21,8 +22,12 @@ class HoverYawController:
         self.params = params
         self._baseline = 0.0
         self._setpoint = 0.0
+        self.altitude_rate_m_s = self.params.get(ParameterKey.HOVER_ALTITUDE_RATE_M_S)
+        self.throttle_deadband = self.params.get(ParameterKey.HOVER_THROTTLE_DEADBAND)
+        self.min_altitude = self.params.get(ParameterKey.HOVER_MIN_ALTITUDE)
         self.yaw_rate = self.params.get("hover_yaw.yaw_rate")
         self.yaw_stick_range = self.params.get("betaflight_yaw_rate_full_stick_dps")
+        self._last_setpoint_update_s = time.monotonic()
         self.rc_mapper = BetaflightRcMapper(
             yaw_rate_full_stick_dps=self.yaw_stick_range,
         )
@@ -48,8 +53,35 @@ class HoverYawController:
     
     @setpoint.setter
     def setpoint(self, value: float) -> None:
-        log.info(f"setpoint {value}")
-        self._setpoint = value
+        log.debug(f"setpoint {value}")
+        self._setpoint = max(float(value), float(self.min_altitude))
+
+    def reset_setpoint(self, current_altitude: float) -> None:
+        self.setpoint = current_altitude
+        self._last_setpoint_update_s = time.monotonic()
+
+    def update_setpoint_from_throttle(self, throttle_rc: int) -> float:
+        now = time.monotonic()
+        dt_s = max(0.0, now - self._last_setpoint_update_s)
+        self._last_setpoint_update_s = now
+
+        throttle = int(throttle_rc)
+        center = RC_MID
+        deadband = int(self.throttle_deadband)
+        upper_deadband = center + deadband // 2
+        lower_deadband = center - deadband // 2
+
+        if throttle > upper_deadband:
+            denominator = max(1, RC_MAX - upper_deadband)
+            stick_fraction = min(1.0, (throttle - upper_deadband) / denominator)
+        elif throttle < lower_deadband:
+            denominator = max(1, lower_deadband - RC_MIN)
+            stick_fraction = -min(1.0, (lower_deadband - throttle) / denominator)
+        else:
+            return self._setpoint
+
+        self.setpoint = self._setpoint + stick_fraction * float(self.altitude_rate_m_s) * dt_s
+        return self._setpoint
     
     def set_baseline (self, current_throttle: float):
         self._baseline = current_throttle
@@ -93,9 +125,15 @@ class HoverYawController:
             self.alt_pid.kd = value
         elif name == ParameterKey.HOVER_OUTPUT_LIMITS:
             self.alt_pid.set_output_limits(value)
-        elif name == ParameterKey.HOVER_YAW_RATE:
+        elif name == ParameterKey.HOVER_ALTITUDE_RATE_M_S:
+            self.altitude_rate_m_s = value
+        elif name == ParameterKey.HOVER_THROTTLE_DEADBAND:
+            self.throttle_deadband = value
+        elif name == ParameterKey.HOVER_MIN_ALTITUDE:
+            self.min_altitude = value
+            self.setpoint = self._setpoint
+        elif name == ParameterKey.HOVER_YAW_YAW_RATE:
             self.yaw_rate = value
         elif name == ParameterKey.BETAFLIGHT_YAW_RATE_FULL_STICK_DPS:
             self.yaw_stick_range = value
             self.rc_mapper.yaw_rate_full_stick_dps = value
-

@@ -13,7 +13,7 @@ class SupportsParameterGet(Protocol):
 
 
 class TypedParameters:
-    """Typed parameter accessors generated from bt_app/config/parameters.yaml."""
+    """Typed parameter accessors generated from bt_app/parameters.yaml."""
 
     def __init__(self, parameters: SupportsParameterGet) -> None:
         self._parameters = parameters
@@ -47,6 +47,10 @@ class TypedParameters:
         return cast(Literal['stabilize', 'altitude', 'position'], self._parameters.get(ParameterKey.FLIGHT_MODE))
 
     @property
+    def hover_altitude_rate_m_s(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HOVER_ALTITUDE_RATE_M_S))
+
+    @property
     def hover_kd(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.HOVER_KD))
 
@@ -59,8 +63,16 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.HOVER_KP))
 
     @property
+    def hover_min_altitude(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HOVER_MIN_ALTITUDE))
+
+    @property
     def hover_output_limits(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.HOVER_OUTPUT_LIMITS))
+
+    @property
+    def hover_throttle_deadband(self) -> int:
+        return cast(int, self._parameters.get(ParameterKey.HOVER_THROTTLE_DEADBAND))
 
     @property
     def hover_yaw_altitude(self) -> float:

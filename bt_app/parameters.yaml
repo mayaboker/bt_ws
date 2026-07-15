@@ -54,6 +54,24 @@ parameters:
     limits:
       min: 0.0
       max: 500.0
+  hover.altitude_rate_m_s:
+    type: float
+    default: 1.0
+    limits:
+      min: 0.0
+      max: 10.0
+  hover.throttle_deadband:
+    type: int
+    default: 100
+    limits:
+      min: 0
+      max: 500
+  hover.min_altitude:
+    type: float
+    default: 2.0
+    limits:
+      min: 0.0
+      max: 200.0
   takeoff_altitude:
     type: float
     default: 2.0

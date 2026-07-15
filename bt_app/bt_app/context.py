@@ -35,9 +35,9 @@ class Context:
     # current drone alt , update from drone at 10hz
     drone_alt: float = 0.0
     #current rc read from drone (use to switch between external and internal pilot and controller switch)
-    drone_rc: list = field(default_factory=list)
-    request_rc: list = field(default_factory=list)
-    sent_rc: list = field(default_factory=list)
+    drone_rc: list = field(default_factory=lambda: DEFAULT_RC_CHANNELS.copy())
+    request_rc: list = field(default_factory=lambda: DEFAULT_RC_CHANNELS.copy())
+    sent_rc: list = field(default_factory=lambda: DEFAULT_RC_CHANNELS.copy())
     battery_voltage: float = 0.0
     # auto mode state 
     auto_mode_type: AutoModeType = field(default=AutoModeType.DISABLED)
@@ -70,9 +70,9 @@ class Context:
         self.auto_arm = False
         self.takeoff_reach = False
         self.drone_alt = 0.0
-        self.drone_rc = DEFAULT_RC_CHANNELS
-        self.request_rc = DEFAULT_RC_CHANNELS
-        self.sent_rc = DEFAULT_RC_CHANNELS
+        self.drone_rc = DEFAULT_RC_CHANNELS.copy()
+        self.request_rc = DEFAULT_RC_CHANNELS.copy()
+        self.sent_rc = DEFAULT_RC_CHANNELS.copy()
         self.battery_voltage = 0.0
         self.auto_mode_type = AutoModeType.DISABLED
         self._initialized = True

@@ -6,7 +6,7 @@ from typing import Final, Literal
 
 
 class ParameterKey:
-    """Parameter keys generated from bt_app/config/parameters.yaml."""
+    """Parameter keys generated from bt_app/parameters.yaml."""
     ALTITUDE_KD: Final[Literal['altitude.kd']] = 'altitude.kd'
     ALTITUDE_KI: Final[Literal['altitude.ki']] = 'altitude.ki'
     ALTITUDE_KP: Final[Literal['altitude.kp']] = 'altitude.kp'
@@ -14,10 +14,13 @@ class ParameterKey:
     BETAFLIGHT_YAW_RATE_FULL_STICK_DPS: Final[Literal['betaflight_yaw_rate_full_stick_dps']] = 'betaflight_yaw_rate_full_stick_dps'
     FAIL_SHAPE_ALT: Final[Literal['fail_shape.alt']] = 'fail_shape.alt'
     FLIGHT_MODE: Final[Literal['flight.mode']] = 'flight.mode'
+    HOVER_ALTITUDE_RATE_M_S: Final[Literal['hover.altitude_rate_m_s']] = 'hover.altitude_rate_m_s'
     HOVER_KD: Final[Literal['hover.kd']] = 'hover.kd'
     HOVER_KI: Final[Literal['hover.ki']] = 'hover.ki'
     HOVER_KP: Final[Literal['hover.kp']] = 'hover.kp'
+    HOVER_MIN_ALTITUDE: Final[Literal['hover.min_altitude']] = 'hover.min_altitude'
     HOVER_OUTPUT_LIMITS: Final[Literal['hover.output_limits']] = 'hover.output_limits'
+    HOVER_THROTTLE_DEADBAND: Final[Literal['hover.throttle_deadband']] = 'hover.throttle_deadband'
     HOVER_YAW_ALTITUDE: Final[Literal['hover_yaw.altitude']] = 'hover_yaw.altitude'
     HOVER_YAW_YAW_RATE: Final[Literal['hover_yaw.yaw_rate']] = 'hover_yaw.yaw_rate'
     TAKEOFF_ALTITUDE: Final[Literal['takeoff_altitude']] = 'takeoff_altitude'
@@ -39,10 +42,13 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'betaflight_yaw_rate_full_stick_dps',
     'fail_shape.alt',
     'flight.mode',
+    'hover.altitude_rate_m_s',
     'hover.kd',
     'hover.ki',
     'hover.kp',
+    'hover.min_altitude',
     'hover.output_limits',
+    'hover.throttle_deadband',
     'hover_yaw.altitude',
     'hover_yaw.yaw_rate',
     'takeoff_altitude',

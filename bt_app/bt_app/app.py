@@ -179,7 +179,7 @@ class App:
 
         elif next == RobotState.HOVER:
             # self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[AETR1234.THROTTLE])
-            self.controllers[RobotState.HOVER].setpoint = self.ctx.drone_alt
+            self.controllers[RobotState.HOVER].reset_setpoint(self.ctx.drone_alt)
 
         elif next == RobotState.FAILSAFE:
             # set the failsafe controller setpoint to the current altitude
@@ -288,6 +288,9 @@ class App:
         - get rc from search controller
         """
         
+        self.controllers[RobotState.HOVER].update_setpoint_from_throttle(
+            self.ctx.request_rc[AETR1234.THROTTLE]
+        )
         setpoint = self.controllers[RobotState.HOVER].setpoint
         rc = self.controllers[RobotState.HOVER].update(setpoint, self.ctx.drone_alt)
         

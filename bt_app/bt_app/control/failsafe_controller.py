@@ -79,9 +79,8 @@ class FailSafeController:
             self.alt_pid.kd = value
         elif name == ParameterKey.HOVER_OUTPUT_LIMITS:
             self.alt_pid.set_output_limits(value)
-        elif name == ParameterKey.HOVER_YAW_RATE:
+        elif name == ParameterKey.HOVER_YAW_YAW_RATE:
             self.yaw_rate = value
         elif name == ParameterKey.BETAFLIGHT_YAW_RATE_FULL_STICK_DPS:
             self.yaw_stick_range = value
             self.rc_mapper.yaw_rate_full_stick_dps = value
-
