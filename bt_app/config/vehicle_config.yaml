@@ -17,6 +17,12 @@ drone_serial_port: "/dev/ttyUSB0"
 gcs_ip: "127.0.0.1"
 gcs_port: 14550
 
+# Optional non-blocking RC/state recorder.
+rc_record_enabled: true
+rc_record_path: "logs/rc_state.csv"
+rc_record_flush_interval_s: 1.0
+rc_record_queue_size: 1000
+
 # Parameter YAML filename under bt_app/config.
 config_name: "parameters.yaml"
 

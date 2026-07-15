@@ -19,6 +19,7 @@ from bt_app.rc_utils import matching
 from bt_app.vehicle_config import VehicleConfig
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.mavlink_wrapper import MavlinkService
+from bt_app.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
 from bt_app.common import (
     AutoModeType,
     NO_RC_CHANNELS, 
@@ -69,6 +70,7 @@ class App:
             qopenhd_addr=(self.config.gcs_ip, self.config.gcs_port),
         )
         self.mavlink_service.start()
+        self.rc_recorder = self.__load_rc_recorder()
         self.mavlink_service.send_text_to_gcs("Application started", MavSeverity.INFO)
         log.info("Application Start")
 
@@ -89,6 +91,18 @@ class App:
         """Create and start betaflight msp adapter"""
         self.drone_adapter = MSPAdapter(self.config)
         self.drone_adapter.start()
+
+    def __load_rc_recorder(self):
+        if not self.config.rc_record_enabled:
+            return NullRcStateRecorder()
+
+        recorder = RcStateRecorder(
+            self.config.rc_record_path,
+            flush_interval_s=self.config.rc_record_flush_interval_s,
+            queue_size=self.config.rc_record_queue_size,
+        )
+        recorder.start()
+        return recorder
 
     def __load_controllers(self):
         """
@@ -358,16 +372,22 @@ class App:
                 self._notification_center()
                 self.robot_sm.resolve()
                 rc_channels = self._resolve_rc()
-                rc_channels = matching(self.ctx, rc_channels, self.config)
+                # rc_channels = matching(self.ctx, rc_channels, self.config)
                 if not rc_channels:
                     log.error(f"rc not valid: {rc_channels} in state {self.ctx.state}")
                     continue
-                self.drone_adapter.dispatcher.set_rc(rc_channels[:8])
+                self.ctx.sent_rc = rc_channels[:8].copy()
+                self.rc_recorder.record(self.ctx.state, self.ctx.sent_rc)
+                self.drone_adapter.dispatcher.set_rc(self.ctx.sent_rc)
                 time.sleep(1/FREQ_HZ)
         except KeyboardInterrupt:
             log.warning("Stopping...")
         finally:
             self.mavlink_service.stop()
+            try:
+                self.rc_recorder.stop()
+            except Exception as exc:
+                log.exception("Failed to stop RC state recorder: {}", exc)
 
 def main(config: VehicleConfig):
     app = App(config=config)

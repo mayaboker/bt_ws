@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 from bt_app.common import AutoModeType
 
+DEFAULT_RC_CHANNELS = [1500, 1500, 1000, 1500, 1000, 1000, 1000, 1000]
+
 @dataclass(init=False)
 class Context:
     # current state machine state update when state changed
@@ -35,6 +37,7 @@ class Context:
     #current rc read from drone (use to switch between external and internal pilot and controller switch)
     drone_rc: list = field(default_factory=list)
     request_rc: list = field(default_factory=list)
+    sent_rc: list = field(default_factory=list)
     battery_voltage: float = 0.0
     # auto mode state 
     auto_mode_type: AutoModeType = field(default=AutoModeType.DISABLED)
@@ -67,8 +70,9 @@ class Context:
         self.auto_arm = False
         self.takeoff_reach = False
         self.drone_alt = 0.0
-        self.drone_rc = []
-        self.request_rc = []
+        self.drone_rc = DEFAULT_RC_CHANNELS
+        self.request_rc = DEFAULT_RC_CHANNELS
+        self.sent_rc = DEFAULT_RC_CHANNELS
         self.battery_voltage = 0.0
         self.auto_mode_type = AutoModeType.DISABLED
         self._initialized = True

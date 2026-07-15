@@ -1,3 +1,5 @@
+import struct
+
 import pytest
 from pymavlink import mavutil
 
@@ -11,7 +13,11 @@ from bt_app.mavlink_wrapper import (
     HeartbeatCommand,
     MavlinkService,
     ReceivePendingCommand,
+    SendChannelStatusV2ExtensionCommand,
+    SendRcChannelsCommand,
     SysStatusCommand,
+    V2_EXTENSION_CHANNEL_STATUS_MESSAGE_TYPE,
+    V2_EXTENSION_CHANNEL_STATUS_PAYLOAD_FORMAT,
     make_base_mode,
 )
 from bt_app.vehicle_config import VehicleConfig
@@ -61,6 +67,18 @@ class FakeMavlinkService:
     def send_text_to_gcs(self, text, severity=mavutil.mavlink.MAV_SEVERITY_INFO):
         self.text = text
         self.severity = severity
+
+
+class FakeRcRecorder:
+    def __init__(self):
+        self.records = []
+        self.stopped = False
+
+    def record(self, state, channels):
+        self.records.append((state, list(channels)))
+
+    def stop(self):
+        self.stopped = True
 
 
 class FakeScheduler:
@@ -148,7 +166,7 @@ def test_start_is_idempotent_and_starts_scheduler_once(monkeypatch):
     scheduler = FakeScheduler.instances[0]
     assert service.open_count == 1
     assert scheduler.started
-    assert len(scheduler.scheduled) == 4
+    assert len(scheduler.scheduled) == 6
     assert isinstance(scheduler.scheduled[0][0], HeartbeatCommand)
     assert scheduler.scheduled[0][1] == service.heartbeat_interval_s
     assert scheduler.scheduled[0][3] == HeartbeatCommand.key
@@ -158,9 +176,15 @@ def test_start_is_idempotent_and_starts_scheduler_once(monkeypatch):
     assert isinstance(scheduler.scheduled[2][0], SysStatusCommand)
     assert scheduler.scheduled[2][1] == 2.0
     assert scheduler.scheduled[2][3] == SysStatusCommand.key
-    assert isinstance(scheduler.scheduled[3][0], ReceivePendingCommand)
-    assert scheduler.scheduled[3][1] == service.poll_interval_s
-    assert scheduler.scheduled[3][3] == ReceivePendingCommand.key
+    assert isinstance(scheduler.scheduled[3][0], SendRcChannelsCommand)
+    assert scheduler.scheduled[3][1] == service.rc_channels_interval_s
+    assert scheduler.scheduled[3][3] == SendRcChannelsCommand.key
+    assert isinstance(scheduler.scheduled[4][0], SendChannelStatusV2ExtensionCommand)
+    assert scheduler.scheduled[4][1] == 0.1
+    assert scheduler.scheduled[4][3] == SendChannelStatusV2ExtensionCommand.key
+    assert isinstance(scheduler.scheduled[5][0], ReceivePendingCommand)
+    assert scheduler.scheduled[5][1] == service.poll_interval_s
+    assert scheduler.scheduled[5][3] == ReceivePendingCommand.key
 
     service.stop()
     assert not service._started
@@ -286,6 +310,59 @@ def test_receive_pending_command_calls_receive_pending():
     assert service.receive_count == 1
 
 
+def test_channel_status_v2_extension_reads_sent_rc_and_state():
+    ctx = Context()
+    ctx.state = RobotState.HOVER
+    ctx.sent_rc = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800]
+    service = MavlinkService(context=ctx)
+    socket = FakeSocket()
+    service._socket = socket
+
+    service._send_channel_status_v2_extension()
+
+    assert socket.sent
+    payload, addr = socket.sent[0]
+    msg = decode_mavlink(payload)
+    assert addr == service.qopenhd_addr
+    assert msg.get_type() == "V2_EXTENSION"
+    assert msg.message_type == V2_EXTENSION_CHANNEL_STATUS_MESSAGE_TYPE
+    unpacked = struct.unpack(
+        V2_EXTENSION_CHANNEL_STATUS_PAYLOAD_FORMAT,
+        bytes(msg.payload[: struct.calcsize(V2_EXTENSION_CHANNEL_STATUS_PAYLOAD_FORMAT)]),
+    )
+    assert unpacked == (
+        1,
+        1,
+        int(RobotState.HOVER),
+        0,
+        1100,
+        1200,
+        1300,
+        1400,
+        1500,
+        1600,
+        1700,
+        1800,
+    )
+
+
+def test_channel_status_v2_extension_uses_safe_defaults_without_sent_rc():
+    ctx = Context()
+    service = MavlinkService(context=ctx)
+    socket = FakeSocket()
+    service._socket = socket
+
+    service._send_channel_status_v2_extension()
+
+    payload, _addr = socket.sent[0]
+    msg = decode_mavlink(payload)
+    unpacked = struct.unpack(
+        V2_EXTENSION_CHANNEL_STATUS_PAYLOAD_FORMAT,
+        bytes(msg.payload[: struct.calcsize(V2_EXTENSION_CHANNEL_STATUS_PAYLOAD_FORMAT)]),
+    )
+    assert unpacked[4:] == (1500, 1500, 1000, 1500, 1000, 1000, 1000, 1000)
+
+
 def test_app_starts_mavlink_service_with_shared_context(monkeypatch):
     FakeMavlinkService.instances = []
     monkeypatch.setattr(app_module, "MavlinkService", FakeMavlinkService)
@@ -314,3 +391,58 @@ def test_app_run_stops_mavlink_service_on_shutdown(monkeypatch):
     app.run()
 
     assert service.stopped
+
+
+def test_app_run_updates_sent_rc_before_dispatch(monkeypatch):
+    service = FakeMavlinkService(context=Context())
+    app = App.__new__(App)
+    app.ctx = Context()
+    app.config = VehicleConfig()
+    app.robot_sm = type("RobotSm", (), {"resolve": lambda self: None})()
+    app.mavlink_service = service
+    app.rc_recorder = FakeRcRecorder()
+    dispatched = []
+
+    class FakeDispatcher:
+        def set_rc(self, channels):
+            dispatched.append(list(channels))
+            raise KeyboardInterrupt
+
+    app.drone_adapter = type(
+        "DroneAdapter",
+        (),
+        {"dispatcher": FakeDispatcher()},
+    )()
+
+    monkeypatch.setattr(App, "_App__update_state", lambda self: None)
+    monkeypatch.setattr(App, "_update_controllers", lambda self: None)
+    monkeypatch.setattr(App, "_notification_center", lambda self: None)
+    monkeypatch.setattr(
+        App,
+        "_resolve_rc",
+        lambda self: [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700],
+    )
+    monkeypatch.setattr(
+        app_module,
+        "matching",
+        lambda ctx, rc_channels, config: [
+            1100,
+            1200,
+            1300,
+            1400,
+            1500,
+            1600,
+            1700,
+            1800,
+        ],
+    )
+
+    app.run()
+
+    assert app.ctx.sent_rc == [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800]
+    assert app.rc_recorder.records == [
+        (RobotState.IDLE, [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800])
+    ]
+    assert dispatched == [[1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800]]
+    assert service.stopped
+    assert app.rc_recorder.stopped

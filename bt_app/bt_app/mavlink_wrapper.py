@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import socket
+import struct
 import time
 from dataclasses import dataclass
 from typing import ClassVar
@@ -21,11 +22,19 @@ COMP_ID = mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1
 GLOBAL_POSITION_INT_INTERVAL_S = 0.5
 SYS_STATUS_INTERVAL_S = 2.0
 RC_CHANNELS_INTERVAL_S = 0.5
+V2_EXTENSION_CHANNEL_STATUS_INTERVAL_S = 0.1
+V2_EXTENSION_CHANNEL_STATUS_MESSAGE_TYPE = 1
+V2_EXTENSION_CHANNEL_STATUS_VERSION = 1
+V2_EXTENSION_CHANNEL_STATUS_COMMAND_ID = 1
+V2_EXTENSION_CHANNEL_STATUS_FLAGS = 0
+V2_EXTENSION_CHANNEL_STATUS_PAYLOAD_FORMAT = "<BBBH8H"
+V2_EXTENSION_PAYLOAD_SIZE = 249
+SAFE_DEFAULT_RC_CHANNELS = (1500, 1500, 1000, 1500, 1000, 1000, 1000, 1000)
 UNKNOWN_GLOBAL_POSITION_HEADING = 65535
 MAX_UINT16 = 65535
 UNKNOWN_RSSI = 255
-UNKNOWN_CURRENT_BATTERY = 5
-UNKNOWN_BATTERY_REMAINING = 100
+UNKNOWN_CURRENT_BATTERY = -1
+UNKNOWN_BATTERY_REMAINING = -1
 
 
 def make_base_mode(armed: bool) -> int:
@@ -72,6 +81,15 @@ class SendRcChannelsCommand(Command):
 
 
 @dataclass
+class SendChannelStatusV2ExtensionCommand(Command):
+    key: ClassVar[str | None] = "mavlink_v2_extension_channel_status"
+    service: "MavlinkService"
+
+    def execute(self, context: SchedulerContext) -> None:
+        self.service._send_channel_status_v2_extension()
+
+
+@dataclass
 class ReceivePendingCommand(Command):
     key: ClassVar[str | None] = "mavlink_receive_pending"
     service: "MavlinkService"
@@ -102,6 +120,7 @@ class MavlinkService:
         global_position_interval_s: float = GLOBAL_POSITION_INT_INTERVAL_S,
         sys_status_interval_s: float = SYS_STATUS_INTERVAL_S,
         rc_channels_interval_s: float = RC_CHANNELS_INTERVAL_S,
+        v2_extension_channel_status_interval_s: float = V2_EXTENSION_CHANNEL_STATUS_INTERVAL_S,
         poll_interval_s: float = 0.01,
     ) -> None:
         self.context = context
@@ -111,6 +130,7 @@ class MavlinkService:
         self.global_position_interval_s = global_position_interval_s
         self.sys_status_interval_s = sys_status_interval_s
         self.rc_channels_interval_s = rc_channels_interval_s
+        self.v2_extension_channel_status_interval_s = v2_extension_channel_status_interval_s
         self.poll_interval_s = poll_interval_s
         self._started = False
         self._socket = None
@@ -151,6 +171,11 @@ class MavlinkService:
             SendRcChannelsCommand(self),
             interval_s=self.rc_channels_interval_s,
             key=SendRcChannelsCommand.key,
+        )
+        self._scheduler.schedule(
+            SendChannelStatusV2ExtensionCommand(self),
+            interval_s=self.v2_extension_channel_status_interval_s,
+            key=SendChannelStatusV2ExtensionCommand.key,
         )
         self._scheduler.schedule(
             ReceivePendingCommand(self),
@@ -256,6 +281,40 @@ class MavlinkService:
             UNKNOWN_RSSI,
         )
         self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
+
+    def _send_v2_extension(self, message_type: int, payload: bytes) -> None:
+        if self._socket is None:
+            return
+
+        padded_payload = payload[:V2_EXTENSION_PAYLOAD_SIZE].ljust(
+            V2_EXTENSION_PAYLOAD_SIZE,
+            b"\x00",
+        )
+        msg = self._mav.v2_extension_encode(0, 0, 0, message_type, padded_payload)
+        self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
+
+    def _make_channel_status_payload(self) -> bytes:
+        channels = getattr(self.context, "sent_rc", None)
+        if not channels or len(channels) != len(SAFE_DEFAULT_RC_CHANNELS):
+            channels = SAFE_DEFAULT_RC_CHANNELS
+
+        normalized_channels = tuple(
+            max(0, min(int(channel), MAX_UINT16)) for channel in channels
+        )
+        return struct.pack(
+            V2_EXTENSION_CHANNEL_STATUS_PAYLOAD_FORMAT,
+            V2_EXTENSION_CHANNEL_STATUS_VERSION,
+            V2_EXTENSION_CHANNEL_STATUS_COMMAND_ID,
+            int(self.context.state),
+            V2_EXTENSION_CHANNEL_STATUS_FLAGS,
+            *normalized_channels,
+        )
+
+    def _send_channel_status_v2_extension(self) -> None:
+        self._send_v2_extension(
+            V2_EXTENSION_CHANNEL_STATUS_MESSAGE_TYPE,
+            self._make_channel_status_payload(),
+        )
 
     def _send_text_to_gcs(
         self,
