@@ -117,3 +117,4 @@ runs/detect/train/weights/best.pt
 runs/detect/train/weights/last.pt
 runs/detect/train/weights/best_rknn_model/best-rk3566.rknn
 runs/detect/train/weights/best_rknn_model/metadata.yaml
+bt_app/logs/rc_state.csv

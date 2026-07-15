@@ -290,12 +290,17 @@ class App:
         search logic
         - get rc from search controller
         """
-        print(self.ctx.request_rc[AETR1234.THROTTLE])
-        self.controllers[RobotState.HOVER].update_setpoint_from_throttle(
+        controller = self.controllers[RobotState.HOVER]
+        controller.update_setpoint_from_throttle(
             self.ctx.request_rc[AETR1234.THROTTLE]
         )
-        setpoint = self.controllers[RobotState.HOVER].setpoint
-        rc = self.controllers[RobotState.HOVER].update(setpoint, self.ctx.drone_alt)
+        if controller.consume_altitude_setpoint_request_event():
+            self.mavlink_service.send_text_to_gcs(
+                "Hover altitude setpoint change requested",
+                MavSeverity.DEBUG,
+            )
+        setpoint = controller.setpoint
+        rc = controller.update(setpoint, self.ctx.drone_alt)
         
         return rc
     

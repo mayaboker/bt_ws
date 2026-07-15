@@ -28,6 +28,8 @@ class HoverYawController:
         self.yaw_rate = self.params.get("hover_yaw.yaw_rate")
         self.yaw_stick_range = self.params.get("betaflight_yaw_rate_full_stick_dps")
         self._last_setpoint_update_s = time.monotonic()
+        self._throttle_outside_deadband = False
+        self._altitude_setpoint_request_event = False
         self.rc_mapper = BetaflightRcMapper(
             yaw_rate_full_stick_dps=self.yaw_stick_range,
         )
@@ -59,6 +61,14 @@ class HoverYawController:
     def reset_setpoint(self, current_altitude: float) -> None:
         self.setpoint = current_altitude
         self._last_setpoint_update_s = time.monotonic()
+        self._throttle_outside_deadband = False
+        self._altitude_setpoint_request_event = False
+
+    def consume_altitude_setpoint_request_event(self) -> bool:
+        if not self._altitude_setpoint_request_event:
+            return False
+        self._altitude_setpoint_request_event = False
+        return True
 
     def update_setpoint_from_throttle(self, throttle_rc: int) -> float:
         now = time.monotonic()
@@ -78,8 +88,12 @@ class HoverYawController:
             denominator = max(1, lower_deadband - RC_MIN)
             stick_fraction = -min(1.0, (lower_deadband - throttle) / denominator)
         else:
+            self._throttle_outside_deadband = False
             return self._setpoint
 
+        if not self._throttle_outside_deadband:
+            self._altitude_setpoint_request_event = True
+        self._throttle_outside_deadband = True
         self.setpoint = self._setpoint + stick_fraction * float(self.altitude_rate_m_s) * dt_s
         return self._setpoint
     

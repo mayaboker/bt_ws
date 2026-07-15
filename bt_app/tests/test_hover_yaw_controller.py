@@ -1,5 +1,5 @@
 from bt_app.app import App
-from bt_app.common import AETR1234, RobotState
+from bt_app.common import AETR1234, MavSeverity, RobotState
 from bt_app.context import Context
 from bt_app.control import hover_yaw_controller as hover_module
 from bt_app.control.hover_yaw_controller import HoverYawController
@@ -75,6 +75,25 @@ def test_high_throttle_increases_setpoint(monkeypatch):
     assert controller.setpoint == 4.0
 
 
+def test_altitude_setpoint_request_event_fires_when_throttle_exits_deadband(monkeypatch):
+    controller = controller_with_times(monkeypatch, [0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
+    controller.reset_setpoint(3.0)
+
+    controller.update_setpoint_from_throttle(1500)
+    assert not controller.consume_altitude_setpoint_request_event()
+
+    controller.update_setpoint_from_throttle(1800)
+    assert controller.consume_altitude_setpoint_request_event()
+    assert not controller.consume_altitude_setpoint_request_event()
+
+    controller.update_setpoint_from_throttle(1900)
+    assert not controller.consume_altitude_setpoint_request_event()
+
+    controller.update_setpoint_from_throttle(1500)
+    controller.update_setpoint_from_throttle(1700)
+    assert controller.consume_altitude_setpoint_request_event()
+
+
 def test_low_throttle_decreases_setpoint_but_not_below_min_altitude(monkeypatch):
     controller = controller_with_times(monkeypatch, [0.0, 0.0, 2.0])
     controller.reset_setpoint(3.0)
@@ -94,6 +113,9 @@ def test_hover_handler_updates_setpoint_from_requested_throttle():
         def update_setpoint_from_throttle(self, throttle_rc):
             self.throttle_rc = throttle_rc
 
+        def consume_altitude_setpoint_request_event(self):
+            return False
+
         def update(self, setpoint, current):
             self.update_args = (setpoint, current)
             return [1500] * 8
@@ -112,3 +134,45 @@ def test_hover_handler_updates_setpoint_from_requested_throttle():
     assert hover_controller.throttle_rc == 1800
     assert hover_controller.update_args == (5.0, 4.2)
     assert rc == [1500] * 8
+
+
+def test_hover_handler_sends_low_severity_text_when_setpoint_request_starts():
+    class FakeHoverController:
+        def __init__(self):
+            self.setpoint = 5.0
+            self.event_pending = True
+
+        def update_setpoint_from_throttle(self, throttle_rc):
+            pass
+
+        def consume_altitude_setpoint_request_event(self):
+            if not self.event_pending:
+                return False
+            self.event_pending = False
+            return True
+
+        def update(self, setpoint, current):
+            return [1500] * 8
+
+    class FakeMavlinkService:
+        def __init__(self):
+            self.messages = []
+
+        def send_text_to_gcs(self, text, severity):
+            self.messages.append((text, severity))
+
+    app = App.__new__(App)
+    app.ctx = Context()
+    app.ctx.state = RobotState.HOVER
+    app.ctx.drone_alt = 4.2
+    app.ctx.request_rc = [1500] * 8
+    app.ctx.request_rc[AETR1234.THROTTLE] = 1800
+    app.controllers = {RobotState.HOVER: FakeHoverController()}
+    app.mavlink_service = FakeMavlinkService()
+
+    app.hover_handler()
+    app.hover_handler()
+
+    assert app.mavlink_service.messages == [
+        ("Hover altitude setpoint change requested", MavSeverity.DEBUG)
+    ]
