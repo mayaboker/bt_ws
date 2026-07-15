@@ -345,6 +345,13 @@ class App:
         
         return rc
 
+    def _manual_handler(self):
+        channels = self.controllers[RobotState.MANUAL].update()
+        if self.ctx.armed:
+            channels[AETR1234.AUX1] = RC_MAX
+            channels[AETR1234.AUX2] = RC_MAX
+        return channels
+
     def _notification_center(self):
         """
         TODO: think about queue and other service handle it, for know we  only user scheduler submit it like queue"""
@@ -416,11 +423,7 @@ class App:
         ------
         resolve rc channels from the active state controller"""
         if self.ctx.state == RobotState.MANUAL:
-            channels = self.controllers[RobotState.MANUAL].update()
-            if self.ctx.armed:
-                channels[AETR1234.AUX1] = RC_MAX
-                channels[AETR1234.AUX2] = RC_MAX
-            return channels
+            return self._manual_handler()
         elif self.ctx.state == RobotState.FAILSAFE:
             return self.failsafe_handler()
         elif self.ctx.state == RobotState.TAKEOFF:
@@ -450,6 +453,7 @@ class App:
                 )
         return sanitized
 
+    #TODO: move to arm controller 
     def _make_disarm_channels(self) -> list[int]:
         channels = [RC_MIN] * NO_RC_CHANNELS
         channels[RCChannel.ROLL] = RC_MID
