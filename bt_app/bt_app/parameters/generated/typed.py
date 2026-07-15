@@ -43,6 +43,30 @@ class TypedParameters:
         return cast(int, self._parameters.get(ParameterKey.FAIL_SHAPE_ALT))
 
     @property
+    def failsafe_descent_rate_m_s(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.FAILSAFE_DESCENT_RATE_M_S))
+
+    @property
+    def failsafe_hold_time_s(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.FAILSAFE_HOLD_TIME_S))
+
+    @property
+    def failsafe_land_altitude_m(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.FAILSAFE_LAND_ALTITUDE_M))
+
+    @property
+    def failsafe_land_confirm_s(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.FAILSAFE_LAND_CONFIRM_S))
+
+    @property
+    def failsafe_land_vertical_speed_m_s(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.FAILSAFE_LAND_VERTICAL_SPEED_M_S))
+
+    @property
+    def failsafe_min_altitude(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.FAILSAFE_MIN_ALTITUDE))
+
+    @property
     def flight_mode(self) -> Literal['stabilize', 'altitude', 'position']:
         return cast(Literal['stabilize', 'altitude', 'position'], self._parameters.get(ParameterKey.FLIGHT_MODE))
 

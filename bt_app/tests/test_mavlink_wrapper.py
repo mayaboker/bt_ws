@@ -446,3 +446,42 @@ def test_app_run_updates_sent_rc_before_dispatch(monkeypatch):
     assert dispatched == [[1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800]]
     assert service.stopped
     assert app.rc_recorder.stopped
+
+
+def test_app_run_replaces_invalid_rc_channel_before_dispatch(monkeypatch):
+    service = FakeMavlinkService(context=Context())
+    app = App.__new__(App)
+    app.ctx = Context()
+    app.config = VehicleConfig()
+    app.robot_sm = type("RobotSm", (), {"resolve": lambda self: None})()
+    app.mavlink_service = service
+    app.rc_recorder = FakeRcRecorder()
+    dispatched = []
+
+    class FakeDispatcher:
+        def set_rc(self, channels):
+            dispatched.append(list(channels))
+            raise KeyboardInterrupt
+
+    app.drone_adapter = type(
+        "DroneAdapter",
+        (),
+        {"dispatcher": FakeDispatcher()},
+    )()
+
+    monkeypatch.setattr(App, "_App__update_state", lambda self: None)
+    monkeypatch.setattr(App, "_update_controllers", lambda self: None)
+    monkeypatch.setattr(App, "_notification_center", lambda self: None)
+    monkeypatch.setattr(
+        App,
+        "_resolve_rc",
+        lambda self: [1500, 1500, 1000, 1500, 2000, 2000, 0, 1000],
+    )
+    monkeypatch.setattr(app_module, "matching", lambda ctx, rc_channels, config: rc_channels)
+
+    app.run()
+
+    assert app.ctx.sent_rc == [1500, 1500, 1000, 1500, 2000, 2000, 1000, 1000]
+    assert dispatched == [[1500, 1500, 1000, 1500, 2000, 2000, 1000, 1000]]
+    assert service.stopped
+    assert app.rc_recorder.stopped

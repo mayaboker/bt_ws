@@ -13,6 +13,12 @@ class ParameterKey:
     ALTITUDE_OUTPUT_LIMITS: Final[Literal['altitude.output_limits']] = 'altitude.output_limits'
     BETAFLIGHT_YAW_RATE_FULL_STICK_DPS: Final[Literal['betaflight_yaw_rate_full_stick_dps']] = 'betaflight_yaw_rate_full_stick_dps'
     FAIL_SHAPE_ALT: Final[Literal['fail_shape.alt']] = 'fail_shape.alt'
+    FAILSAFE_DESCENT_RATE_M_S: Final[Literal['failsafe.descent_rate_m_s']] = 'failsafe.descent_rate_m_s'
+    FAILSAFE_HOLD_TIME_S: Final[Literal['failsafe.hold_time_s']] = 'failsafe.hold_time_s'
+    FAILSAFE_LAND_ALTITUDE_M: Final[Literal['failsafe.land_altitude_m']] = 'failsafe.land_altitude_m'
+    FAILSAFE_LAND_CONFIRM_S: Final[Literal['failsafe.land_confirm_s']] = 'failsafe.land_confirm_s'
+    FAILSAFE_LAND_VERTICAL_SPEED_M_S: Final[Literal['failsafe.land_vertical_speed_m_s']] = 'failsafe.land_vertical_speed_m_s'
+    FAILSAFE_MIN_ALTITUDE: Final[Literal['failsafe.min_altitude']] = 'failsafe.min_altitude'
     FLIGHT_MODE: Final[Literal['flight.mode']] = 'flight.mode'
     HOVER_ALTITUDE_RATE_M_S: Final[Literal['hover.altitude_rate_m_s']] = 'hover.altitude_rate_m_s'
     HOVER_KD: Final[Literal['hover.kd']] = 'hover.kd'
@@ -41,6 +47,12 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'altitude.output_limits',
     'betaflight_yaw_rate_full_stick_dps',
     'fail_shape.alt',
+    'failsafe.descent_rate_m_s',
+    'failsafe.hold_time_s',
+    'failsafe.land_altitude_m',
+    'failsafe.land_confirm_s',
+    'failsafe.land_vertical_speed_m_s',
+    'failsafe.min_altitude',
     'flight.mode',
     'hover.altitude_rate_m_s',
     'hover.kd',

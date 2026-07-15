@@ -14,7 +14,7 @@ from bt_app.control import (
     HoverYawController
 )
 from bt_app.sm import Robot_StateMachine
-from bt_app.context import Context
+from bt_app.context import Context, DEFAULT_RC_CHANNELS
 from bt_app.rc_utils import matching
 from bt_app.vehicle_config import VehicleConfig
 from bt_app.msp_adapter import MSPAdapter
@@ -183,7 +183,7 @@ class App:
 
         elif next == RobotState.FAILSAFE:
             # set the failsafe controller setpoint to the current altitude
-            self.controllers[RobotState.FAILSAFE].setpoint = self.ctx.drone_alt
+            self.controllers[RobotState.FAILSAFE].reset(self.ctx.drone_alt)
 
     #region joystick handlers
     def __handle_joy_interrupt(self, name, value):
@@ -259,6 +259,9 @@ class App:
         # end region
 
         self.ctx.drone_alt = self.drone_adapter.get_altitude()
+        altitude = self.drone_adapter.dispatcher.last_altitude
+        if altitude and "vertical_speed_m_s" in altitude:
+            self.ctx.drone_vertical_speed = altitude["vertical_speed_m_s"]
         ## read last drone rc
         self.ctx.drone_rc = self.drone_adapter.get_rc()
         # log.info(self.ctx.state, self.ctx.armable, self.ctx.takeoff_interrupt)
@@ -287,7 +290,7 @@ class App:
         search logic
         - get rc from search controller
         """
-        
+        print(self.ctx.request_rc[AETR1234.THROTTLE])
         self.controllers[RobotState.HOVER].update_setpoint_from_throttle(
             self.ctx.request_rc[AETR1234.THROTTLE]
         )
@@ -302,8 +305,18 @@ class App:
         TODO: what the altitude setpoint for failsafe? should we use the last known altitude or a predefined altitude?
         """
         
-        setpoint = self.controllers[RobotState.FAILSAFE].setpoint
-        rc = self.controllers[RobotState.FAILSAFE].update(setpoint, self.ctx.drone_alt)
+        controller = self.controllers[RobotState.FAILSAFE]
+        rc = controller.update(self.ctx.drone_alt, self.ctx.drone_vertical_speed)
+        if controller.consume_descent_started_event():
+            self.mavlink_service.send_text_to_gcs(
+                "Failsafe landing started",
+                MavSeverity.WARNING,
+            )
+        if controller.consume_landed_event():
+            self.mavlink_service.send_text_to_gcs(
+                "Failsafe land detected, disarming",
+                MavSeverity.WARNING,
+            )
         
         return rc
 
@@ -357,6 +370,21 @@ class App:
             log.error(f"RC selector not implemented for state {self.ctx.state}")
             raise NotImplementedError(f"RC selector not implemented for state {self.ctx.state}")
 
+    def _sanitize_rc_channels(self, channels: list[int]) -> list[int]:
+        sanitized = DEFAULT_RC_CHANNELS.copy()
+        for index, channel in enumerate(channels[:NO_RC_CHANNELS]):
+            channel = int(channel)
+            if RC_MIN <= channel <= RC_MAX:
+                sanitized[index] = channel
+            else:
+                log.debug(
+                    "Invalid RC channel {} value {}, using default {}",
+                    index + 1,
+                    channel,
+                    sanitized[index],
+                )
+        return sanitized
+
     def run(self):
         """
         Application entry and running loop
@@ -375,11 +403,11 @@ class App:
                 self._notification_center()
                 self.robot_sm.resolve()
                 rc_channels = self._resolve_rc()
-                # rc_channels = matching(self.ctx, rc_channels, self.config)
+                rc_channels = matching(self.ctx, rc_channels, self.config)
                 if not rc_channels:
                     log.error(f"rc not valid: {rc_channels} in state {self.ctx.state}")
                     continue
-                self.ctx.sent_rc = rc_channels[:8].copy()
+                self.ctx.sent_rc = self._sanitize_rc_channels(rc_channels)
                 self.rc_recorder.record(self.ctx.state, self.ctx.sent_rc)
                 self.drone_adapter.dispatcher.set_rc(self.ctx.sent_rc)
                 time.sleep(1/FREQ_HZ)

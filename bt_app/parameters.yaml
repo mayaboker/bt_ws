@@ -5,6 +5,42 @@ parameters:
     limits:
       min: 1
       max: 120
+  failsafe.hold_time_s:
+    type: float
+    default: 5.0
+    limits:
+      min: 0.0
+      max: 120.0
+  failsafe.descent_rate_m_s:
+    type: float
+    default: 0.5
+    limits:
+      min: 0.0
+      max: 10.0
+  failsafe.min_altitude:
+    type: float
+    default: 0.0
+    limits:
+      min: 0.0
+      max: 200.0
+  failsafe.land_altitude_m:
+    type: float
+    default: 0.15
+    limits:
+      min: 0.0
+      max: 10.0
+  failsafe.land_vertical_speed_m_s:
+    type: float
+    default: 0.1
+    limits:
+      min: 0.0
+      max: 10.0
+  failsafe.land_confirm_s:
+    type: float
+    default: 1.0
+    limits:
+      min: 0.0
+      max: 30.0
       
   altitude.kp:
     type: float

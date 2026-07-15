@@ -34,6 +34,7 @@ class Context:
     takeoff_reach: bool = field(default=False)
     # current drone alt , update from drone at 10hz
     drone_alt: float = 0.0
+    drone_vertical_speed: float = 0.0
     #current rc read from drone (use to switch between external and internal pilot and controller switch)
     drone_rc: list = field(default_factory=lambda: DEFAULT_RC_CHANNELS.copy())
     request_rc: list = field(default_factory=lambda: DEFAULT_RC_CHANNELS.copy())
@@ -70,6 +71,7 @@ class Context:
         self.auto_arm = False
         self.takeoff_reach = False
         self.drone_alt = 0.0
+        self.drone_vertical_speed = 0.0
         self.drone_rc = DEFAULT_RC_CHANNELS.copy()
         self.request_rc = DEFAULT_RC_CHANNELS.copy()
         self.sent_rc = DEFAULT_RC_CHANNELS.copy()
