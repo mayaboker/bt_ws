@@ -262,7 +262,7 @@ class App:
 
     def __update_state(self):
         """
-        update the context / blackborad from drone and other sensors
+        update the context / blackboard from drone and other sensors
         the context contain variable for state machine condition
         """
         # region read drone state
