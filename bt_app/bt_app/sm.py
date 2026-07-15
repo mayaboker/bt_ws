@@ -189,7 +189,7 @@ class Robot_StateMachine:
         joy_arm_requested: true if joy request arm combination, reset when disarmed or arm failed
         self.ctx.armable: true if drone can be armed
         """
-        s1_or_s4 = self.ctx.joy_takeoff_request != self.ctx.joy_manual_request
+        s1_or_s4 = self.ctx.joy_takeoff_request or self.ctx.joy_manual_request
         ok = all([
             s1_or_s4,
             self.ctx.armable,
@@ -199,11 +199,10 @@ class Robot_StateMachine:
         return  ok
     
     def enter_takeoff_from_arm(self, event):
-        s1_or_s4 = self.ctx.joy_takeoff_request != self.ctx.joy_manual_request
         ok = all([
-            s1_or_s4,
             self.ctx.armed,
             self.ctx.joy_takeoff_request,
+            not self.ctx.joy_manual_request
         ])
         return  ok
 
@@ -228,9 +227,7 @@ class Robot_StateMachine:
     
     # region manual mode
     def enter_manual_mode_from_arm(self, event):
-        s1_or_s4 = self.ctx.joy_takeoff_request != self.ctx.joy_manual_request
         ok = all([
-            s1_or_s4,
             self.ctx.armed,
             self.ctx.joy_manual_request
         ])
