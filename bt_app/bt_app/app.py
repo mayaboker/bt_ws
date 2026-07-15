@@ -172,6 +172,7 @@ class App:
             self.ctx.joy_manual_request = False
         
     def _handle_before_state_changed(self, prev, next):
+        
         """
         run before the state change, one time on change
         """
@@ -179,31 +180,40 @@ class App:
             log.warning("reset arm controller ")
             self.controllers[RobotState.ARM].reset()
 
-        if next == RobotState.MANUAL:
+        # only next condition
+        match next:
+            case RobotState.MANUAL:
+                self._reset_manual_land_detector()
+
+            case RobotState.TAKEOFF:
+                self.controllers[RobotState.TAKEOFF].reset()
+
+            case RobotState.IDLE:
+                log.warning("reset all controllers")
+                self.controllers[RobotState.ARM].reset()
+                self.controllers[RobotState.TAKEOFF].reset()
+                self.ctx.armed_allowed = False
+                self.ctx.joy_arm_requested = False
+                self.ctx.joy_takeoff_request = False
+                self.ctx.armed = False
+                self._reset_manual_land_detector()
+
+            case RobotState.HOVER:
+                # self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[AETR1234.THROTTLE])
+                base_line = RC_MID# self.ctx.drone_rc[3]
+                self.controllers[RobotState.HOVER].reset_setpoint(self.ctx.drone_alt)
+                self.controllers[RobotState.HOVER].set_baseline(base_line)# AETR1234.THROTTLE
+                log.info(f"switch to alt hold at altitude {self.ctx.drone_alt} with baseline {base_line}")
+
+            case RobotState.FAILSAFE:
+                # set the failsafe controller setpoint to the current altitude
+                base_line = RC_MID# self.ctx.drone_rc[3]
+                self.controllers[RobotState.FAILSAFE].reset(self.ctx.drone_alt)
+                self.controllers[RobotState.FAILSAFE].set_baseline(base_line)# AETR1234.THROTTLE 
+                log.info(f"switch to alt hold at altitude {self.ctx.drone_alt} with baseline {base_line}")
+
+        if prev == RobotState.MANUAL and next != RobotState.IDLE:
             self._reset_manual_land_detector()
-        elif prev == RobotState.MANUAL and next != RobotState.IDLE:
-            self._reset_manual_land_detector()
-
-        elif next == RobotState.TAKEOFF:
-            self.controllers[RobotState.TAKEOFF].reset()
-
-        elif next == RobotState.IDLE:
-            log.warning("reset all controllers")
-            self.controllers[RobotState.ARM].reset()
-            self.controllers[RobotState.TAKEOFF].reset()
-            self.ctx.armed_allowed = False
-            self.ctx.joy_arm_requested = False
-            self.ctx.joy_takeoff_request = False
-            self.ctx.armed = False
-            self._reset_manual_land_detector()
-
-        elif next == RobotState.HOVER:
-            # self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[AETR1234.THROTTLE])
-            self.controllers[RobotState.HOVER].reset_setpoint(self.ctx.drone_alt)
-
-        elif next == RobotState.FAILSAFE:
-            # set the failsafe controller setpoint to the current altitude
-            self.controllers[RobotState.FAILSAFE].reset(self.ctx.drone_alt)
 
     #region joystick handlers
     def __handle_joy_interrupt(self, name, value):
@@ -412,10 +422,10 @@ class App:
             # AERT - roll, pitch, yaw, throttle, aux1, aux2, aux3, aux4
             # print(format_channels(self.ctx.drone_rc, formatter=tuple(AETR1234)))
             # log.info(f"Drone RC: {self.ctx.drone_rc[3]}")
-            if self.ctx.state != RobotState.HOVER:
-                self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE
-            if self.ctx.state != RobotState.FAILSAFE: 
-                self.controllers[RobotState.FAILSAFE].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE 
+            # if self.ctx.state != RobotState.HOVER:
+            #     self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE
+            # if self.ctx.state != RobotState.FAILSAFE: 
+            #     self.controllers[RobotState.FAILSAFE].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE 
 
     def _resolve_rc(self):
         """
