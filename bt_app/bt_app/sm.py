@@ -122,6 +122,13 @@ class Robot_StateMachine:
             before=lambda x: self.on_before_state_changed.emit(RobotState.TAKEOFF, RobotState.HOVER),
             conditions=[self.enter_hover_from_takeoff]
         )
+        self.machine.add_transition(
+            "resolve",
+            RobotState.TAKEOFF,
+            RobotState.MANUAL,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.TAKEOFF, RobotState.MANUAL),
+            conditions=[self.enter_manual_from_takeoff]
+        )
         # endregion from TAKEOFF
 
         # region from HOVER
@@ -226,6 +233,13 @@ class Robot_StateMachine:
         return ok
     
     # region manual mode
+    def enter_manual_from_takeoff(self, event):
+        ok = all([
+            self.ctx.armed,
+            self.ctx.joy_manual_request
+        ])
+        return ok
+    
     def enter_manual_mode_from_arm(self, event):
         ok = all([
             self.ctx.armed,
