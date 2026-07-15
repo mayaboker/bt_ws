@@ -107,6 +107,10 @@ class TypedParameters:
         return cast(int, self._parameters.get(ParameterKey.HOVER_YAW_YAW_RATE))
 
     @property
+    def manual_idle_land_confirm_s(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.MANUAL_IDLE_LAND_CONFIRM_S))
+
+    @property
     def takeoff_altitude(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.TAKEOFF_ALTITUDE))
 

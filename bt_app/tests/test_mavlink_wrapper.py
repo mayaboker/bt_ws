@@ -367,6 +367,7 @@ def test_app_starts_mavlink_service_with_shared_context(monkeypatch):
     FakeMavlinkService.instances = []
     monkeypatch.setattr(app_module, "MavlinkService", FakeMavlinkService)
     monkeypatch.setattr(App, "_App__load_parameters", lambda self: object())
+    monkeypatch.setattr(App, "_App__load_manual_land_detector", lambda self: object())
     monkeypatch.setattr(App, "_App__load_drone_interface", lambda self: None)
     monkeypatch.setattr(App, "_App__load_controllers", lambda self: None)
 
@@ -422,28 +423,13 @@ def test_app_run_updates_sent_rc_before_dispatch(monkeypatch):
         "_resolve_rc",
         lambda self: [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700],
     )
-    monkeypatch.setattr(
-        app_module,
-        "matching",
-        lambda ctx, rc_channels, config: [
-            1100,
-            1200,
-            1300,
-            1400,
-            1500,
-            1600,
-            1700,
-            1800,
-        ],
-    )
-
     app.run()
 
-    assert app.ctx.sent_rc == [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800]
+    assert app.ctx.sent_rc == [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700]
     assert app.rc_recorder.records == [
-        (RobotState.IDLE, [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800])
+        (RobotState.IDLE, [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700])
     ]
-    assert dispatched == [[1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800]]
+    assert dispatched == [[1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700]]
     assert service.stopped
     assert app.rc_recorder.stopped
 
@@ -477,8 +463,6 @@ def test_app_run_replaces_invalid_rc_channel_before_dispatch(monkeypatch):
         "_resolve_rc",
         lambda self: [1500, 1500, 1000, 1500, 2000, 2000, 0, 1000],
     )
-    monkeypatch.setattr(app_module, "matching", lambda ctx, rc_channels, config: rc_channels)
-
     app.run()
 
     assert app.ctx.sent_rc == [1500, 1500, 1000, 1500, 2000, 2000, 1000, 1000]

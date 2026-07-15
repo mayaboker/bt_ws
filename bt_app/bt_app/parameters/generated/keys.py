@@ -29,6 +29,7 @@ class ParameterKey:
     HOVER_THROTTLE_DEADBAND: Final[Literal['hover.throttle_deadband']] = 'hover.throttle_deadband'
     HOVER_YAW_ALTITUDE: Final[Literal['hover_yaw.altitude']] = 'hover_yaw.altitude'
     HOVER_YAW_YAW_RATE: Final[Literal['hover_yaw.yaw_rate']] = 'hover_yaw.yaw_rate'
+    MANUAL_IDLE_LAND_CONFIRM_S: Final[Literal['manual_idle.land_confirm_s']] = 'manual_idle.land_confirm_s'
     TAKEOFF_ALTITUDE: Final[Literal['takeoff_altitude']] = 'takeoff_altitude'
     VISUAL_FINAL_TRACKING_DISTANCE: Final[Literal['visual.final_tracking_distance']] = 'visual.final_tracking_distance'
     VISUAL_FORWARD_PITCH_DEG: Final[Literal['visual.forward_pitch_deg']] = 'visual.forward_pitch_deg'
@@ -63,6 +64,7 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'hover.throttle_deadband',
     'hover_yaw.altitude',
     'hover_yaw.yaw_rate',
+    'manual_idle.land_confirm_s',
     'takeoff_altitude',
     'visual.final_tracking_distance',
     'visual.forward_pitch_deg',

@@ -151,12 +151,12 @@ class Robot_StateMachine:
     # ------------------
     def enter_idle_from_manual(self, event):
         """
-        close manual request and throttle low to enter idle
+        close manual request, throttle low, and confirmed landed to enter idle
         """
         ok = all([
             not self.ctx.joy_manual_request,
             self.ctx.request_rc[AETR1234.THROTTLE] < 1050,
-            self.ctx.request_rc[AETR1234.YAW] > 1950,
+            self.ctx.manual_land_confirmed,
         ])
         
         return ok

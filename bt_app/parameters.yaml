@@ -41,6 +41,12 @@ parameters:
     limits:
       min: 0.0
       max: 30.0
+  manual_idle.land_confirm_s:
+    type: float
+    default: 2.0
+    limits:
+      min: 0.0
+      max: 30.0
       
   altitude.kp:
     type: float

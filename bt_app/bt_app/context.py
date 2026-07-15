@@ -32,6 +32,7 @@ class Context:
     auto_arm: bool = field(default=False)
     # is takeoff reach alt and wait (stabilize)
     takeoff_reach: bool = field(default=False)
+    manual_land_confirmed: bool = field(default=False)
     # current drone alt , update from drone at 10hz
     drone_alt: float = 0.0
     drone_vertical_speed: float = 0.0
@@ -70,6 +71,7 @@ class Context:
         self.take_control = False
         self.auto_arm = False
         self.takeoff_reach = False
+        self.manual_land_confirmed = False
         self.drone_alt = 0.0
         self.drone_vertical_speed = 0.0
         self.drone_rc = DEFAULT_RC_CHANNELS.copy()

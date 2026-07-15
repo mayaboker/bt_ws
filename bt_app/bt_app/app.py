@@ -15,11 +15,11 @@ from bt_app.control import (
 )
 from bt_app.sm import Robot_StateMachine
 from bt_app.context import Context, DEFAULT_RC_CHANNELS
-from bt_app.rc_utils import matching
 from bt_app.vehicle_config import VehicleConfig
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.mavlink_wrapper import MavlinkService
 from bt_app.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
+from bt_app.control.land_detector import LandDetector
 from bt_app.common import (
     AutoModeType,
     NO_RC_CHANNELS, 
@@ -32,7 +32,9 @@ from bt_app.common import (
 )
 from bt_app.msp.bt_v2 import (
     RC_MAX,
-    RC_MIN
+    RC_MID,
+    RC_MIN,
+    RCChannel_alias as RCChannel,
 )
 from bt_app.common import AETR1234
 from bt_app.parameters import Parameters
@@ -62,6 +64,9 @@ class App:
         # loaded controllers
         self.controllers = {}
         self.__params = self.__load_parameters()
+        self.manual_land_detector = self.__load_manual_land_detector()
+        self._manual_land_detection_started_notified = False
+        self._manual_land_confirmed_notified = False
         
         self.__load_drone_interface()
         self.__load_controllers()
@@ -86,6 +91,15 @@ class App:
             raise FileNotFoundError(f"Parameters config not found: {p_path}")
         log.info("load parameters from: {}", p_path)
         return Parameters(yaml_path=p_path)
+
+    def __load_manual_land_detector(self):
+        return LandDetector(
+            confirm_s=self.__params.get(ParameterKey.MANUAL_IDLE_LAND_CONFIRM_S),
+            land_altitude_m=self.__params.get(ParameterKey.FAILSAFE_LAND_ALTITUDE_M),
+            land_vertical_speed_m_s=self.__params.get(
+                ParameterKey.FAILSAFE_LAND_VERTICAL_SPEED_M_S
+            ),
+        )
 
     def __load_drone_interface(self):
         """Create and start betaflight msp adapter"""
@@ -165,6 +179,11 @@ class App:
             log.warning("reset arm controller ")
             self.controllers[RobotState.ARM].reset()
 
+        if next == RobotState.MANUAL:
+            self._reset_manual_land_detector()
+        elif prev == RobotState.MANUAL and next != RobotState.IDLE:
+            self._reset_manual_land_detector()
+
         elif next == RobotState.TAKEOFF:
             self.controllers[RobotState.TAKEOFF].reset()
 
@@ -176,6 +195,7 @@ class App:
             self.ctx.joy_arm_requested = False
             self.ctx.joy_takeoff_request = False
             self.ctx.armed = False
+            self._reset_manual_land_detector()
 
         elif next == RobotState.HOVER:
             # self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[AETR1234.THROTTLE])
@@ -328,12 +348,52 @@ class App:
     def _notification_center(self):
         """
         TODO: think about queue and other service handle it, for know we  only user scheduler submit it like queue"""
+        self._update_manual_land_detector()
         if self.ctx.state == RobotState.ARM:
             if self.ctx.arming_disable_flags:
                 pass
                 # print(self.ctx.arming_disable_flags)
 
         # log.info(self.ctx)
+
+    def _manual_land_detection_requested(self) -> bool:
+        return (
+            self.ctx.state == RobotState.MANUAL
+            and not self.ctx.joy_manual_request
+            and self.ctx.request_rc[AETR1234.THROTTLE] < 1050
+        )
+
+    def _reset_manual_land_detector(self) -> None:
+        self.manual_land_detector.reset()
+        self.ctx.manual_land_confirmed = False
+        self._manual_land_detection_started_notified = False
+        self._manual_land_confirmed_notified = False
+
+    def _update_manual_land_detector(self) -> None:
+        if not self._manual_land_detection_requested():
+            self._reset_manual_land_detector()
+            return
+
+        if not self._manual_land_detection_started_notified:
+            self.mavlink_service.send_text_to_gcs(
+                "Manual land detection started",
+                MavSeverity.INFO,
+            )
+            self._manual_land_detection_started_notified = True
+
+        self.ctx.manual_land_confirmed = self.manual_land_detector.update(
+            self.ctx.drone_alt,
+            self.ctx.drone_vertical_speed,
+        )
+        if (
+            self.ctx.manual_land_confirmed
+            and not self._manual_land_confirmed_notified
+        ):
+            self.mavlink_service.send_text_to_gcs(
+                "Manual land confirmed, disarming",
+                MavSeverity.INFO,
+            )
+            self._manual_land_confirmed_notified = True
 
     def _update_controllers(self):
         """
@@ -366,7 +426,7 @@ class App:
         elif self.ctx.state == RobotState.TAKEOFF:
             return self._takeoff_handler() 
         elif self.ctx.state == RobotState.IDLE:
-            return [RC_MIN] * NO_RC_CHANNELS
+            return self._make_disarm_channels()
         elif self.ctx.state == RobotState.ARM:
             return self.controllers[RobotState.ARM].update()
         elif self.ctx.state == RobotState.HOVER:
@@ -390,6 +450,16 @@ class App:
                 )
         return sanitized
 
+    def _make_disarm_channels(self) -> list[int]:
+        channels = [RC_MIN] * NO_RC_CHANNELS
+        channels[RCChannel.ROLL] = RC_MID
+        channels[RCChannel.PITCH] = RC_MID
+        channels[RCChannel.THROTTLE] = RC_MIN
+        channels[RCChannel.YAW] = RC_MID
+        channels[RCChannel.ARM] = RC_MIN
+        channels[RCChannel.ANGLE] = RC_MAX
+        return channels
+
     def run(self):
         """
         Application entry and running loop
@@ -408,7 +478,6 @@ class App:
                 self._notification_center()
                 self.robot_sm.resolve()
                 rc_channels = self._resolve_rc()
-                rc_channels = matching(self.ctx, rc_channels, self.config)
                 if not rc_channels:
                     log.error(f"rc not valid: {rc_channels} in state {self.ctx.state}")
                     continue
