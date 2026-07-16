@@ -2,7 +2,7 @@
 has_external_pilot: true
 
 # FCU connection type. Use 1 for serial and 2 for ethernet.
-drone_sink: 1
+drone_sink: 2
 
 # Ethernet host/IP for the FCU when drone_sink is ethernet.
 drone_eth_host: "127.0.0.1"

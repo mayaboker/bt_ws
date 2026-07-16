@@ -255,7 +255,8 @@ class App:
 
         elif name == JoyInterrupt.MANUAL_REQUEST:
             self.ctx.joy_manual_request = value == RC_MAX
-            self.ctx.armed_allowed = False
+            # TODO: what more safety
+            # self.ctx.armed_allowed = False
             log.warning(f"manual request {self.ctx.joy_manual_request}")
 
         elif name == JoyInterrupt.AUTO_REQUEST:
@@ -289,11 +290,15 @@ class App:
         # roll_for_arm = current[AETR1234.ROLL] < 1050
         # pitch_for_arm = current[AETR1234.PITCH] < 1050
         yaw_for_arm = current[AETR1234.YAW] > 1950
+        yaw_for_disarmed = current[AETR1234.YAW] < 1050
         throttle_for_arm = current[AETR1234.THROTTLE] < 1050
         # if all([roll_for_arm, pitch_for_arm]):#, roll_for_arm, pitch_for_arm]):
         if all([yaw_for_arm, throttle_for_arm]):
             log.warning("Joystick arm request detected")
             self.ctx.armed_allowed = True
+        elif all([yaw_for_disarmed, throttle_for_arm]):
+            log.warning("Joystick disarm request detected")
+            self.ctx.armed_allowed = False
 
         self.ctx.joy_arm_requested = all([throttle_for_arm, yaw_for_arm, self.ctx.armed_allowed])#, roll_for_arm, pitch_for_arm])
         # end region
