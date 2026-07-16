@@ -132,6 +132,24 @@ parameters:
     limits:
       min: -500
       max: 500
+  hover_yaw.max_rate_dps:
+    type: float
+    default: 60.0
+    limits:
+      min: 0.0
+      max: 1000.0
+  hover_yaw.deadband:
+    type: int
+    default: 50
+    limits:
+      min: 0
+      max: 500
+  hover_yaw.expo:
+    type: float
+    default: 0.55
+    limits:
+      min: 0.0
+      max: 1.0
   visual.hover_throttle:
     type: float
     default: 0.55

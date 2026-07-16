@@ -35,6 +35,9 @@ class FakeController:
     def update_setpoint_from_throttle(self, throttle_rc):
         self.calls.append(("throttle", throttle_rc))
 
+    def update_yaw_from_joystick(self, yaw_rc):
+        self.calls.append(("yaw", yaw_rc))
+
     def consume_altitude_setpoint_request_event(self):
         return False
 
@@ -56,6 +59,9 @@ class FakeMavlinkService:
 
     def send_text_to_gcs(self, text, severity):
         self.messages.append((text, severity))
+
+    def send_named_value_to_gcs(self, name, value):
+        self.messages.append((name, value))
 
 
 def make_app_with_context():
@@ -126,7 +132,7 @@ def test_rc_selector_uses_robot_state_members(state, controller_key):
     elif state == RobotState.FAILSAFE:
         assert controller.calls == [(12.5, -0.1)]
     elif state == RobotState.HOVER:
-        assert controller.calls == [("throttle", 1500), (42, 12.5)]
+        assert controller.calls == [("throttle", 1500), ("yaw", 1500), (42, 12.5)]
     else:
         assert controller.calls == [()]
 

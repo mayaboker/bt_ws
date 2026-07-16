@@ -25,8 +25,11 @@ class HoverYawController:
         self.altitude_rate_m_s = self.params.get(ParameterKey.HOVER_ALTITUDE_RATE_M_S)
         self.throttle_deadband = self.params.get(ParameterKey.HOVER_THROTTLE_DEADBAND)
         self.min_altitude = self.params.get(ParameterKey.HOVER_MIN_ALTITUDE)
-        self.yaw_rate = self.params.get("hover_yaw.yaw_rate")
-        self.yaw_stick_range = self.params.get("betaflight_yaw_rate_full_stick_dps")
+        self.yaw_rate = self.params.get(ParameterKey.HOVER_YAW_YAW_RATE)
+        self.max_yaw_rate_dps = self.params.get(ParameterKey.HOVER_YAW_MAX_RATE_DPS)
+        self.yaw_deadband = self.params.get(ParameterKey.HOVER_YAW_DEADBAND)
+        self.yaw_expo = self.params.get(ParameterKey.HOVER_YAW_EXPO)
+        self.yaw_stick_range = self.params.get(ParameterKey.BETAFLIGHT_YAW_RATE_FULL_STICK_DPS)
         self._last_setpoint_update_s = time.monotonic()
         self._throttle_outside_deadband = False
         self._altitude_setpoint_request_event = False
@@ -96,6 +99,27 @@ class HoverYawController:
         self._throttle_outside_deadband = True
         self.setpoint = self._setpoint + stick_fraction * float(self.altitude_rate_m_s) * dt_s
         return self._setpoint
+
+    def update_yaw_from_joystick(self, yaw_rc: int) -> float:
+        yaw = int(yaw_rc)
+        deadband = int(self.yaw_deadband)
+        upper_deadband = RC_MID + deadband
+        lower_deadband = RC_MID - deadband
+
+        if yaw > upper_deadband:
+            denominator = max(1, RC_MAX - upper_deadband)
+            linear = min(1.0, (yaw - upper_deadband) / denominator)
+        elif yaw < lower_deadband:
+            denominator = max(1, lower_deadband - RC_MIN)
+            linear = -min(1.0, (lower_deadband - yaw) / denominator)
+        else:
+            self.yaw_rate = 0.0
+            return self.yaw_rate
+
+        expo = max(0.0, min(float(self.yaw_expo), 1.0))
+        command = linear * (1.0 - expo) + (linear**3) * expo
+        self.yaw_rate = command * float(self.max_yaw_rate_dps)
+        return self.yaw_rate
     
     def set_baseline (self, current_throttle: float):
         self._baseline = current_throttle
@@ -148,6 +172,12 @@ class HoverYawController:
             self.setpoint = self._setpoint
         elif name == ParameterKey.HOVER_YAW_YAW_RATE:
             self.yaw_rate = value
+        elif name == ParameterKey.HOVER_YAW_MAX_RATE_DPS:
+            self.max_yaw_rate_dps = value
+        elif name == ParameterKey.HOVER_YAW_DEADBAND:
+            self.yaw_deadband = value
+        elif name == ParameterKey.HOVER_YAW_EXPO:
+            self.yaw_expo = value
         elif name == ParameterKey.BETAFLIGHT_YAW_RATE_FULL_STICK_DPS:
             self.yaw_stick_range = value
             self.rc_mapper.yaw_rate_full_stick_dps = value

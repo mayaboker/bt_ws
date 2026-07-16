@@ -333,14 +333,18 @@ class App:
 
     def hover_handler(self):
         """
-        TODO: TBD
-        search logic
-        - get rc from search controller
+        ALT Hold handler
         """
         controller = self.controllers[RobotState.HOVER]
+        # read last joystick state
         controller.update_setpoint_from_throttle(
             self.ctx.request_rc[AETR1234.THROTTLE]
         )
+        controller.update_yaw_from_joystick(
+            self.ctx.request_rc[AETR1234.YAW]
+        )
+
+
         if controller.consume_altitude_setpoint_request_event():
             self.mavlink_service.send_text_to_gcs(
                 "Hover altitude setpoint change requested",
@@ -349,7 +353,7 @@ class App:
             
             
         setpoint = controller.setpoint
-        rc = controller.update(setpoint, self.ctx.drone_alt)
+        # update gcs setpoint
         if controller.setpoint != self.ctx.alt_setpoint:
             self.mavlink_service.send_named_value_to_gcs(
                     NamedValue.ALT_SP,
@@ -357,6 +361,7 @@ class App:
                 )
             self.ctx.alt_setpoint = setpoint
         
+        rc = controller.update(setpoint, self.ctx.drone_alt)
         return rc
     
     def failsafe_handler(self):

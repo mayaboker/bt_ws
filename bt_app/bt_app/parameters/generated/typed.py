@@ -103,6 +103,18 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.HOVER_YAW_ALTITUDE))
 
     @property
+    def hover_yaw_deadband(self) -> int:
+        return cast(int, self._parameters.get(ParameterKey.HOVER_YAW_DEADBAND))
+
+    @property
+    def hover_yaw_expo(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HOVER_YAW_EXPO))
+
+    @property
+    def hover_yaw_max_rate_dps(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HOVER_YAW_MAX_RATE_DPS))
+
+    @property
     def hover_yaw_yaw_rate(self) -> int:
         return cast(int, self._parameters.get(ParameterKey.HOVER_YAW_YAW_RATE))
 

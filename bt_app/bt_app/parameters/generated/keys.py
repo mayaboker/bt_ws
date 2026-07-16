@@ -28,6 +28,9 @@ class ParameterKey:
     HOVER_OUTPUT_LIMITS: Final[Literal['hover.output_limits']] = 'hover.output_limits'
     HOVER_THROTTLE_DEADBAND: Final[Literal['hover.throttle_deadband']] = 'hover.throttle_deadband'
     HOVER_YAW_ALTITUDE: Final[Literal['hover_yaw.altitude']] = 'hover_yaw.altitude'
+    HOVER_YAW_DEADBAND: Final[Literal['hover_yaw.deadband']] = 'hover_yaw.deadband'
+    HOVER_YAW_EXPO: Final[Literal['hover_yaw.expo']] = 'hover_yaw.expo'
+    HOVER_YAW_MAX_RATE_DPS: Final[Literal['hover_yaw.max_rate_dps']] = 'hover_yaw.max_rate_dps'
     HOVER_YAW_YAW_RATE: Final[Literal['hover_yaw.yaw_rate']] = 'hover_yaw.yaw_rate'
     MANUAL_IDLE_LAND_CONFIRM_S: Final[Literal['manual_idle.land_confirm_s']] = 'manual_idle.land_confirm_s'
     TAKEOFF_ALTITUDE: Final[Literal['takeoff_altitude']] = 'takeoff_altitude'
@@ -63,6 +66,9 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'hover.output_limits',
     'hover.throttle_deadband',
     'hover_yaw.altitude',
+    'hover_yaw.deadband',
+    'hover_yaw.expo',
+    'hover_yaw.max_rate_dps',
     'hover_yaw.yaw_rate',
     'manual_idle.land_confirm_s',
     'takeoff_altitude',
