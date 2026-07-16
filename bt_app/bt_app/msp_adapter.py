@@ -1,4 +1,4 @@
-from bt_app.msp import BetaflightMspClient, TcpMspTransport
+from bt_app.msp import BetaflightMspClient, SerialMspTransport, TcpMspTransport
 from bt_app.msp.command_dispatcher import MspCommandDispatcher
 from bt_app.vehicle_config import VehicleConfig, DroneSink
 from loguru import logger as log
@@ -9,8 +9,10 @@ class MSPAdapter:
         self.msp = None
         if config.drone_sink == DroneSink.ETHERNET.value:
             transport = TcpMspTransport(config.drone_eth_host, config.drone_eth_port)
+        elif config.drone_sink == DroneSink.SERIAL.value:
+            transport = SerialMspTransport(config.drone_serial_port)
         else:
-            raise NotImplementedError("Serial transport not implemented yet")
+            raise ValueError(f"Unsupported drone sink: {config.drone_sink}")
         self.msp = BetaflightMspClient(transport)
 
         self.dispatcher = MspCommandDispatcher(

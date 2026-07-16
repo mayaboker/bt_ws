@@ -18,6 +18,11 @@ class FakeTransport:
         self.port = port
 
 
+class FakeSerialTransport:
+    def __init__(self, device):
+        self.device = device
+
+
 class FakeDispatcher:
     def __init__(self, msp, on_error=None):
         self.msp = msp
@@ -54,3 +59,16 @@ def test_msp_adapter_schedules_battery_at_0_5_hz(monkeypatch):
     assert adapter.msp.opened
     assert ("battery", 2.0) in adapter.dispatcher.scheduled
     assert adapter.dispatcher.started
+
+
+def test_msp_adapter_uses_serial_transport(monkeypatch):
+    monkeypatch.setattr(msp_adapter_module, "BetaflightMspClient", FakeMspClient)
+    monkeypatch.setattr(msp_adapter_module, "SerialMspTransport", FakeSerialTransport)
+    monkeypatch.setattr(msp_adapter_module, "MspCommandDispatcher", FakeDispatcher)
+    config = VehicleConfig()
+    config.drone_sink = DroneSink.SERIAL.value
+    config.drone_serial_port = "/dev/ttyACM0"
+
+    adapter = MSPAdapter(config)
+
+    assert adapter.msp.transport.device == "/dev/ttyACM0"
