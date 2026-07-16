@@ -45,7 +45,7 @@ def main(args: Sequence[str] | None = None, standalone_mode: bool = True) -> Non
             config = build_vehicle_config(options)
         except AppStartupError as exc:
             _configure_logging(options.log_level or "INFO")
-            _handle_error(str(exc), 1, standalone_mode)
+            _handle_error(str(exc), exc.exit_code, standalone_mode)
             return
 
     _configure_logging(
@@ -54,7 +54,7 @@ def main(args: Sequence[str] | None = None, standalone_mode: bool = True) -> Non
     try:
         dispatch_command(options, config)
     except AppStartupError as exc:
-        _handle_error(str(exc), 1, standalone_mode)
+        _handle_error(str(exc), exc.exit_code, standalone_mode)
 
 
 def dispatch_command(options: CliOptions, config: VehicleConfig | None = None) -> None:

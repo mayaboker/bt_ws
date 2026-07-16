@@ -56,6 +56,44 @@ def test_run_missing_vehicle_config_exits_one_in_standalone_mode(tmp_path):
     assert exc_info.value.code == 1
 
 
+def test_run_missing_serial_port_exits_cleanly_non_standalone(tmp_path):
+    serial_path = tmp_path / "missing_ttyUSB0"
+    config_path = tmp_path / "vehicle_config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "drone_sink: 1",
+                f"drone_serial_port: {str(serial_path)!r}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        main(["run", "-c", str(config_path)], standalone_mode=False)
+
+    assert str(exc_info.value) == f"Serial port not found: {serial_path}"
+
+
+def test_run_missing_serial_port_exits_three_in_standalone_mode(tmp_path):
+    serial_path = tmp_path / "missing_ttyUSB0"
+    config_path = tmp_path / "vehicle_config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "drone_sink: 1",
+                f"drone_serial_port: {str(serial_path)!r}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", "-c", str(config_path)], standalone_mode=True)
+
+    assert exc_info.value.code == 3
+
+
 def test_run_missing_parameters_file_exits_one_in_standalone_mode(tmp_path):
     parameters_path = tmp_path / "missing_parameters.yaml"
     config_path = _write_vehicle_config(tmp_path, parameters_path)

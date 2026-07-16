@@ -15,7 +15,7 @@ from bt_app.control import (
 )
 from bt_app.sm import Robot_StateMachine
 from bt_app.context import Context, DEFAULT_RC_CHANNELS
-from bt_app.vehicle_config import VehicleConfig
+from bt_app.vehicle_config import DroneSink, VehicleConfig
 from bt_app.errors import AppStartupError
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.mavlink_wrapper import MavlinkService
@@ -64,6 +64,7 @@ class App:
         
         # loaded controllers
         self.controllers = {}
+        self.__validate_startup_config()
         self.__params = self.__load_parameters()
         self.manual_land_detector = self.__load_manual_land_detector()
         self._manual_land_detection_started_notified = False
@@ -79,6 +80,18 @@ class App:
         self.rc_recorder = self.__load_rc_recorder()
         self.mavlink_service.send_text_to_gcs("Application started", MavSeverity.INFO)
         log.info("Application Start")
+
+
+    def __validate_startup_config(self):
+        if self.config.drone_sink != DroneSink.SERIAL.value:
+            return
+
+        serial_path = pathlib.Path(self.config.drone_serial_port)
+        if not serial_path.exists():
+            raise AppStartupError(
+                f"Serial port not found: {serial_path}",
+                exit_code=3,
+            )
 
 
     def __load_parameters(self):
