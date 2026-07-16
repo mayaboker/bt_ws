@@ -1,4 +1,4 @@
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 
 
 class MavSeverity(IntEnum):
@@ -10,3 +10,7 @@ class MavSeverity(IntEnum):
     NOTICE = 5
     INFO = 6
     DEBUG = 7
+
+
+class NamedValue(StrEnum):
+    ALT_SP = "alt_sp"

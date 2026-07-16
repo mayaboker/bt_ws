@@ -41,7 +41,7 @@ from bt_app.parameters import Parameters
 from loguru import logger as log
 import time
 from bt_app.common.helper import format_channels
-
+from bt_app.common.mavlink import NamedValue
 
 class App:
     def __init__(self, config: VehicleConfig):
@@ -203,6 +203,10 @@ class App:
                 base_line = RC_MID# self.ctx.drone_rc[3]
                 self.controllers[RobotState.HOVER].reset_setpoint(self.ctx.drone_alt)
                 self.controllers[RobotState.HOVER].set_baseline(base_line)# AETR1234.THROTTLE
+                self.mavlink_service.send_named_value_to_gcs(
+                    NamedValue.ALT_SP,
+                    self.ctx.drone_alt
+                )
                 log.info(f"switch to alt hold at altitude {self.ctx.drone_alt} with baseline {base_line}")
 
             case RobotState.FAILSAFE:
@@ -210,6 +214,10 @@ class App:
                 base_line = RC_MID# self.ctx.drone_rc[3]
                 self.controllers[RobotState.FAILSAFE].reset(self.ctx.drone_alt)
                 self.controllers[RobotState.FAILSAFE].set_baseline(base_line)# AETR1234.THROTTLE 
+                self.mavlink_service.send_named_value_to_gcs(
+                    NamedValue.ALT_SP,
+                    self.ctx.drone_alt
+                )
                 log.info(f"switch to alt hold at altitude {self.ctx.drone_alt} with baseline {base_line}")
 
         if prev == RobotState.MANUAL and next != RobotState.IDLE:
@@ -300,6 +308,7 @@ class App:
         if battery and "voltage_v" in battery:
             self.ctx.battery_voltage = battery["voltage_v"] + 20.0 #TODO: remove this hack, the voltage is not correct in betaflight 4.4.1
 
+        
     
     def _takeoff_handler(self):
         """
@@ -312,6 +321,14 @@ class App:
         rc = self.controllers[RobotState.TAKEOFF].update(setpoint, self.ctx.drone_alt)
         # time 
         self.ctx.takeoff_reach = self.controllers[RobotState.TAKEOFF].time_in_alt >= 1
+
+        if setpoint != self.ctx.alt_setpoint:
+            self.mavlink_service.send_named_value_to_gcs(
+                    NamedValue.ALT_SP,
+                    setpoint
+                )
+            self.ctx.alt_setpoint = setpoint
+        
         return rc
 
     def hover_handler(self):
@@ -329,8 +346,16 @@ class App:
                 "Hover altitude setpoint change requested",
                 MavSeverity.DEBUG,
             )
+            
+            
         setpoint = controller.setpoint
         rc = controller.update(setpoint, self.ctx.drone_alt)
+        if controller.setpoint != self.ctx.alt_setpoint:
+            self.mavlink_service.send_named_value_to_gcs(
+                    NamedValue.ALT_SP,
+                    setpoint
+                )
+            self.ctx.alt_setpoint = setpoint
         
         return rc
     
@@ -433,6 +458,7 @@ class App:
         rc loop
         ------
         resolve rc channels from the active state controller"""
+        
         if self.ctx.state == RobotState.MANUAL:
             return self._manual_handler()
         elif self.ctx.state == RobotState.FAILSAFE:

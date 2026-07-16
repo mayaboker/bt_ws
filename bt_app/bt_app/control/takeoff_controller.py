@@ -19,6 +19,7 @@ class TakeoffController:
         self.params = params
         self.__time_in_alt = 0
         self.__prev_date = 0
+        self._setpoint = 0
         self.params.on_parameter_changed.subscribe(self.on_parameter_changed)
         self._setup()
 
@@ -40,7 +41,12 @@ class TakeoffController:
         self.__time_in_alt = 0
         self.__prev_date = 0
         
+    @property
+    def setpoint(self) -> float:
+        return self._setpoint
+    
     def update(self, setpoint, current):
+        self._setpoint = setpoint
         current_time = time.monotonic()
         if abs(setpoint-current) < ALT_REACH_DELTA:
             #self.__prev_date can't be zero in this timeline

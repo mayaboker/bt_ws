@@ -43,6 +43,8 @@ class Context:
     battery_voltage: float = 0.0
     # auto mode state 
     auto_mode_type: AutoModeType = field(default=AutoModeType.DISABLED)
+    # altitude request setpoint use (takeoff, alt_hold)
+    alt_setpoint: float = 0.0
 
 
 

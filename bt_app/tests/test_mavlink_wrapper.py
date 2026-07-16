@@ -12,6 +12,7 @@ from bt_app.mavlink_wrapper import (
     GlobalPositionIntCommand,
     HeartbeatCommand,
     MavlinkService,
+    NamedValueFloatCommand,
     ReceivePendingCommand,
     SendChannelStatusV2ExtensionCommand,
     SendRcChannelsCommand,
@@ -166,7 +167,7 @@ def test_start_is_idempotent_and_starts_scheduler_once(monkeypatch):
     scheduler = FakeScheduler.instances[0]
     assert service.open_count == 1
     assert scheduler.started
-    assert len(scheduler.scheduled) == 6
+    assert len(scheduler.scheduled) == 7
     assert isinstance(scheduler.scheduled[0][0], HeartbeatCommand)
     assert scheduler.scheduled[0][1] == service.heartbeat_interval_s
     assert scheduler.scheduled[0][3] == HeartbeatCommand.key
@@ -182,9 +183,12 @@ def test_start_is_idempotent_and_starts_scheduler_once(monkeypatch):
     assert isinstance(scheduler.scheduled[4][0], SendChannelStatusV2ExtensionCommand)
     assert scheduler.scheduled[4][1] == 0.1
     assert scheduler.scheduled[4][3] == SendChannelStatusV2ExtensionCommand.key
-    assert isinstance(scheduler.scheduled[5][0], ReceivePendingCommand)
-    assert scheduler.scheduled[5][1] == service.poll_interval_s
-    assert scheduler.scheduled[5][3] == ReceivePendingCommand.key
+    assert isinstance(scheduler.scheduled[5][0], NamedValueFloatCommand)
+    assert scheduler.scheduled[5][1] == 1.0
+    assert scheduler.scheduled[5][3] == NamedValueFloatCommand.key
+    assert isinstance(scheduler.scheduled[6][0], ReceivePendingCommand)
+    assert scheduler.scheduled[6][1] == service.poll_interval_s
+    assert scheduler.scheduled[6][3] == ReceivePendingCommand.key
 
     service.stop()
     assert not service._started
@@ -308,6 +312,47 @@ def test_receive_pending_command_calls_receive_pending():
     ReceivePendingCommand(service).execute(service.context)
 
     assert service.receive_count == 1
+
+
+def test_named_value_float_sends_current_time(monkeypatch):
+    monkeypatch.setattr(mavlink_module.time, "time", lambda: 1234.5)
+    service = MavlinkService(context=Context())
+    socket = FakeSocket()
+    service._socket = socket
+
+    service._send_named_value_float()
+
+    assert socket.sent
+    payload, addr = socket.sent[0]
+    msg = decode_mavlink(payload)
+    assert addr == service.qopenhd_addr
+    assert msg.get_type() == "NAMED_VALUE_FLOAT"
+    assert msg.name == "time"
+    assert msg.value == pytest.approx(1234.5)
+
+
+def test_named_value_float_encodes_string_name_as_ascii_bytes():
+    service = MavlinkService(context=Context())
+    socket = FakeSocket()
+    service._socket = socket
+
+    service._send_named_value_float("alt_sp", 30.0)
+
+    payload, _addr = socket.sent[0]
+    msg = decode_mavlink(payload)
+    assert msg.get_type() == "NAMED_VALUE_FLOAT"
+    assert msg.name == "alt_sp"
+    assert msg.value == pytest.approx(30.0)
+
+
+def test_named_value_float_command_sends_named_value():
+    service = MavlinkService(context=Context())
+    socket = FakeSocket()
+    service._socket = socket
+
+    NamedValueFloatCommand(service).execute(service.context)
+
+    assert socket.sent
 
 
 def test_channel_status_v2_extension_reads_sent_rc_and_state():

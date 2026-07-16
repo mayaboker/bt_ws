@@ -90,6 +90,17 @@ class SendChannelStatusV2ExtensionCommand(Command):
 
 
 @dataclass
+class NamedValueFloatCommand(Command):
+    key: ClassVar[str | None] = "mavlink_named_value_float"
+    service: "MavlinkService"
+    named: str
+    value: float
+
+    def execute(self, context: SchedulerContext) -> None:
+        self.service._send_named_value_float(self.named, self.value)
+
+
+@dataclass
 class ReceivePendingCommand(Command):
     key: ClassVar[str | None] = "mavlink_receive_pending"
     service: "MavlinkService"
@@ -172,11 +183,12 @@ class MavlinkService:
             interval_s=self.rc_channels_interval_s,
             key=SendRcChannelsCommand.key,
         )
-        self._scheduler.schedule(
-            SendChannelStatusV2ExtensionCommand(self),
-            interval_s=self.v2_extension_channel_status_interval_s,
-            key=SendChannelStatusV2ExtensionCommand.key,
-        )
+        # self._scheduler.schedule(
+        #     SendChannelStatusV2ExtensionCommand(self),
+        #     interval_s=self.v2_extension_channel_status_interval_s,
+        #     key=SendChannelStatusV2ExtensionCommand.key,
+        # )
+      
         self._scheduler.schedule(
             ReceivePendingCommand(self),
             interval_s=self.poll_interval_s,
@@ -201,6 +213,10 @@ class MavlinkService:
     ) -> None:
         self._scheduler.submit(SendTextToGcsCommand(self, text, severity))
 
+
+    def send_named_value_to_gcs(self, name, value):
+        self._scheduler.submit(NamedValueFloatCommand(self, name, value))
+
     def _open_socket(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind(self.local_addr)
@@ -221,6 +237,20 @@ class MavlinkService:
         self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
 
     def _send_global_position_int(self) -> None:
+        """
+        The filtered global position (e.g. fused GPS and accelerometers). The position is in GPS-frame (right-handed, Z-up). It is designed as scaled integer message since the resolution of float is not sufficient.
+        | Field Name | Type | Units | Description |
+        | --- | --- | --- | --- |
+        | time_boot_ms | uint32_t | ms | Timestamp (time since system boot). |
+        | lat | int32_t | degE7 | Latitude, expressed |
+        | lon | int32_t | degE7 | Longitude, expressed |
+        | alt | int32_t | mm | Altitude (MSL). Note that virtually all GPS modules provide both WGS84 and MSL. |
+        | relative_alt | int32_t | mm | Altitude above home |
+        | vx | int16_t | cm/s | Ground X Speed (Latitude, positive north) |
+        | vy | int16_t | cm/s | Ground Y Speed (Longitude, positive east) |
+        | vz | int16_t | cm/s | Ground Z Speed (Altitude, positive down) |
+        | hdg | uint16_t | cdeg | Vehicle heading (yaw angle), 0.0..359.99 degrees. If unknown, set to: UINT16_MAX |
+        """
         if self._socket is None:
             return
 
@@ -315,6 +345,26 @@ class MavlinkService:
             V2_EXTENSION_CHANNEL_STATUS_MESSAGE_TYPE,
             self._make_channel_status_payload(),
         )
+
+    def _send_named_value_float(
+        self,
+        named: str,
+        value: float
+    ) -> None:
+        if self._socket is None:
+            return
+
+        msg = self._mav.named_value_float_encode(
+            self._time_boot_ms(),
+            self._named_value_name_bytes(named),
+            value
+        )
+        self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
+
+    def _named_value_name_bytes(self, named: str | bytes) -> bytes:
+        if isinstance(named, bytes):
+            return named[:10]
+        return named.encode("ascii", errors="replace")[:10]
 
     def _send_text_to_gcs(
         self,
