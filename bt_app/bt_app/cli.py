@@ -8,6 +8,8 @@ from typing import Sequence
 
 import click
 
+from bt_app.errors import AppExitCode
+
 
 LOG_LEVELS = (
     "TRACE",
@@ -34,13 +36,17 @@ class CliOptions:
 
 
 class CliParseExit(Exception):
-    def __init__(self, exit_code: int = 0) -> None:
+    def __init__(self, exit_code: int = AppExitCode.SUCCESS) -> None:
         super().__init__(exit_code)
         self.exit_code = exit_code
 
 
 class CliParseError(Exception):
-    def __init__(self, message: str, exit_code: int = 2) -> None:
+    def __init__(
+        self,
+        message: str,
+        exit_code: int = AppExitCode.CLI_USAGE_ERROR,
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.exit_code = exit_code

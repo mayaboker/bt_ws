@@ -19,7 +19,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only in minimal envs
 
 from bt_app.cli import CliOptions, CliParseError, CliParseExit, CommandName, LOG_LEVELS
 from bt_app.cli import parse_cli_args
-from bt_app.errors import AppStartupError
+from bt_app.errors import AppExitCode, AppStartupError
 from bt_app.vehicle_config import VehicleConfig
 
 
@@ -147,17 +147,21 @@ def _configure_logging(log_level: str) -> None:
     logger.setLevel(getattr(logging, level, logging.INFO))
 
 
-def _handle_error(message: str, exit_code: int, standalone_mode: bool) -> None:
+def _handle_error(
+    message: str,
+    exit_code: int | AppExitCode,
+    standalone_mode: bool,
+) -> None:
     if not standalone_mode:
         raise RuntimeError(message)
     logger.error(message)
-    raise SystemExit(exit_code)
+    raise SystemExit(int(exit_code))
 
 
-def _handle_exit(exit_code: int, standalone_mode: bool) -> None:
+def _handle_exit(exit_code: int | AppExitCode, standalone_mode: bool) -> None:
     if not standalone_mode:
-        raise CliParseExit(exit_code)
-    raise SystemExit(exit_code)
+        raise CliParseExit(int(exit_code))
+    raise SystemExit(int(exit_code))
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ from bt_app.control import (
 from bt_app.sm import Robot_StateMachine
 from bt_app.context import Context, DEFAULT_RC_CHANNELS
 from bt_app.vehicle_config import DroneSink, VehicleConfig
-from bt_app.errors import AppStartupError
+from bt_app.errors import AppExitCode, AppStartupError
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.mavlink_wrapper import MavlinkService
 from bt_app.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
@@ -90,7 +90,7 @@ class App:
         if not serial_path.exists():
             raise AppStartupError(
                 f"Serial port not found: {serial_path}",
-                exit_code=3,
+                exit_code=AppExitCode.SERIAL_PORT_NOT_FOUND,
             )
 
 

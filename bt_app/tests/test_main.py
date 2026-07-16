@@ -1,6 +1,7 @@
 import pytest
 
 from bt_app.context import Context
+from bt_app.errors import AppExitCode
 from bt_app.main import main
 from bt_app.vehicle_config import VehicleConfig
 
@@ -53,7 +54,7 @@ def test_run_missing_vehicle_config_exits_one_in_standalone_mode(tmp_path):
     with pytest.raises(SystemExit) as exc_info:
         main(["run", "-c", str(config_path)], standalone_mode=True)
 
-    assert exc_info.value.code == 1
+    assert exc_info.value.code == AppExitCode.STARTUP_ERROR
 
 
 def test_run_missing_serial_port_exits_cleanly_non_standalone(tmp_path):
@@ -91,7 +92,7 @@ def test_run_missing_serial_port_exits_three_in_standalone_mode(tmp_path):
     with pytest.raises(SystemExit) as exc_info:
         main(["run", "-c", str(config_path)], standalone_mode=True)
 
-    assert exc_info.value.code == 3
+    assert exc_info.value.code == AppExitCode.SERIAL_PORT_NOT_FOUND
 
 
 def test_run_missing_parameters_file_exits_one_in_standalone_mode(tmp_path):
@@ -101,7 +102,7 @@ def test_run_missing_parameters_file_exits_one_in_standalone_mode(tmp_path):
     with pytest.raises(SystemExit) as exc_info:
         main(["run", "-c", str(config_path)], standalone_mode=True)
 
-    assert exc_info.value.code == 1
+    assert exc_info.value.code == AppExitCode.STARTUP_ERROR
 
 
 def test_run_invalid_parameters_file_exits_cleanly_non_standalone(tmp_path):
