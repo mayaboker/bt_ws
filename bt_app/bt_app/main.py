@@ -41,7 +41,12 @@ def main(args: Sequence[str] | None = None, standalone_mode: bool = True) -> Non
 
     config = None
     if options.command in {CommandName.DUMP_CONFIG, CommandName.RUN}:
-        config = build_vehicle_config(options)
+        try:
+            config = build_vehicle_config(options)
+        except AppStartupError as exc:
+            _configure_logging(options.log_level or "INFO")
+            _handle_error(str(exc), 1, standalone_mode)
+            return
 
     _configure_logging(
         config.log_level if config is not None else options.log_level or "INFO"
@@ -91,11 +96,24 @@ def _merge_vehicle_config_yaml(
     config_path: str | Path | None = None,
 ) -> None:
     yaml_path = Path(config_path) if config_path is not None else DEFAULT_VEHICLE_CONFIG_PATH
+    if not yaml_path.is_absolute():
+        yaml_path = Path.cwd().joinpath(yaml_path)
     if not yaml_path.exists():
+        if config_path is not None:
+            raise AppStartupError(f"Vehicle config not found: {yaml_path}")
         return
 
-    with yaml_path.open("r", encoding="utf-8") as config_file:
-        config_data = yaml.safe_load(config_file) or {}
+    try:
+        with yaml_path.open("r", encoding="utf-8") as config_file:
+            config_data = yaml.safe_load(config_file) or {}
+    except Exception as exc:
+        raise AppStartupError(
+            f"Failed to load vehicle config from {yaml_path}: {exc}"
+        ) from exc
+    if not isinstance(config_data, dict):
+        raise AppStartupError(
+            f"Failed to load vehicle config from {yaml_path}: expected YAML mapping"
+        )
     config_fields = {field.name for field in fields(VehicleConfig)}
     for key, value in config_data.items():
         if key in config_fields:

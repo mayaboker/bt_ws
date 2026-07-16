@@ -38,6 +38,24 @@ def test_run_missing_parameters_file_exits_cleanly_non_standalone(tmp_path):
     assert not isinstance(exc_info.value.__cause__, FileNotFoundError)
 
 
+def test_run_missing_vehicle_config_exits_cleanly_non_standalone(tmp_path):
+    config_path = tmp_path / "missing_vehicle_config.yaml"
+
+    with pytest.raises(RuntimeError) as exc_info:
+        main(["run", "-c", str(config_path)], standalone_mode=False)
+
+    assert str(exc_info.value) == f"Vehicle config not found: {config_path}"
+
+
+def test_run_missing_vehicle_config_exits_one_in_standalone_mode(tmp_path):
+    config_path = tmp_path / "missing_vehicle_config.yaml"
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["run", "-c", str(config_path)], standalone_mode=True)
+
+    assert exc_info.value.code == 1
+
+
 def test_run_missing_parameters_file_exits_one_in_standalone_mode(tmp_path):
     parameters_path = tmp_path / "missing_parameters.yaml"
     config_path = _write_vehicle_config(tmp_path, parameters_path)
