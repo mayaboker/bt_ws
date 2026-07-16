@@ -286,9 +286,12 @@ class App:
         throttle_for_arm = current[AETR1234.THROTTLE] < 1050
         yaw_for_arm = 1450 < current[AETR1234.YAW] < 1550
         # one time 
-        roll_for_arm = current[AETR1234.ROLL] < 1050
-        pitch_for_arm = current[AETR1234.PITCH] < 1050
-        if all([roll_for_arm, pitch_for_arm]):#, roll_for_arm, pitch_for_arm]):
+        # roll_for_arm = current[AETR1234.ROLL] < 1050
+        # pitch_for_arm = current[AETR1234.PITCH] < 1050
+        yaw_for_arm = current[AETR1234.YAW] > 1950
+        throttle_for_arm = current[AETR1234.THROTTLE] < 1050
+        # if all([roll_for_arm, pitch_for_arm]):#, roll_for_arm, pitch_for_arm]):
+        if all([yaw_for_arm, throttle_for_arm]):
             log.warning("Joystick arm request detected")
             self.ctx.armed_allowed = True
 
