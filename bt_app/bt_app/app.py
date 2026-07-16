@@ -16,6 +16,7 @@ from bt_app.control import (
 from bt_app.sm import Robot_StateMachine
 from bt_app.context import Context, DEFAULT_RC_CHANNELS
 from bt_app.vehicle_config import VehicleConfig
+from bt_app.errors import AppStartupError
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.mavlink_wrapper import MavlinkService
 from bt_app.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
@@ -88,9 +89,14 @@ class App:
         if not p_path.is_absolute():
             p_path = pathlib.Path.cwd().joinpath(p_path)
         if not p_path.exists():
-            raise FileNotFoundError(f"Parameters config not found: {p_path}")
+            raise AppStartupError(f"Parameters config not found: {p_path}")
         log.info("load parameters from: {}", p_path)
-        return Parameters(yaml_path=p_path)
+        try:
+            return Parameters(yaml_path=p_path)
+        except Exception as exc:
+            raise AppStartupError(
+                f"Failed to load parameters from {p_path}: {exc}"
+            ) from exc
 
     def __load_manual_land_detector(self):
         return LandDetector(

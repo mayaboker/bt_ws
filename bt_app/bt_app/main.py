@@ -19,6 +19,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only in minimal envs
 
 from bt_app.cli import CliOptions, CliParseError, CliParseExit, CommandName, LOG_LEVELS
 from bt_app.cli import parse_cli_args
+from bt_app.errors import AppStartupError
 from bt_app.vehicle_config import VehicleConfig
 
 
@@ -45,7 +46,10 @@ def main(args: Sequence[str] | None = None, standalone_mode: bool = True) -> Non
     _configure_logging(
         config.log_level if config is not None else options.log_level or "INFO"
     )
-    dispatch_command(options, config)
+    try:
+        dispatch_command(options, config)
+    except AppStartupError as exc:
+        _handle_error(str(exc), 1, standalone_mode)
 
 
 def dispatch_command(options: CliOptions, config: VehicleConfig | None = None) -> None:
