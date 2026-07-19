@@ -15,7 +15,7 @@ def test_recorder_writes_header_and_valid_row(tmp_path):
     recorder = RcStateRecorder(path, flush_interval_s=0.01)
 
     recorder.start()
-    recorder.record(RobotState.HOVER, [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800])
+    recorder.record(RobotState.ALT_HOLD, [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800])
     recorder.stop()
 
     rows = read_rows(path)
@@ -52,7 +52,7 @@ def test_recorder_queue_full_drops_newest_without_blocking(tmp_path):
     recorder._enabled = True
     recorder._queue.put_nowait((time.monotonic_ns(), "MANUAL", (1000,) * 8))
 
-    recorder.record(RobotState.HOVER, [1100] * 8)
+    recorder.record(RobotState.ALT_HOLD, [1100] * 8)
 
     assert recorder.dropped_samples == 1
     queued = recorder._queue.get_nowait()

@@ -56,7 +56,7 @@ parameters:
       max: 200.0
   altitude.ki:
     type: float
-    default: 20.0
+    default: 0.0
     limits:
       min: 0.0
       max: 200.0

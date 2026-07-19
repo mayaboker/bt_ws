@@ -121,6 +121,10 @@ class HoverYawController:
         self.yaw_rate = command * float(self.max_yaw_rate_dps)
         return self.yaw_rate
     
+    def update_pitch_roll(self, pitch, roll):
+        self._pitch = pitch
+        self._roll = roll
+
     def set_baseline (self, current_throttle: float):
         self._baseline = current_throttle
 
@@ -146,7 +150,8 @@ class HoverYawController:
 
     def make_channels(self, throttle: int = 0, yaw: int = 0) -> list[int]:
         channels = [RC_MID] * NO_RC_CHANNELS
-
+        channels[RCChannel.ROLL] = self._roll
+        channels[RCChannel.PITCH] = self._pitch
         channels[RCChannel.THROTTLE] = max(RC_MIN, min(RC_MAX, throttle))
         channels[RCChannel.YAW] = max(RC_MIN, min(RC_MAX, yaw))
         channels[RCChannel.ARM] = RC_MAX

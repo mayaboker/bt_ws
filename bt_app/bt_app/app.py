@@ -28,6 +28,7 @@ from bt_app.common import (
     JoyInterrupt,
     MavSeverity)
 from bt_app.parameters.generated import ParameterKey
+from bt_app._version import __version__
 from bt_app.common import (
     FREQ_HZ
 )
@@ -55,11 +56,11 @@ class App:
         # hold application state
         self.ctx = Context()
         
-        # state macine
+        # state machine
         self.robot_sm = Robot_StateMachine(self.ctx, self.config)
         self.robot_sm.on_before_state_changed += self._handle_before_state_changed
         self.robot_sm.on_state_changed += self._state_changed_handler
-        # drone iterface (msp)
+        # drone interface (msp)
         self.drone_adapter = None
         
         # loaded controllers
@@ -79,8 +80,10 @@ class App:
         self.mavlink_service.start()
         self.rc_recorder = self.__load_rc_recorder()
         self.mavlink_service.send_text_to_gcs("Application started", MavSeverity.INFO)
-        log.info("Application Start")
+        self.__banner()
 
+    def __banner(self):
+        log.info("Application Start v{}", __version__)
 
     def __validate_startup_config(self):
         if self.config.drone_sink != DroneSink.SERIAL.value:
@@ -168,12 +171,14 @@ class App:
         self.controllers[RobotState.ARM] = ARMController(self.__params)
 
         # search controller
-        self.controllers[RobotState.HOVER] = HoverYawController(self.__params)
+        self.controllers[RobotState.ALT_HOLD] = HoverYawController(self.__params)
 
     def register_joy_interrupt(self, joy_adapter):
         joy_adapter.register_interrupt(AETR1234.AUX4, JoyInterrupt.TAKEOFF_REQUEST)
         joy_adapter.register_interrupt(AETR1234.AUX1, JoyInterrupt.MANUAL_REQUEST)
         joy_adapter.register_interrupt(AETR1234.AUX2, JoyInterrupt.AUTO_REQUEST)
+        joy_adapter.register_interrupt(AETR1234.AUX3, JoyInterrupt.ENABLER_REQUEST)
+        
 
     def _state_changed_handler(self, previous_state, new_state):
         """
@@ -217,11 +222,11 @@ class App:
                 self.ctx.armed = False
                 self._reset_manual_land_detector()
 
-            case RobotState.HOVER:
+            case RobotState.ALT_HOLD:
                 # self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[AETR1234.THROTTLE])
                 base_line = RC_MID# self.ctx.drone_rc[3]
-                self.controllers[RobotState.HOVER].reset_setpoint(self.ctx.drone_alt)
-                self.controllers[RobotState.HOVER].set_baseline(base_line)# AETR1234.THROTTLE
+                self.controllers[RobotState.ALT_HOLD].reset_setpoint(self.ctx.drone_alt)
+                self.controllers[RobotState.ALT_HOLD].set_baseline(base_line)# AETR1234.THROTTLE
                 self.mavlink_service.send_named_value_to_gcs(
                     NamedValue.ALT_SP,
                     self.ctx.drone_alt
@@ -263,6 +268,9 @@ class App:
             self.ctx.auto_mode_type = AutoModeType(value)
             log.warning(f"auto request {self.ctx.auto_mode_type}")
 
+        elif name == JoyInterrupt.ENABLER_REQUEST:
+            self.ctx.auto_mode_enable = value == RC_MAX
+
         
 
     
@@ -285,7 +293,6 @@ class App:
             return
         self.ctx.request_rc = current.copy()
         throttle_for_arm = current[AETR1234.THROTTLE] < 1050
-        yaw_for_arm = 1450 < current[AETR1234.YAW] < 1550
         # one time 
         # roll_for_arm = current[AETR1234.ROLL] < 1050
         # pitch_for_arm = current[AETR1234.PITCH] < 1050
@@ -358,11 +365,38 @@ class App:
         
         return rc
 
+    def auto_mode_handler(self):
+        if self.ctx.auto_mode_enable:
+            log.warning("not implement yat fall to hover")
+            self.ctx.auto_mode_enable = False
+
+        if not self.ctx.auto_mode_enable:
+            """
+            ALT Hold handler
+            """
+            controller = self.controllers[RobotState.ALT_HOLD]
+            # read last joystick state
+            # controller.update_setpoint_from_throttle(
+            #     self.ctx.request_rc[AETR1234.THROTTLE]
+            # )
+            controller.update_yaw_from_joystick(
+                self.ctx.request_rc[AETR1234.YAW]
+            )
+
+
+            # disabled pitch / roll
+            controller.update_pitch_roll(RC_MID, RC_MID)
+
+            setpoint = controller.setpoint
+            rc = controller.update(setpoint, self.ctx.drone_alt)
+            return rc
+
+
     def hover_handler(self):
         """
         ALT Hold handler
         """
-        controller = self.controllers[RobotState.HOVER]
+        controller = self.controllers[RobotState.ALT_HOLD]
         # read last joystick state
         controller.update_setpoint_from_throttle(
             self.ctx.request_rc[AETR1234.THROTTLE]
@@ -371,6 +405,11 @@ class App:
             self.ctx.request_rc[AETR1234.YAW]
         )
 
+        # TODO: add deadband ???
+        pitch = self.ctx.request_rc[AETR1234.PITCH]
+        roll = self.ctx.request_rc[AETR1234.ROLL]
+
+        controller.update_pitch_roll(pitch, roll)
 
         if controller.consume_altitude_setpoint_request_event():
             self.mavlink_service.send_text_to_gcs(
@@ -490,22 +529,24 @@ class App:
         rc loop
         ------
         resolve rc channels from the active state controller"""
-        
-        if self.ctx.state == RobotState.MANUAL:
-            return self._manual_handler()
-        elif self.ctx.state == RobotState.FAILSAFE:
-            return self.failsafe_handler()
-        elif self.ctx.state == RobotState.TAKEOFF:
-            return self._takeoff_handler() 
-        elif self.ctx.state == RobotState.IDLE:
-            return self._make_disarm_channels()
-        elif self.ctx.state == RobotState.ARM:
-            return self.controllers[RobotState.ARM].update()
-        elif self.ctx.state == RobotState.HOVER:
-            return self.hover_handler()
-        else:
-            log.error(f"RC selector not implemented for state {self.ctx.state}")
-            raise NotImplementedError(f"RC selector not implemented for state {self.ctx.state}")
+        match self.ctx.state:
+            case RobotState.MANUAL:
+                return self._manual_handler()
+            case RobotState.FAILSAFE:
+                return self.failsafe_handler()
+            case RobotState.TAKEOFF:
+                return self._takeoff_handler() 
+            case RobotState.IDLE:
+                return self._make_disarm_channels()
+            case RobotState.ARM:
+                return self.controllers[RobotState.ARM].update()
+            case RobotState.ALT_HOLD:
+                return self.hover_handler()
+            case RobotState.TRACKING:
+                return self.auto_mode_handler()
+            case _:
+                log.error(f"RC selector not implemented for state {self.ctx.state}")
+                raise NotImplementedError(f"RC selector not implemented for state {self.ctx.state}")
 
     def _sanitize_rc_channels(self, channels: list[int]) -> list[int]:
         sanitized = DEFAULT_RC_CHANNELS.copy()

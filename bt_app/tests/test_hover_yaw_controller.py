@@ -202,14 +202,14 @@ def test_hover_handler_updates_setpoint_from_requested_throttle():
 
     app = App.__new__(App)
     app.ctx = Context()
-    app.ctx.state = RobotState.HOVER
+    app.ctx.state = RobotState.ALT_HOLD
     app.ctx.drone_alt = 4.2
     app.ctx.alt_setpoint = 5.0
     app.ctx.request_rc = [1500] * 8
     app.ctx.request_rc[AETR1234.THROTTLE] = 1800
     app.ctx.request_rc[AETR1234.YAW] = 1700
     hover_controller = FakeHoverController()
-    app.controllers = {RobotState.HOVER: hover_controller}
+    app.controllers = {RobotState.ALT_HOLD: hover_controller}
 
     rc = app.hover_handler()
 
@@ -252,12 +252,12 @@ def test_hover_handler_sends_low_severity_text_when_setpoint_request_starts():
 
     app = App.__new__(App)
     app.ctx = Context()
-    app.ctx.state = RobotState.HOVER
+    app.ctx.state = RobotState.ALT_HOLD
     app.ctx.drone_alt = 4.2
     app.ctx.alt_setpoint = 5.0
     app.ctx.request_rc = [1500] * 8
     app.ctx.request_rc[AETR1234.THROTTLE] = 1800
-    app.controllers = {RobotState.HOVER: FakeHoverController()}
+    app.controllers = {RobotState.ALT_HOLD: FakeHoverController()}
     app.mavlink_service = FakeMavlinkService()
 
     app.hover_handler()

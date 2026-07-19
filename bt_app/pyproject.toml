@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bt-app"
-version = "0.1.1"
+dynamic = ["version"]
 description = "BT application services"
 requires-python = ">=3.10"
 dependencies = [
@@ -38,3 +38,6 @@ bt-gz-rtf = "bt_app.sensors.gz_rtf_monitor:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["bt_app*", "msp*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "bt_app._version.__version__" }

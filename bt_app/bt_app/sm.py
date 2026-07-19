@@ -4,7 +4,7 @@ from transitions import Machine
 from bt_app.common import Event
 from bt_app.vehicle_config import VehicleConfig
 from bt_app.context import Context
-from bt_app.common import AETR1234
+from bt_app.common import AETR1234, AutoModeType
 
 def _coerce_robot_state(state) -> RobotState:
     if isinstance(state, RobotState):
@@ -77,9 +77,9 @@ class Robot_StateMachine:
 
         self.machine.add_transition(
             "resolve",
-            RobotState.HOVER,
+            RobotState.ALT_HOLD,
             RobotState.FAILSAFE,
-            before=lambda x: self.on_before_state_changed.emit(RobotState.HOVER, RobotState.FAILSAFE),
+            before=lambda x: self.on_before_state_changed.emit(RobotState.ALT_HOLD, RobotState.FAILSAFE),
             conditions=[self.enter_failsafe]
         )
         # endregion to FAILSAFE
@@ -88,8 +88,8 @@ class Robot_StateMachine:
         self.machine.add_transition(
             "resolve",
             RobotState.FAILSAFE,
-            RobotState.HOVER,
-            before=lambda x: self.on_before_state_changed.emit(RobotState.FAILSAFE, RobotState.HOVER),
+            RobotState.ALT_HOLD,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.FAILSAFE, RobotState.ALT_HOLD),
             conditions=[self.exit_failsafe],
         )
 
@@ -116,8 +116,8 @@ class Robot_StateMachine:
         self.machine.add_transition(
             "resolve",
             RobotState.MANUAL,
-            RobotState.HOVER,
-            before=lambda x: self.on_before_state_changed.emit(RobotState.MANUAL, RobotState.HOVER),
+            RobotState.ALT_HOLD,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.MANUAL, RobotState.ALT_HOLD),
             conditions=[self.enter_hover_from_manual],
         )
         #endregion from manual
@@ -126,8 +126,8 @@ class Robot_StateMachine:
         self.machine.add_transition(
             "resolve",
             RobotState.TAKEOFF,
-            RobotState.HOVER,
-            before=lambda x: self.on_before_state_changed.emit(RobotState.TAKEOFF, RobotState.HOVER),
+            RobotState.ALT_HOLD,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.TAKEOFF, RobotState.ALT_HOLD),
             conditions=[self.enter_hover_from_takeoff]
         )
         self.machine.add_transition(
@@ -142,12 +142,30 @@ class Robot_StateMachine:
         # region from HOVER
         self.machine.add_transition(
             "resolve",
-            RobotState.HOVER,
+            RobotState.ALT_HOLD,
             RobotState.MANUAL,
-            before=lambda x: self.on_before_state_changed.emit(RobotState.HOVER, RobotState.MANUAL),
+            before=lambda x: self.on_before_state_changed.emit(RobotState.ALT_HOLD, RobotState.MANUAL),
             conditions=[self.enter_manual_mode_from_hover],
         )
         # endregion from HOVER
+
+        # region to AUTO
+        self.machine.add_transition(
+            "resolve",
+            RobotState.ALT_HOLD,
+            RobotState.TRACKING,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.ALT_HOLD, RobotState.TRACKING),
+            conditions=[self.enter_tracking_mode_from_alt_hold],
+        )
+
+        self.machine.add_transition(
+            "resolve",
+            RobotState.TRACKING,
+            RobotState.ALT_HOLD,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.TRACKING, RobotState.ALT_HOLD),
+            conditions=[self.enter_alt_hold_mode_from_auto],
+        )
+        # endregion auto mode
 
 
 
@@ -279,4 +297,21 @@ class Robot_StateMachine:
             self.ctx.armed
         ])
         return ok
+    
+    def enter_tracking_mode_from_alt_hold(self, event):
+        ok = all([
+            self.ctx.auto_mode_type in [AutoModeType.TRACKING, AutoModeType.CURSOR],
+            self.ctx.armed
+        ])
+        return ok
+    
+    def enter_alt_hold_mode_from_auto(self, event):
+        ok = all([
+            self.ctx.auto_mode_type in [AutoModeType.DISABLED],
+            self.ctx.armed,
+            not self.ctx.joy_manual_request
+        ])
+        return ok
+    
+    
     #endregion manual mode

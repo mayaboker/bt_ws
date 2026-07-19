@@ -38,6 +38,7 @@ class Context:
     drone_vertical_speed: float = 0.0
     #current rc read from drone (use to switch between external and internal pilot and controller switch)
     drone_rc: list = field(default_factory=lambda: DEFAULT_RC_CHANNELS.copy())
+    # last joystick rc state
     request_rc: list = field(default_factory=lambda: DEFAULT_RC_CHANNELS.copy())
     sent_rc: list = field(default_factory=lambda: DEFAULT_RC_CHANNELS.copy())
     battery_voltage: float = 0.0
@@ -45,6 +46,9 @@ class Context:
     auto_mode_type: AutoModeType = field(default=AutoModeType.DISABLED)
     # altitude request setpoint use (takeoff, alt_hold)
     alt_setpoint: float = 0.0
+
+    # auto mode enable
+    auto_mode_enable: bool = field(default=False)
 
 
 
@@ -81,5 +85,6 @@ class Context:
         self.sent_rc = DEFAULT_RC_CHANNELS.copy()
         self.battery_voltage = 0.0
         self.auto_mode_type = AutoModeType.DISABLED
+        self.auto_mode_enable = False
         self._initialized = True
     # endregion

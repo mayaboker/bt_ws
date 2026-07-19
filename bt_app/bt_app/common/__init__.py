@@ -24,6 +24,7 @@ class JoyInterrupt(StrEnum):
     TAKEOFF_REQUEST = "takeoff_request"
     MANUAL_REQUEST = "manual_request"
     AUTO_REQUEST = "auto_request"
+    ENABLER_REQUEST = "enabler_request"
 
 class AETR1234(IntEnum):
     """
@@ -49,7 +50,7 @@ class RobotState(IntEnum):
     FAILSAFE = 4
     TAKEOFF = 5
     ARM = 6
-    HOVER = 7
+    ALT_HOLD = 7
 
 
 def print_channels(channels: list[int]):

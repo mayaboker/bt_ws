@@ -81,7 +81,7 @@ def test_robot_state_uses_stable_integer_values():
     assert RobotState.FAILSAFE.value == 4
     assert RobotState.TAKEOFF.value == 5
     assert RobotState.ARM.value == 6
-    assert RobotState.HOVER.value == 7
+    assert RobotState.ALT_HOLD.value == 7
 
 
 def test_context_state_defaults_to_robot_state_member():
@@ -110,7 +110,7 @@ def test_state_machine_transition_assigns_robot_state_member():
     [
         (RobotState.MANUAL, RobotState.MANUAL),
         (RobotState.ARM, RobotState.ARM),
-        (RobotState.HOVER, RobotState.HOVER),
+        (RobotState.ALT_HOLD, RobotState.ALT_HOLD),
         (RobotState.FAILSAFE, RobotState.FAILSAFE),
         (RobotState.TAKEOFF, RobotState.TAKEOFF),
     ],
@@ -131,7 +131,7 @@ def test_rc_selector_uses_robot_state_members(state, controller_key):
         assert controller.calls == [(42, 12.5)]
     elif state == RobotState.FAILSAFE:
         assert controller.calls == [(12.5, -0.1)]
-    elif state == RobotState.HOVER:
+    elif state == RobotState.ALT_HOLD:
         assert controller.calls == [("throttle", 1500), ("yaw", 1500), (42, 12.5)]
     else:
         assert controller.calls == [()]

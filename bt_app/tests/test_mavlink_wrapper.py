@@ -129,7 +129,7 @@ def test_make_base_mode_sets_armed_flag_when_armed():
 
 def test_heartbeat_reads_context_state_and_armed_flag():
     ctx = Context()
-    ctx.state = RobotState.HOVER
+    ctx.state = RobotState.ALT_HOLD
     ctx.armed = True
     service = MavlinkService(context=ctx)
     socket = FakeSocket()
@@ -142,7 +142,7 @@ def test_heartbeat_reads_context_state_and_armed_flag():
     msg = decode_mavlink(payload)
     assert addr == service.qopenhd_addr
     assert msg.get_type() == "HEARTBEAT"
-    assert msg.custom_mode == int(RobotState.HOVER)
+    assert msg.custom_mode == int(RobotState.ALT_HOLD)
     assert msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
 
 
@@ -357,7 +357,7 @@ def test_named_value_float_command_sends_named_value():
 
 def test_channel_status_v2_extension_reads_sent_rc_and_state():
     ctx = Context()
-    ctx.state = RobotState.HOVER
+    ctx.state = RobotState.ALT_HOLD
     ctx.sent_rc = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800]
     service = MavlinkService(context=ctx)
     socket = FakeSocket()
@@ -378,7 +378,7 @@ def test_channel_status_v2_extension_reads_sent_rc_and_state():
     assert unpacked == (
         1,
         1,
-        int(RobotState.HOVER),
+        int(RobotState.ALT_HOLD),
         0,
         1100,
         1200,
