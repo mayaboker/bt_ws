@@ -329,7 +329,7 @@ class App:
             self.ctx.arming_disable_flags = vehicle_state.get("arming_disable_flags", [])
 
         # end region
-
+        # the zero point is where the drone power on, if i land in lower surface the alt will be negative
         self.ctx.drone_alt = self.drone_adapter.get_altitude()
         altitude = self.drone_adapter.dispatcher.last_altitude
         if altitude and "vertical_speed_m_s" in altitude:
@@ -352,6 +352,7 @@ class App:
         """
         
         setpoint = self.__params.get(ParameterKey.TAKEOFF_ALTITUDE)
+        #TODO: setpoint is alt_ref + setpoint
         rc = self.controllers[RobotState.TAKEOFF].update(setpoint, self.ctx.drone_alt)
         # time 
         self.ctx.takeoff_reach = self.controllers[RobotState.TAKEOFF].time_in_alt >= 1
