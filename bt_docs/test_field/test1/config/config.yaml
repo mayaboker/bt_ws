@@ -1,0 +1,10 @@
+stream_ip: 192.168.168.177
+stream_ip_port: 5600
+device: /dev/video2
+width: 640
+height: 512
+fps: 30
+record_format: mp4
+video_format: I420
+http_server_port: 8001
+target_folder: ./output
