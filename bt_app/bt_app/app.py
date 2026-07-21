@@ -84,6 +84,7 @@ class App:
 
     def __banner(self):
         log.info("Application Start v{}", __version__)
+        log.debug("Application log level : DEBUG")
 
     def __validate_startup_config(self):
         if self.config.drone_sink != DroneSink.SERIAL.value:
@@ -327,6 +328,12 @@ class App:
             self.ctx.armed = vehicle_state.get("box_mode_flags") == 3
             self.ctx.armable = vehicle_state.get("armable", False)
             self.ctx.arming_disable_flags = vehicle_state.get("arming_disable_flags", [])
+
+            if not self.ctx.armable and self.ctx.arming_disable_flags:
+                log.warning("vehicle not armed")
+                log.warning(self.ctx.arming_disable_flags)
+
+            log.debug(vehicle_state)
 
         # end region
         # the zero point is where the drone power on, if i land in lower surface the alt will be negative
