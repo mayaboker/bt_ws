@@ -342,8 +342,12 @@ class App:
         if altitude and "vertical_speed_m_s" in altitude:
             self.ctx.drone_vertical_speed = altitude["vertical_speed_m_s"]
         ## read last drone rc
-        self.ctx.drone_rc = self.drone_adapter.get_rc()
-        # log.info(self.ctx.state, self.ctx.armable, self.ctx.takeoff_interrupt)
+        rc = self.drone_adapter.get_rc()
+        if rc:
+            self.ctx.drone_rc = rc
+            # read the aux1/armed value , the idea is to update ARM/AUX1 value when the system run with external pilot
+            # TODO : think to combine with msp_override_mask (aux3)
+            self.ctx.armed = self.ctx.drone_rc[RCChannel.ARM] == RC_MAX
 
         battery = self.drone_adapter.dispatcher.last_battery
         if battery and "voltage_v" in battery:
