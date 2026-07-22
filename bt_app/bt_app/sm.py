@@ -46,6 +46,24 @@ class Robot_StateMachine:
             before=lambda x: self.on_before_state_changed.emit(RobotState.IDLE, RobotState.ARM),
             conditions=[self.enter_arm]
         )
+
+        # idle to manual
+        self.machine.add_transition(
+            "resolve",
+            RobotState.IDLE,
+            RobotState.MANUAL,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.IDLE, RobotState.MANUAL),
+            conditions=[self.enter_manual_from_idle]
+        )
+
+        # idle to alt_hold
+        self.machine.add_transition(
+            "resolve",
+            RobotState.IDLE,
+            RobotState.ALT_HOLD,
+            before=lambda x: self.on_before_state_changed.emit(RobotState.IDLE, RobotState.ALT_HOLD),
+            conditions=[self.enter_manual_from_alt_hold]
+        )
         # endregion from IDLE
 
         # region from ARM
@@ -217,6 +235,20 @@ class Robot_StateMachine:
     # def enter_idle_from_manual(self, event):
     #     return not self.ctx.joy_manual_request and not self.ctx.takeoff_interrupt and not self.ctx.armable
 
+    
+    def enter_manual_from_alt_hold(self, event):
+        ok = all([
+            self.ctx.armed,
+            not self.ctx.joy_arm_requested
+        ])
+        return  ok
+    
+    def enter_manual_from_idle(self, event):
+        ok = all([
+            self.ctx.armed,
+            self.ctx.joy_arm_requested
+        ])
+        return  ok
     
     def enter_arm(self, event):
         """

@@ -337,7 +337,7 @@ class App:
 
         # end region
         # the zero point is where the drone power on, if i land in lower surface the alt will be negative
-        self.ctx.drone_alt = self.drone_adapter.get_altitude()
+        self.ctx.drone_alt = self.drone_adapter.get_altitude() # in meter
         altitude = self.drone_adapter.dispatcher.last_altitude
         if altitude and "vertical_speed_m_s" in altitude:
             self.ctx.drone_vertical_speed = altitude["vertical_speed_m_s"]
@@ -352,6 +352,7 @@ class App:
                 log.info(f"arming change : {armed}")
                 log.debug(f"drone rc: {self.ctx.drone_rc}")
                 self.ctx.armed = armed
+
 
         battery = self.drone_adapter.dispatcher.last_battery
         if battery and "voltage_v" in battery:
