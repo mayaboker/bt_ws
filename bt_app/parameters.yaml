@@ -47,6 +47,12 @@ parameters:
     limits:
       min: 0.0
       max: 30.0
+  joystick.server_timeout_s:
+    type: float
+    default: 1.0
+    limits:
+      min: 0.1
+      max: 10.0
       
   altitude.kp:
     type: float

@@ -32,6 +32,7 @@ class ParameterKey:
     HOVER_YAW_EXPO: Final[Literal['hover_yaw.expo']] = 'hover_yaw.expo'
     HOVER_YAW_MAX_RATE_DPS: Final[Literal['hover_yaw.max_rate_dps']] = 'hover_yaw.max_rate_dps'
     HOVER_YAW_YAW_RATE: Final[Literal['hover_yaw.yaw_rate']] = 'hover_yaw.yaw_rate'
+    JOYSTICK_SERVER_TIMEOUT_S: Final[Literal['joystick.server_timeout_s']] = 'joystick.server_timeout_s'
     MANUAL_IDLE_LAND_CONFIRM_S: Final[Literal['manual_idle.land_confirm_s']] = 'manual_idle.land_confirm_s'
     TAKEOFF_ALTITUDE: Final[Literal['takeoff_altitude']] = 'takeoff_altitude'
     VISUAL_FINAL_TRACKING_DISTANCE: Final[Literal['visual.final_tracking_distance']] = 'visual.final_tracking_distance'
@@ -70,6 +71,7 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'hover_yaw.expo',
     'hover_yaw.max_rate_dps',
     'hover_yaw.yaw_rate',
+    'joystick.server_timeout_s',
     'manual_idle.land_confirm_s',
     'takeoff_altitude',
     'visual.final_tracking_distance',
