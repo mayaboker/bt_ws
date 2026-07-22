@@ -347,7 +347,11 @@ class App:
             self.ctx.drone_rc = rc
             # read the aux1/armed value , the idea is to update ARM/AUX1 value when the system run with external pilot
             # TODO : think to combine with msp_override_mask (aux3)
-            self.ctx.armed = self.ctx.drone_rc[RCChannel.ARM] == RC_MAX
+            armed = self.ctx.drone_rc[RCChannel.ARM] == RC_MAX
+            if armed != self.ctx.armed:
+                log.info(f"arming change : {armed}")
+                log.debug(f"drone rc: {self.ctx.drone_rc}")
+                self.ctx.armed = armed
 
         battery = self.drone_adapter.dispatcher.last_battery
         if battery and "voltage_v" in battery:
