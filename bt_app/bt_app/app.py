@@ -547,7 +547,7 @@ class App:
             case RobotState.IDLE:
                 return self._make_disarm_channels()
             case RobotState.ARM:
-                return self.controllers[RobotState.ARM].update()
+                return self._arm_handler()
             case RobotState.ALT_HOLD:
                 return self.hover_handler()
             case RobotState.TRACKING:
@@ -571,7 +571,13 @@ class App:
                 )
         return sanitized
 
+    def _arm_handler(self):
+        from typing import cast
+        arm_controller: ARMController = cast(ARMController, self.controllers[RobotState.ARM])
+        self.ctx.armed = arm_controller.is_arm_done
+        return self.controllers[RobotState.ARM].update()
     #TODO: move to arm controller 
+
     def _make_disarm_channels(self) -> list[int]:
         channels = [RC_MIN] * NO_RC_CHANNELS
         channels[RCChannel.ROLL] = RC_MID

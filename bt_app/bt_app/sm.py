@@ -67,6 +67,7 @@ class Robot_StateMachine:
         # endregion
 
         # region to FAILSAFE
+        # manual to failsafe
         self.machine.add_transition(
             "resolve",
             RobotState.MANUAL,
