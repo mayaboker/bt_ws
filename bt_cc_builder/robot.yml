@@ -28,11 +28,37 @@
           - curl
           - tmux
           - htop
+          - openssh-server
           - python3
           - python3-pip
           - tmuxp
           - vim
         state: present
+
+    - name: Install SSH public key for user
+      ansible.posix.authorized_key:
+        user: user
+        state: present
+        key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC+cr27OxEUbO11/Zx/iRhHNhg+wfVQRfQp86GkoFvgO user@dev1
+
+    - name: Create SSH server config directory
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Enable SSH password and key login
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/robot.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          PasswordAuthentication yes
+          PubkeyAuthentication yes
+          PermitRootLogin no
 
     - name: Download uv installer
       ansible.builtin.get_url:
@@ -46,3 +72,30 @@
         creates: /usr/local/bin/uv
       environment:
         UV_UNMANAGED_INSTALL: /usr/local/bin
+
+    - name: Create user Python environment
+      ansible.builtin.command:
+        cmd: /usr/local/bin/uv venv /home/user/.venv
+        creates: /home/user/.venv/bin/python
+      environment:
+        HOME: /home/user
+
+    - name: Set user Python environment ownership
+      ansible.builtin.file:
+        path: /home/user/.venv
+        state: directory
+        owner: user
+        group: user
+        recurse: true
+
+    - name: Add user Python environment to login shell
+      ansible.builtin.blockinfile:
+        path: /home/user/.profile
+        create: true
+        owner: user
+        group: user
+        mode: "0644"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - user python environment"
+        block: |
+          export VIRTUAL_ENV=/home/user/.venv
+          export PATH="$VIRTUAL_ENV/bin:$PATH"
