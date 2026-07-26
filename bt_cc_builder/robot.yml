@@ -166,16 +166,41 @@
         dest: /tmp/uv-install.sh
         mode: "0755"
 
+    - name: Remove old root uv install
+      ansible.builtin.file:
+        path: /usr/local/bin/uv
+        state: absent
+
+    - name: Create user uv directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: user
+        group: user
+        mode: "0755"
+      loop:
+        - /home/user/.local
+        - /home/user/.local/bin
+        - /home/user/.cache
+        - /home/user/.cache/uv
+
     - name: Install uv
       ansible.builtin.command:
-        cmd: sh /tmp/uv-install.sh
-        creates: /usr/local/bin/uv
+        cmd: >
+          runuser -u user --
+          env HOME=/home/user UV_INSTALL_DIR=/home/user/.local/bin
+          sh /tmp/uv-install.sh
+        creates: /home/user/.local/bin/uv
       environment:
-        UV_UNMANAGED_INSTALL: /usr/local/bin
+        HOME: /home/user
+        UV_INSTALL_DIR: /home/user/.local/bin
 
     - name: Create user Python environment
       ansible.builtin.command:
-        cmd: /usr/local/bin/uv venv /home/user/.venv
+        cmd: >
+          runuser -u user --
+          env HOME=/home/user
+          /home/user/.local/bin/uv venv /home/user/.venv
         creates: /home/user/.venv/bin/python
       environment:
         HOME: /home/user
@@ -191,7 +216,9 @@
     - name: Install bt_app Python dependencies into user environment
       ansible.builtin.command:
         cmd: >
-          /usr/local/bin/uv pip install
+          runuser -u user --
+          env HOME=/home/user
+          /home/user/.local/bin/uv pip install
           --python /home/user/.venv/bin/python
           loguru
           click
@@ -222,6 +249,14 @@
         group: user
         recurse: true
 
+    - name: Set user uv cache ownership
+      ansible.builtin.file:
+        path: /home/user/.cache/uv
+        state: directory
+        owner: user
+        group: user
+        recurse: true
+
     - name: Add user Python environment to login shell
       ansible.builtin.blockinfile:
         path: /home/user/.profile
@@ -232,6 +267,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK - user python environment"
         block: |
           export VIRTUAL_ENV=/home/user/.venv
+          export PATH="/home/user/.local/bin:$PATH"
           export PATH="$VIRTUAL_ENV/bin:$PATH"
 
     - name: Add user command aliases
@@ -244,7 +280,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK - user aliases"
         block: |
           alias py='/home/user/.venv/bin/python'
-          alias uvpip='/usr/local/bin/uv pip --python /home/user/.venv/bin/python'
+          alias uvpip='/home/user/.local/bin/uv pip --python /home/user/.venv/bin/python'
           alias bt-app='/home/user/.venv/bin/bt-app'
           alias bt-gz-camera='/home/user/.venv/bin/bt-gz-camera'
           alias bt-optical-flow-tracker='/home/user/.venv/bin/bt-optical-flow-tracker'

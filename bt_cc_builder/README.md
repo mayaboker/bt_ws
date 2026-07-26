@@ -84,3 +84,11 @@ ANSIBLE_CONFIG=./ansible.cfg ansible-playbook \
     --ask-become-pass \
     robot.yml
 ```
+
+```
+ ANSIBLE_CONFIG=./ansible.cfg ansible-playbook \
+    -i inventory_ssh.yml \
+    --ask-become-pass \
+    robot.yml \
+    --tags uv
+```
