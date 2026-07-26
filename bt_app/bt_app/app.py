@@ -45,6 +45,8 @@ import time
 from bt_app.common.helper import format_channels
 from bt_app.common.mavlink import NamedValue
 
+START_HOVER_PWM = 1200
+
 class App:
     def __init__(self, config: VehicleConfig):
         """
@@ -415,8 +417,9 @@ class App:
         """
         controller = self.controllers[RobotState.ALT_HOLD]
         # read last joystick state
+        self.ctx.request_rc[AETR1234.THROTTLE]
         controller.update_setpoint_from_throttle(
-            self.ctx.request_rc[AETR1234.THROTTLE]
+            START_HOVER_PWM
         )
         controller.update_yaw_from_joystick(
             self.ctx.request_rc[AETR1234.YAW]
