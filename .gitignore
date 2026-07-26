@@ -118,3 +118,9 @@ runs/detect/train/weights/last.pt
 runs/detect/train/weights/best_rknn_model/best-rk3566.rknn
 runs/detect/train/weights/best_rknn_model/metadata.yaml
 bt_app/logs/rc_state.csv
+bt_cc_builder/images/ubuntu-26.04-preinstalled-server-arm64+raspi-prepared-20260726-145151.img
+bt_cc_builder/images/ubuntu-26.04-preinstalled-server-arm64+raspi-prepared-20260726-145421.img
+bt_cc_builder/images/ubuntu-26.04-preinstalled-server-arm64+raspi-prepared-20260726-152401.img
+bt_cc_builder/README.md
+robot-os.img
+ubuntu-24.04-preinstalled-server-arm64-radxa-zero3.img.xz
