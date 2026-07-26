@@ -7,6 +7,15 @@
     DEBIAN_FRONTEND: noninteractive
 
   tasks:
+    - name: Create robot user
+      ansible.builtin.user:
+        name: user
+        password: "{{ 'user' | password_hash('sha512', 'robotuser') }}"
+        home: /home/user
+        create_home: true
+        shell: /bin/bash
+        state: present
+
     - name: Update apt cache
       ansible.builtin.apt:
         update_cache: true
