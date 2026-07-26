@@ -1,0 +1,39 @@
+---
+- name: Configure Raspberry Pi image
+  hosts: robot_image
+  gather_facts: true
+
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install robot packages
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - tmux
+          - htop
+          - python3
+          - python3-pip
+          - tmuxp
+          - vim
+        state: present
+
+    - name: Download uv installer
+      ansible.builtin.get_url:
+        url: https://astral.sh/uv/install.sh
+        dest: /tmp/uv-install.sh
+        mode: "0755"
+
+    - name: Install uv
+      ansible.builtin.command:
+        cmd: sh /tmp/uv-install.sh
+        creates: /usr/local/bin/uv
+      environment:
+        UV_UNMANAGED_INSTALL: /usr/local/bin
