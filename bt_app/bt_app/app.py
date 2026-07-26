@@ -409,7 +409,7 @@ class App:
             return rc
 
 
-    def hover_handler(self):
+    def alt_hold_handler(self):
         """
         ALT Hold handler
         """
@@ -558,7 +558,7 @@ class App:
             case RobotState.ARM:
                 return self._arm_handler()
             case RobotState.ALT_HOLD:
-                return self.hover_handler()
+                return self.alt_hold_handler()
             case RobotState.TRACKING:
                 return self.auto_mode_handler()
             case _:
