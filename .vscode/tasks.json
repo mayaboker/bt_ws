@@ -152,6 +152,30 @@
                 "reveal": "always",
                 "panel": "shared"
             }
+        },
+        {
+            "label": "ansible: robot ssh",
+            "type": "shell",
+            "command": "ansible-playbook",
+            "args": [
+                "-i",
+                "inventory_ssh.yml",
+                "--ask-become-pass",
+                "robot.yml"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/bt_cc_builder",
+                "env": {
+                    "ANSIBLE_CONFIG": "${workspaceFolder}/bt_cc_builder/ansible.cfg",
+                    "ANSIBLE_LOCAL_TEMP": "/tmp/ansible-local",
+                    "ANSIBLE_PERSISTENT_CONTROL_PATH_DIR": "/tmp/ansible-cp"
+                }
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
         }
     ]
 }
