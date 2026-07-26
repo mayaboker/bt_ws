@@ -16,6 +16,10 @@
         shell: /bin/bash
         state: present
 
+    - name: Clean apt package archives
+      ansible.builtin.apt:
+        clean: true
+
     - name: Update apt cache
       ansible.builtin.apt:
         update_cache: true
@@ -65,6 +69,71 @@
           - python3-gi
           - python3-gst-1.0
         state: present
+
+    - name: Install debug and network diagnostic tools
+      ansible.builtin.apt:
+        autoclean: true
+        name:
+          - iftop
+          - iperf3
+          - iproute2
+          - iputils-ping
+          - lsof
+          - net-tools
+          - strace
+          - tcpdump
+        state: present
+
+    - name: Clean apt package archives after debug tool install
+      ansible.builtin.apt:
+        clean: true
+
+    - name: Install hotspot network packages
+      ansible.builtin.apt:
+        autoclean: true
+        name:
+          - dnsmasq
+          - netplan.io
+          - network-manager
+          - wpasupplicant
+        state: present
+
+    - name: Clean apt package archives after hotspot package install
+      ansible.builtin.apt:
+        clean: true
+
+    - name: Configure wlan0 as jarvis hotspot with netplan
+      ansible.builtin.copy:
+        dest: /etc/netplan/90-jarvis-hotspot.yaml
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          network:
+            version: 2
+            renderer: NetworkManager
+            wifis:
+              wlan0:
+                dhcp4: false
+                dhcp6: false
+                addresses:
+                  - 192.168.1.1/24
+                access-points:
+                  "jarvis":
+                    mode: ap
+
+    - name: Configure DHCP for jarvis hotspot clients
+      ansible.builtin.copy:
+        dest: /etc/dnsmasq.d/jarvis-hotspot.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          interface=wlan0
+          bind-interfaces
+          dhcp-range=192.168.1.50,192.168.1.150,255.255.255.0,12h
+          dhcp-option=3,192.168.1.1
+          dhcp-option=6,192.168.1.1
 
     - name: Install SSH public key for user
       ansible.posix.authorized_key:
@@ -164,3 +233,19 @@
         block: |
           export VIRTUAL_ENV=/home/user/.venv
           export PATH="$VIRTUAL_ENV/bin:$PATH"
+
+    - name: Add user command aliases
+      ansible.builtin.blockinfile:
+        path: /home/user/.bash_aliases
+        create: true
+        owner: user
+        group: user
+        mode: "0644"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - user aliases"
+        block: |
+          alias py='/home/user/.venv/bin/python'
+          alias uvpip='/usr/local/bin/uv pip --python /home/user/.venv/bin/python'
+          alias bt-app='/home/user/.venv/bin/bt-app'
+          alias bt-gz-camera='/home/user/.venv/bin/bt-gz-camera'
+          alias bt-optical-flow-tracker='/home/user/.venv/bin/bt-optical-flow-tracker'
+          alias bt-gz-rtf='/home/user/.venv/bin/bt-gz-rtf'
