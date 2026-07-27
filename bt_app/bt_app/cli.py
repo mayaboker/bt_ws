@@ -24,6 +24,7 @@ LOG_LEVELS = (
 
 class CommandName:
     VERSION = "version"
+    ALIAS = "alias"
     DUMP_CONFIG = "dump_config"
     RUN = "run"
 
@@ -71,6 +72,21 @@ def version_command(ctx: click.Context) -> CliOptions:
     """Print the installed package version."""
 
     return _make_options(ctx, command=CommandName.VERSION)
+
+
+@_cli.command(CommandName.ALIAS)
+@click.option(
+    "-c",
+    "--config",
+    "config_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Path to vehicle YAML configuration.",
+)
+@click.pass_context
+def alias_command(ctx: click.Context, config_path: Path | None) -> CliOptions:
+    """Print a Bash alias for running the BT application."""
+
+    return _make_options(ctx, command=CommandName.ALIAS, config_path=config_path)
 
 
 @_cli.command(CommandName.DUMP_CONFIG)

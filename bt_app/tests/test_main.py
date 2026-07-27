@@ -1,3 +1,5 @@
+import shlex
+
 import pytest
 
 from bt_app.context import Context
@@ -26,6 +28,55 @@ def _write_vehicle_config(tmp_path, parameters_path):
         encoding="utf-8",
     )
     return config_path
+
+
+def test_alias_prints_run_alias_and_bashrc_append_command(capsys):
+    main(["alias"], standalone_mode=False)
+
+    assert capsys.readouterr().out == (
+        "For current shell:\n"
+        "alias start_bt_app='uv run bt-app run'\n"
+        "For persistent shell (~/.bashrc):\n"
+        "echo 'alias start_bt_app='\"'\"'uv run bt-app run'\"'\"'' >> ~/.bashrc\n"
+    )
+
+
+def test_alias_includes_config_path(capsys):
+    main(["alias", "-c", "config/vehicle_config.yaml"], standalone_mode=False)
+
+    assert capsys.readouterr().out == (
+        "For current shell:\n"
+        "alias start_bt_app='uv run bt-app run -c config/vehicle_config.yaml'\n"
+        "For persistent shell (~/.bashrc):\n"
+        "echo 'alias start_bt_app='\"'\"'uv run bt-app run -c config/vehicle_config.yaml'\"'\"'' >> ~/.bashrc\n"
+    )
+
+
+def test_alias_quotes_config_path_with_spaces(capsys):
+    main(["alias", "-c", "configs/vehicle app.yaml"], standalone_mode=False)
+
+    current_title, alias_line, persistent_title, append_line = (
+        capsys.readouterr().out.splitlines()
+    )
+    assert current_title == "For current shell:"
+    assert alias_line == (
+        "alias start_bt_app='uv run bt-app run -c "
+        "'\"'\"'configs/vehicle app.yaml'\"'\"''"
+    )
+    assert persistent_title == "For persistent shell (~/.bashrc):"
+    assert append_line.startswith("echo ")
+    assert append_line.endswith(" >> ~/.bashrc")
+    assert shlex.split(append_line.removeprefix("echo ").removesuffix(" >> ~/.bashrc")) == [
+        alias_line
+    ]
+
+
+def test_alias_does_not_validate_config(capsys):
+    main(["alias", "-c", "missing.yaml"], standalone_mode=False)
+
+    output = capsys.readouterr().out
+    assert "missing.yaml" in output
+    assert "Vehicle config not found" not in output
 
 
 def test_run_missing_parameters_file_exits_cleanly_non_standalone(tmp_path):

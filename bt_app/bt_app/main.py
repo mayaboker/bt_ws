@@ -7,6 +7,7 @@ from dataclasses import MISSING, asdict, fields
 from importlib import metadata
 import logging
 from pathlib import Path
+import shlex
 import sys
 
 import yaml
@@ -62,6 +63,9 @@ def dispatch_command(options: CliOptions, config: VehicleConfig | None = None) -
     if options.command == CommandName.VERSION:
         print(_package_version())
         return
+    if options.command == CommandName.ALIAS:
+        print(build_alias_output(options.config_path))
+        return
     if options.command == CommandName.DUMP_CONFIG:
         print(yaml.safe_dump(asdict(config), sort_keys=False), end="")
         return
@@ -73,6 +77,25 @@ def dispatch_command(options: CliOptions, config: VehicleConfig | None = None) -
         App(config=config).run()
         return
     raise RuntimeError(f"unknown command: {options.command}")
+
+
+def build_alias_output(config_path: object | None = None) -> str:
+    alias_line = build_alias_line(config_path)
+    append_line = f"echo {shlex.quote(alias_line)} >> ~/.bashrc"
+    return (
+        "For current shell:\n"
+        f"{alias_line}\n"
+        "For persistent shell (~/.bashrc):\n"
+        f"{append_line}"
+    )
+
+
+def build_alias_line(config_path: object | None = None) -> str:
+    command_parts = ["uv", "run", "bt-app", "run"]
+    if config_path is not None:
+        command_parts.extend(["-c", str(config_path)])
+    command = shlex.join(command_parts)
+    return f"alias start_bt_app={shlex.quote(command)}"
 
 
 def build_vehicle_config(options: CliOptions) -> VehicleConfig:
