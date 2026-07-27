@@ -102,6 +102,21 @@
         }
         ,
         {
+            "label": "build: bt_app config deb",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/build_bt_app_config_deb.sh",
+            "args": [],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        }
+        ,
+        {
             "label": "generate: parameter types",
             "type": "shell",
             "command": "python3",
