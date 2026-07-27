@@ -16,6 +16,19 @@
         shell: /bin/bash
         state: present
 
+    - name: Allow robot user to run all sudo commands
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/user
+        owner: root
+        group: root
+        mode: "0440"
+        content: |
+          user ALL=(ALL:ALL) ALL
+        validate: "visudo -cf %s"
+      tags:
+        - sudoers
+        - suders
+
     - name: Clean apt package archives
       ansible.builtin.apt:
         clean: true
@@ -52,6 +65,16 @@
           - vim
           - zlib1g-dev
         state: present
+
+    - name: Install global tmux config
+      ansible.builtin.copy:
+        src: files/tmux.conf
+        dest: /etc/tmux.conf
+        owner: root
+        group: root
+        mode: "0644"
+      tags:
+        - tmux
 
     - name: Install GStreamer, Python bindings, and H264 H265 support
       ansible.builtin.apt:
