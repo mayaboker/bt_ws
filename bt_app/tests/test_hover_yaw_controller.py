@@ -211,7 +211,7 @@ def test_hover_handler_updates_setpoint_from_requested_throttle():
     hover_controller = FakeHoverController()
     app.controllers = {RobotState.ALT_HOLD: hover_controller}
 
-    rc = app.hover_handler()
+    rc = app.alt_hold_handler()
 
     assert hover_controller.throttle_rc == 1800
     assert hover_controller.yaw_rc == 1700
@@ -260,8 +260,8 @@ def test_hover_handler_sends_low_severity_text_when_setpoint_request_starts():
     app.controllers = {RobotState.ALT_HOLD: FakeHoverController()}
     app.mavlink_service = FakeMavlinkService()
 
-    app.hover_handler()
-    app.hover_handler()
+    app.alt_hold_handler()
+    app.alt_hold_handler()
 
     assert app.mavlink_service.messages == [
         ("Hover altitude setpoint change requested", MavSeverity.DEBUG)
