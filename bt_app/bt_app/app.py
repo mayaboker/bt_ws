@@ -429,17 +429,19 @@ class App:
         """
         controller = self.controllers[RobotState.ALT_HOLD]
         # read last joystick state
-        self.ctx.request_rc[AETR1234.THROTTLE]
+        
+        # update alt setpoint
+        controller.update_setpoint_from_throttle(
+            self.ctx.request_rc[InternalJoy.THROTTLE]
+        )
 
-        # controller.update_setpoint_from_throttle(
-        #     START_HOVER_PWM
-        # )
-
+        # control yaw
         controller.update_yaw_from_joystick(
             self.ctx.request_rc[InternalJoy.YAW]
         )
 
         # TODO: add deadband ???
+        # control pitch and yaw
         pitch = self.ctx.request_rc[InternalJoy.PITCH]
         roll = self.ctx.request_rc[InternalJoy.ROLL]
 

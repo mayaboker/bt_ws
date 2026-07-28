@@ -74,6 +74,14 @@ class HoverYawController:
         return True
 
     def update_setpoint_from_throttle(self, throttle_rc: int) -> float:
+        """Adjust the altitude setpoint from a centered throttle command.
+
+        Values inside the throttle deadband leave the setpoint unchanged. Values
+        outside it are normalized to ``[-1, 1]`` and integrated over elapsed time
+        at ``altitude_rate_m_s``. An event is raised once when the stick first
+        leaves the deadband so consumers can react to a new altitude request.
+        """
+
         now = time.monotonic()
         dt_s = max(0.0, now - self._last_setpoint_update_s)
         self._last_setpoint_update_s = now
