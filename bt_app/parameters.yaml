@@ -102,6 +102,12 @@ parameters:
     limits:
       min: 0.0
       max: 500.0
+  hover.baseline:
+    type: int
+    default: 1500
+    limits:
+      min: 1000
+      max: 2000
   hover.altitude_rate_m_s:
     type: float
     default: 1.0

@@ -11,7 +11,8 @@ from bt_app.control import (
     FailSafeController,
     TakeoffController,
     ARMController,
-    HoverYawController
+    HoverYawController,
+    MavlinkListenerService
 )
 from bt_app.sm import Robot_StateMachine
 from bt_app.context import Context, DEFAULT_RC_CHANNELS
@@ -37,15 +38,24 @@ from bt_app.msp.bt_v2 import (
     RC_MID,
     RC_MIN,
     RCChannel_alias as RCChannel,
+    BTRCChannels
 )
-from bt_app.common import AETR1234
+from bt_app.common import (
+    AETR1234,
+    InternalJoy)
 from bt_app.parameters import Parameters
 from loguru import logger as log
 import time
 from bt_app.common.helper import format_channels
 from bt_app.common.mavlink import NamedValue
+#TODO: remove when rc_channel_control implement adapter
+from bt_joy.server.mavlink import (
+    RcChannelsOverrideEvent,
+    MavlinkServerConfig,
+    NoCommunicationEvent,
+    CommunicationResumedEvent
+)
 
-START_HOVER_PWM = 1200
 
 class App:
     def __init__(self, config: VehicleConfig):
@@ -69,10 +79,11 @@ class App:
         self.controllers = {}
         self.__validate_startup_config()
         self.__params = self.__load_parameters()
+        self.ctx.alt_setpoint = self.__params.get(ParameterKey.TAKEOFF_ALTITUDE)
         self.manual_land_detector = self.__load_manual_land_detector()
         self._manual_land_detection_started_notified = False
         self._manual_land_confirmed_notified = False
-        
+        self._last_rc_channel = None
         self.__load_drone_interface()
         self.__load_controllers()
         self.mavlink_service = MavlinkService(
@@ -153,13 +164,31 @@ class App:
         - takeoff
         """
         #region joy adapter
-        joy_adapter = joy_zmq_adapter.JoyZmqAdapter(self.__params)
+        config = MavlinkServerConfig(
+            connection="udpin:0.0.0.0:14560",
+            source_system=254,
+            source_component=0,
+            heartbeat_rate_hz=1.0,
+            communication_timeout_stage1_s=1.0,
+            communication_timeout_stage2_s=5.0,
+            receive_timeout_s=0.05,
+            channel_count=18,
+        )
+        joy_adapter = MavlinkListenerService(
+            config=config,
+            on_rc=self.__handle_joy_rc,
+            on_timeout=self._joystick_fs_enter,
+            on_resume=self.__joystick_fs_exit
+        )
         joy_adapter.start()
-        joy_adapter.on_failsafe_enter += self._joystick_fs_enter
-        joy_adapter.on_failsafe_exit += self.__joystick_fs_exit
-        joy_adapter.on_interrupt += self.__handle_joy_interrupt
+        log.info(f"------------------------- {config}")
+        # joy_adapter = joy_zmq_adapter.JoyZmqAdapter(self.__params)
+        # joy_adapter.start()
+        # joy_adapter.on_failsafe_enter += self._joystick_fs_enter
+        # joy_adapter.on_failsafe_exit += self.__joystick_fs_exit
+        # joy_adapter.on_interrupt += self.__handle_joy_interrupt
         # TODO: convert to const and mapping
-        self.register_joy_interrupt(joy_adapter)
+        # self.register_joy_interrupt(joy_adapter)
         self.controllers[RobotState.MANUAL] = joy_adapter
         log.info("load joy adapter")
         #endregion
@@ -176,11 +205,11 @@ class App:
         # search controller
         self.controllers[RobotState.ALT_HOLD] = HoverYawController(self.__params)
 
-    def register_joy_interrupt(self, joy_adapter):
-        joy_adapter.register_interrupt(AETR1234.AUX4, JoyInterrupt.TAKEOFF_REQUEST)
-        joy_adapter.register_interrupt(AETR1234.AUX1, JoyInterrupt.MANUAL_REQUEST)
-        joy_adapter.register_interrupt(AETR1234.AUX2, JoyInterrupt.AUTO_REQUEST)
-        joy_adapter.register_interrupt(AETR1234.AUX3, JoyInterrupt.ENABLER_REQUEST)
+    # def register_joy_interrupt(self, joy_adapter):
+    #     joy_adapter.register_interrupt(AETR1234.AUX4, JoyInterrupt.TAKEOFF_REQUEST)
+    #     joy_adapter.register_interrupt(AETR1234.AUX1, JoyInterrupt.MANUAL_REQUEST)
+    #     joy_adapter.register_interrupt(AETR1234.AUX2, JoyInterrupt.AUTO_REQUEST)
+    #     joy_adapter.register_interrupt(AETR1234.AUX3, JoyInterrupt.ENABLER_REQUEST)
         
 
     def _state_changed_handler(self, previous_state, new_state):
@@ -226,8 +255,7 @@ class App:
                 self._reset_manual_land_detector()
 
             case RobotState.ALT_HOLD:
-                # self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[AETR1234.THROTTLE])
-                base_line = RC_MID# self.ctx.drone_rc[3]
+                base_line = self.__params.get(ParameterKey.HOVER_BASELINE)
                 self.controllers[RobotState.ALT_HOLD].reset_setpoint(self.ctx.drone_alt)
                 self.controllers[RobotState.ALT_HOLD].set_baseline(base_line)# AETR1234.THROTTLE
                 self.mavlink_service.send_named_value_to_gcs(
@@ -238,7 +266,7 @@ class App:
 
             case RobotState.FAILSAFE:
                 # set the failsafe controller setpoint to the current altitude
-                base_line = RC_MID# self.ctx.drone_rc[3]
+                base_line = self.__params.get(ParameterKey.HOVER_BASELINE)
                 self.controllers[RobotState.FAILSAFE].reset(self.ctx.drone_alt)
                 self.controllers[RobotState.FAILSAFE].set_baseline(base_line)# AETR1234.THROTTLE 
                 self.mavlink_service.send_named_value_to_gcs(
@@ -251,37 +279,43 @@ class App:
             self._reset_manual_land_detector()
 
     #region joystick handlers
-    def __handle_joy_interrupt(self, name, value):
+    def __handle_joy_rc(self, event: RcChannelsOverrideEvent):
         """
         handle interrupt that register as joy action
         """
-        # TODO: create interrupt action list
+        self._last_rc_channel = list(event.channels)
+        self.ctx.request_rc = self._last_rc_channel
+        # if name == JoyInterrupt.TAKEOFF_REQUEST:
+        self.ctx.joy_takeoff_request = self._last_rc_channel[InternalJoy.AUTO_TAKE_OFF] == RC_MAX
+        self.ctx.joy_manual_request = self._last_rc_channel[InternalJoy.MANUAL] == RC_MIN
+        # self.ctx.auto_mode_type = AutoModeType(self._last_rc_channel[AETR1234.AUX2])
+        self.ctx.auto_mode_enable = self._last_rc_channel[InternalJoy.ENABLER] == RC_MAX
         
-        if name == JoyInterrupt.TAKEOFF_REQUEST:
-            self.ctx.joy_takeoff_request = value == RC_MAX
-            log.warning(f"--------takeoff interrupt {value}")
+        
+        
+        # print(current)
+        
+        arm_switch = self._last_rc_channel[InternalJoy.ARM] == RC_MAX
+        throttle_for_arm = self._last_rc_channel[InternalJoy.THROTTLE] < 1050
+        # if all([roll_for_arm, pitch_for_arm]):#, roll_for_arm, pitch_for_arm]):
+        if all([throttle_for_arm, arm_switch]):
+            # log.warning("Joystick arm request detected")
+            self.ctx.armed_allowed = True
+        elif all([not arm_switch, throttle_for_arm]):
+            # log.warning("Joystick disarm request detected")
+            self.ctx.armed_allowed = False
 
-        elif name == JoyInterrupt.MANUAL_REQUEST:
-            self.ctx.joy_manual_request = value == RC_MAX
-            # TODO: what more safety
-            # self.ctx.armed_allowed = False
-            log.warning(f"manual request {self.ctx.joy_manual_request}")
-
-        elif name == JoyInterrupt.AUTO_REQUEST:
-            self.ctx.auto_mode_type = AutoModeType(value)
-            log.warning(f"auto request {self.ctx.auto_mode_type}")
-
-        elif name == JoyInterrupt.ENABLER_REQUEST:
-            self.ctx.auto_mode_enable = value == RC_MAX
+        self.ctx.joy_arm_requested = all([throttle_for_arm, self.ctx.armed_allowed])#, roll_for_arm, pitch_for_arm])
+        # end region
 
         
 
     
-    def _joystick_fs_enter(self):
+    def _joystick_fs_enter(self, event: NoCommunicationEvent):
         log.warning("Joystick Failsafe Entered")
         self.ctx.joy_fail_safe = True
 
-    def __joystick_fs_exit(self):
+    def __joystick_fs_exit(self, event: CommunicationResumedEvent):
         log.warning("Joystick Failsafe Exited")
         self.ctx.joy_fail_safe = False
 
@@ -291,27 +325,7 @@ class App:
         the context contain variable for state machine condition
         """
         # region read joystick state for arm request
-        current = self.controllers[RobotState.MANUAL].last_rc_channels
-        if not current:
-            return
-        self.ctx.request_rc = current.copy()
-        throttle_for_arm = current[AETR1234.THROTTLE] < 1050
-        # one time 
-        # roll_for_arm = current[AETR1234.ROLL] < 1050
-        # pitch_for_arm = current[AETR1234.PITCH] < 1050
-        yaw_for_arm = current[AETR1234.YAW] > 1950
-        yaw_for_disarmed = current[AETR1234.YAW] < 1050
-        throttle_for_arm = current[AETR1234.THROTTLE] < 1050
-        # if all([roll_for_arm, pitch_for_arm]):#, roll_for_arm, pitch_for_arm]):
-        if all([yaw_for_arm, throttle_for_arm]):
-            log.warning("Joystick arm request detected")
-            self.ctx.armed_allowed = True
-        elif all([yaw_for_disarmed, throttle_for_arm]):
-            log.warning("Joystick disarm request detected")
-            self.ctx.armed_allowed = False
-
-        self.ctx.joy_arm_requested = all([throttle_for_arm, yaw_for_arm, self.ctx.armed_allowed])#, roll_for_arm, pitch_for_arm])
-        # end region
+        
 
     #endregion
 
@@ -320,14 +334,12 @@ class App:
         update the context / blackboard from drone and other sensors
         the context contain variable for state machine condition
         """
-        # region read drone state
-        self._update_state_from_joystick()
 
         vehicle_state =self.drone_adapter.get_state()
         if vehicle_state:
             #TODO: move to consts
             # TODO read more about armed mask the code is just for test
-            self.ctx.armed = vehicle_state.get("box_mode_flags") == 3
+            # self.ctx.armed = vehicle_state.get("box_mode_flags") == 3
             self.ctx.armable = vehicle_state.get("armable", False)
             self.ctx.arming_disable_flags = vehicle_state.get("arming_disable_flags", [])
 
@@ -348,12 +360,12 @@ class App:
         if rc:
             self.ctx.drone_rc = rc
             # read the aux1/armed value , the idea is to update ARM/AUX1 value when the system run with external pilot
-            # TODO : think to combine with msp_override_mask (aux3)
-            armed = self.ctx.drone_rc[RCChannel.ARM] == RC_MAX
-            if armed != self.ctx.armed:
-                log.info(f"arming change : {armed}")
-                log.debug(f"drone rc: {self.ctx.drone_rc}")
-                self.ctx.armed = armed
+            # TODO : check with real drone
+            armed = self.ctx.drone_rc[BTRCChannels.ARM] == RC_MAX
+            # if armed != self.ctx.armed:
+            #     log.info(f"arming change : {armed}")
+            #     log.info(f"drone rc: {self.ctx.drone_rc}")
+            #     self.ctx.armed = armed
 
 
         battery = self.drone_adapter.dispatcher.last_battery
@@ -418,9 +430,11 @@ class App:
         controller = self.controllers[RobotState.ALT_HOLD]
         # read last joystick state
         self.ctx.request_rc[AETR1234.THROTTLE]
-        controller.update_setpoint_from_throttle(
-            START_HOVER_PWM
-        )
+
+        # controller.update_setpoint_from_throttle(
+        #     START_HOVER_PWM
+        # )
+
         controller.update_yaw_from_joystick(
             self.ctx.request_rc[AETR1234.YAW]
         )
@@ -472,7 +486,7 @@ class App:
         return rc
 
     def _manual_handler(self):
-        channels = self.controllers[RobotState.MANUAL].update()
+        channels = self._last_rc_channel
         if self.ctx.armed:
             channels[AETR1234.AUX1] = RC_MAX
             channels[AETR1234.AUX2] = RC_MAX

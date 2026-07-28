@@ -18,6 +18,16 @@ class RCChannel(IntEnum):
     AUX3 = 6
     AUX4 = 7
 
+class BTRCChannels(IntEnum):
+    """
+    Index 0: Roll (Aileron)Index 1: Pitch (Elevator)Index 2: Yaw (Rudder)Index 3: ThrottleIndex 4: AUX 1Index 5: AUX 2Index 6: AUX 3Index 7: AUX 4
+    """
+    ROLL = 0
+    PITCH = 1 
+    YAW = 2
+    THROTTLE = 3
+    ARM = 4
+    
 class RCChannel_alias(IntEnum):
     ROLL = 0
     PITCH = 1

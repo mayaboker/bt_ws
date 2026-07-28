@@ -26,6 +26,21 @@ class JoyInterrupt(StrEnum):
     AUTO_REQUEST = "auto_request"
     ENABLER_REQUEST = "enabler_request"
 
+
+class InternalJoy(IntEnum):
+    """
+        roll, pitch, throttle, yaw
+    """
+    ROLL= 0
+    PITCH = auto()
+    THROTTLE = auto()
+    YAW = auto()
+    ARM = auto() # SE
+    MANUAL = auto()
+    AUTO_TAKE_OFF = auto()
+    ENABLER = auto() # sf
+    
+
 class AETR1234(IntEnum):
     """
     roll, pitch, throttle, yaw

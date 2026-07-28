@@ -75,6 +75,10 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.HOVER_ALTITUDE_RATE_M_S))
 
     @property
+    def hover_baseline(self) -> int:
+        return cast(int, self._parameters.get(ParameterKey.HOVER_BASELINE))
+
+    @property
     def hover_kd(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.HOVER_KD))
 

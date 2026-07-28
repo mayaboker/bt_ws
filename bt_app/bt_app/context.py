@@ -32,6 +32,7 @@ class Context:
     auto_arm: bool = field(default=False)
     # is takeoff reach alt and wait (stabilize)
     takeoff_reach: bool = field(default=False)
+    takeoff_setpoint: float = field(default=0)
     manual_land_confirmed: bool = field(default=False)
     # current drone alt , update from drone at 10hz
     drone_alt: float = 0.0
@@ -87,4 +88,5 @@ class Context:
         self.auto_mode_type = AutoModeType.DISABLED
         self.auto_mode_enable = False
         self._initialized = True
+        self.takeoff_setpoint = 0.0
     # endregion

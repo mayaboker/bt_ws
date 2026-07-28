@@ -4,6 +4,7 @@ from bt_app.app import App
 from bt_app.common import AETR1234, MavSeverity, RobotState
 from bt_app.context import Context
 from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RC_MIN, RCChannel_alias as RCChannel
+from bt_app.parameters.generated import ParameterKey
 from bt_app.sm import Robot_StateMachine
 from bt_app.vehicle_config import VehicleConfig
 
@@ -27,6 +28,9 @@ class FakeController:
         self.calls = []
         self.time_in_alt = 0
         self.setpoint = 42
+        self.baseline = None
+        self.reset_setpoint_altitude = None
+        self.reset_altitude = None
 
     def update(self, *args):
         self.calls.append(args)
@@ -47,9 +51,23 @@ class FakeController:
     def consume_landed_event(self):
         return False
 
+    def reset_setpoint(self, altitude):
+        self.reset_setpoint_altitude = altitude
+
+    def reset(self, altitude=None):
+        self.reset_altitude = altitude
+
+    def set_baseline(self, baseline):
+        self.baseline = baseline
+
 
 class FakeParams:
-    def get(self, _key):
+    def __init__(self, baseline=1375):
+        self.baseline = baseline
+
+    def get(self, key):
+        if key == ParameterKey.HOVER_BASELINE:
+            return self.baseline
         return 42
 
 
@@ -64,12 +82,20 @@ class FakeMavlinkService:
         self.messages.append((name, value))
 
 
+class FakeLandDetector:
+    def reset(self):
+        pass
+
+
 def make_app_with_context():
     app = App.__new__(App)
     app.ctx = Context()
     app.controllers = {}
     app._App__params = FakeParams()
     app.mavlink_service = FakeMavlinkService()
+    app.manual_land_detector = FakeLandDetector()
+    app._manual_land_detection_started_notified = False
+    app._manual_land_confirmed_notified = False
     return app
 
 
@@ -149,6 +175,32 @@ def test_rc_selector_idle_returns_neutral_channels():
     assert channels[RCChannel.YAW] == RC_MID
     assert channels[RCChannel.ARM] == RC_MIN
     assert channels[RCChannel.ANGLE] == RC_MAX
+
+
+def test_alt_hold_entry_uses_hover_baseline_parameter():
+    app = make_app_with_context()
+    controller = FakeController([1500] * 8)
+    app.controllers[RobotState.ALT_HOLD] = controller
+    app.ctx.drone_alt = 3.25
+    app._App__params = FakeParams(baseline=1325)
+
+    app._handle_before_state_changed(RobotState.MANUAL, RobotState.ALT_HOLD)
+
+    assert controller.reset_setpoint_altitude == 3.25
+    assert controller.baseline == 1325
+
+
+def test_failsafe_entry_uses_hover_baseline_parameter():
+    app = make_app_with_context()
+    controller = FakeController([1500] * 8)
+    app.controllers[RobotState.FAILSAFE] = controller
+    app.ctx.drone_alt = 4.5
+    app._App__params = FakeParams(baseline=1400)
+
+    app._handle_before_state_changed(RobotState.MANUAL, RobotState.FAILSAFE)
+
+    assert controller.reset_altitude == 4.5
+    assert controller.baseline == 1400
 
 
 def test_manual_to_idle_waits_for_land_confirmation():

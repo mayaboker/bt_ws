@@ -39,6 +39,7 @@ class Robot_StateMachine:
         )
 
         # region from IDLE
+        # from idle to arm
         self.machine.add_transition(
             "resolve",
             RobotState.IDLE,
@@ -56,17 +57,10 @@ class Robot_StateMachine:
             conditions=[self.enter_manual_from_idle]
         )
 
-        # idle to alt_hold
-        self.machine.add_transition(
-            "resolve",
-            RobotState.IDLE,
-            RobotState.ALT_HOLD,
-            before=lambda x: self.on_before_state_changed.emit(RobotState.IDLE, RobotState.ALT_HOLD),
-            conditions=[self.enter_manual_from_alt_hold]
-        )
-        # endregion from IDLE
+       
 
         # region from ARM
+        # from arm to manual
         self.machine.add_transition(
             "resolve",
             RobotState.ARM,
@@ -77,10 +71,10 @@ class Robot_StateMachine:
 
         self.machine.add_transition(
             "resolve",
-            RobotState.ARM,
+            RobotState.MANUAL,
             RobotState.TAKEOFF,
-            before=lambda x: self.on_before_state_changed.emit(RobotState.ARM, RobotState.TAKEOFF),
-            conditions=[self.enter_takeoff_from_arm]
+            before=lambda x: self.on_before_state_changed.emit(RobotState.MANUAL, RobotState.TAKEOFF),
+            conditions=[self.enter_takeoff_from_manual]
         )
         # endregion
 
@@ -132,6 +126,7 @@ class Robot_StateMachine:
             conditions=[self.enter_idle_from_manual],
         )
 
+        # manual to alt_hold
         self.machine.add_transition(
             "resolve",
             RobotState.MANUAL,
@@ -206,7 +201,7 @@ class Robot_StateMachine:
         close manual request, throttle low, without ---- confirmed landed to enter idle
         """
         ok = all([
-            not self.ctx.joy_manual_request,
+            self.ctx.joy_manual_request,
             not self.ctx.armed_allowed,
             # TODO: is it more safety
             # self.ctx.manual_land_confirmed,
@@ -239,7 +234,7 @@ class Robot_StateMachine:
     def enter_manual_from_alt_hold(self, event):
         ok = all([
             self.ctx.armed,
-            not self.ctx.joy_arm_requested
+            self.ctx.joy_manual_request
         ])
         return  ok
     
@@ -255,20 +250,20 @@ class Robot_StateMachine:
         joy_arm_requested: true if joy request arm combination, reset when disarmed or arm failed
         self.ctx.armable: true if drone can be armed
         """
-        s1_or_s4 = self.ctx.joy_takeoff_request or self.ctx.joy_manual_request
+        sa_or_sd = self.ctx.joy_takeoff_request or self.ctx.joy_manual_request
         ok = all([
-            s1_or_s4,
+            sa_or_sd,
             self.ctx.armable,
             not self.ctx.armed,
             self.ctx.joy_arm_requested
         ])
         return  ok
     
-    def enter_takeoff_from_arm(self, event):
+    def enter_takeoff_from_manual(self, event):
         ok = all([
             self.ctx.armed,
             self.ctx.joy_takeoff_request,
-            not self.ctx.joy_manual_request
+            self.ctx.drone_alt < self.ctx.alt_setpoint
         ])
         return  ok
 
@@ -303,9 +298,13 @@ class Robot_StateMachine:
     
     # region manual mode
     def enter_manual_from_takeoff(self, event):
+        """
+        
+        """
         ok = all([
             self.ctx.armed,
-            self.ctx.joy_manual_request
+            self.ctx.joy_manual_request,
+            not self.ctx.joy_takeoff_request
         ])
         return ok
     

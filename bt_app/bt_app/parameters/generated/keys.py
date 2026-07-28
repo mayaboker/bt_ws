@@ -21,6 +21,7 @@ class ParameterKey:
     FAILSAFE_MIN_ALTITUDE: Final[Literal['failsafe.min_altitude']] = 'failsafe.min_altitude'
     FLIGHT_MODE: Final[Literal['flight.mode']] = 'flight.mode'
     HOVER_ALTITUDE_RATE_M_S: Final[Literal['hover.altitude_rate_m_s']] = 'hover.altitude_rate_m_s'
+    HOVER_BASELINE: Final[Literal['hover.baseline']] = 'hover.baseline'
     HOVER_KD: Final[Literal['hover.kd']] = 'hover.kd'
     HOVER_KI: Final[Literal['hover.ki']] = 'hover.ki'
     HOVER_KP: Final[Literal['hover.kp']] = 'hover.kp'
@@ -60,6 +61,7 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'failsafe.min_altitude',
     'flight.mode',
     'hover.altitude_rate_m_s',
+    'hover.baseline',
     'hover.kd',
     'hover.ki',
     'hover.kp',
