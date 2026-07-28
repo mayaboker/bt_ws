@@ -361,7 +361,7 @@ class App:
             self.ctx.drone_rc = rc
             # read the aux1/armed value , the idea is to update ARM/AUX1 value when the system run with external pilot
             # TODO : check with real drone
-            armed = self.ctx.drone_rc[BTRCChannels.ARM] == RC_MAX
+            # armed = self.ctx.drone_rc[BTRCChannels.ARM] == RC_MAX
             # if armed != self.ctx.armed:
             #     log.info(f"arming change : {armed}")
             #     log.info(f"drone rc: {self.ctx.drone_rc}")
@@ -382,7 +382,7 @@ class App:
         """
         
         setpoint = self.__params.get(ParameterKey.TAKEOFF_ALTITUDE)
-        #TODO: setpoint is alt_ref + setpoint
+        #TODO: setpoint is alt_ref + setpoint validate again the start alt is zero
         rc = self.controllers[RobotState.TAKEOFF].update(setpoint, self.ctx.drone_alt)
         # time 
         self.ctx.takeoff_reach = self.controllers[RobotState.TAKEOFF].time_in_alt >= 1
@@ -398,7 +398,7 @@ class App:
 
     def auto_mode_handler(self):
         if self.ctx.auto_mode_enable:
-            log.warning("not implement yat fall to hover")
+            log.warning("not implement yat fall to alt hold")
             self.ctx.auto_mode_enable = False
 
         if not self.ctx.auto_mode_enable:
@@ -436,12 +436,12 @@ class App:
         # )
 
         controller.update_yaw_from_joystick(
-            self.ctx.request_rc[AETR1234.YAW]
+            self.ctx.request_rc[InternalJoy.YAW]
         )
 
         # TODO: add deadband ???
-        pitch = self.ctx.request_rc[AETR1234.PITCH]
-        roll = self.ctx.request_rc[AETR1234.ROLL]
+        pitch = self.ctx.request_rc[InternalJoy.PITCH]
+        roll = self.ctx.request_rc[InternalJoy.ROLL]
 
         controller.update_pitch_roll(pitch, roll)
 

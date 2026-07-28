@@ -48,14 +48,14 @@ class Robot_StateMachine:
             conditions=[self.enter_arm]
         )
 
-        # idle to manual
-        self.machine.add_transition(
-            "resolve",
-            RobotState.IDLE,
-            RobotState.MANUAL,
-            before=lambda x: self.on_before_state_changed.emit(RobotState.IDLE, RobotState.MANUAL),
-            conditions=[self.enter_manual_from_idle]
-        )
+        # from idle to manual
+        # self.machine.add_transition(
+        #     "resolve",
+        #     RobotState.IDLE,
+        #     RobotState.MANUAL,
+        #     before=lambda x: self.on_before_state_changed.emit(RobotState.IDLE, RobotState.MANUAL),
+        #     conditions=[self.enter_manual_from_idle]
+        # )
 
        
 
@@ -69,6 +69,7 @@ class Robot_StateMachine:
             conditions=[self.enter_manual_mode_from_arm],
         )
 
+        # from manual to take off
         self.machine.add_transition(
             "resolve",
             RobotState.MANUAL,
@@ -203,7 +204,7 @@ class Robot_StateMachine:
         ok = all([
             self.ctx.joy_manual_request,
             not self.ctx.arm_switch,
-            self.ctx.request_rc[AETR1234.THROTTLE] < 1050
+            self.ctx.is_low_throttle()
             # TODO: is it more safety
             # self.ctx.manual_land_confirmed,
         ])
@@ -239,12 +240,12 @@ class Robot_StateMachine:
         ])
         return  ok
     
-    def enter_manual_from_idle(self, event):
-        ok = all([
-            self.ctx.armed,
-            self.ctx.joy_arm_requested
-        ])
-        return  ok
+    # def enter_manual_from_idle(self, event):
+    #     ok = all([
+    #         self.ctx.armed,
+    #         self.ctx.joy_arm_requested
+    #     ])
+    #     return  ok
     
     def enter_arm(self, event):
         """
@@ -261,6 +262,9 @@ class Robot_StateMachine:
         return  ok
     
     def enter_takeoff_from_manual(self, event):
+        """
+        allow only if current alt < takeoff alt setpoint
+        """
         ok = all([
             self.ctx.armed,
             self.ctx.joy_takeoff_request,
@@ -269,8 +273,13 @@ class Robot_StateMachine:
         return  ok
 
     def enter_failsafe(self, event):
-        # TODO: decide when active failsafe, manual -> fs, hover, takeoff -> ??
-        # TODO: Must to Add on air
+        """
+        joystick enter fail
+        vehicle armed
+        active only from manual and takeoff
+        # TODO: Must add on AIR or land detector
+
+        """
         ok = all([
             self.ctx.armed,
             self.ctx.joy_fail_safe
