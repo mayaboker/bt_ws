@@ -295,13 +295,13 @@ class App:
         
         # print(current)
         
-        arm_switch = self._last_rc_channel[InternalJoy.ARM] == RC_MAX
+        self.ctx.arm_switch = self._last_rc_channel[InternalJoy.ARM] == RC_MAX
         throttle_for_arm = self._last_rc_channel[InternalJoy.THROTTLE] < 1050
         # if all([roll_for_arm, pitch_for_arm]):#, roll_for_arm, pitch_for_arm]):
-        if all([throttle_for_arm, arm_switch]):
+        if all([throttle_for_arm, self.ctx.arm_switch]):
             # log.warning("Joystick arm request detected")
             self.ctx.armed_allowed = True
-        elif all([not arm_switch, throttle_for_arm]):
+        elif all([not self.ctx.arm_switch, throttle_for_arm]):
             # log.warning("Joystick disarm request detected")
             self.ctx.armed_allowed = False
 

@@ -25,6 +25,8 @@ class Context:
     armed: bool = field(default=False)
     # flag true: if we make the arm sequence
     armed_allowed: bool = field(default=False)
+    arm_switch: bool = field(default=False)
+
     # joystick network connection lost, if true enter failsafe
     joy_fail_safe: bool = field(default=False)
     take_control: bool = field(default=False)

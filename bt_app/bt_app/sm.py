@@ -202,7 +202,8 @@ class Robot_StateMachine:
         """
         ok = all([
             self.ctx.joy_manual_request,
-            not self.ctx.armed_allowed,
+            not self.ctx.arm_switch,
+            self.ctx.request_rc[AETR1234.THROTTLE] < 1050
             # TODO: is it more safety
             # self.ctx.manual_land_confirmed,
         ])

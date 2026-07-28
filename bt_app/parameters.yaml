@@ -104,7 +104,7 @@ parameters:
       max: 500.0
   hover.baseline:
     type: int
-    default: 1500
+    default: 1300
     limits:
       min: 1000
       max: 2000
