@@ -1,130 +1,132 @@
 # BT App State Machine
 
-This document describes the explicit application state machine implemented in
-`bt_app/bt_app/sm.py` and driven by `bt_app/bt_app/app.py`.
+The application state machine is implemented by `Robot_StateMachine` in
+`bt_app/bt_app/sm.py`. It uses the `transitions` library and starts in `IDLE`.
+The application periodically calls `resolve()`; the machine evaluates eligible
+transitions for the current state in registration order. Invalid triggers are
+ignored.
 
-The application runs a continuous control loop:
+After a successful transition, the machine:
 
-1. Read vehicle status, altitude, and RC input through the MSP adapter.
-2. Update the shared `Context`.
-3. Call `robot_sm.resolve()` to evaluate state transitions.
-4. Select the controller for the active state and generate RC channels.
-5. Apply RC matching rules and send the final channels to Betaflight.
-
-## State Data
-
-The transition guards are evaluated against `Context` fields:
-
-| Field | Source | Meaning |
-| --- | --- | --- |
-| `state` | State machine | Current application state. |
-| `armed` | MSP vehicle state | `True` when Betaflight reports the expected armed mode flags. |
-| `armable` | MSP vehicle state | `True` when Betaflight reports no arming disable flags. |
-| `arming_disable_flags` | MSP vehicle state | Raw Betaflight arming-disable reasons. |
-| `joy_fail_safe` | Joystick ZMQ failsafe event | `True` while joystick failsafe is active. |
-| `takeoff_interrupt` | Joystick AUX4 interrupt | `True` when AUX4 equals `RC_MAX`. |
-| `force_manual_interrupt` | Joystick AUX5 interrupt | `True` when AUX5 equals `RC_MAX`. |
-| `force_manual_mode` | Context flag | Forces manual mode from `IDLE`. |
-| `take_control` | RC matching logic | Tracks whether the internal controller has taken throttle control in `MANUAL`. |
-| `auto_arm` | State side effect | In `MANUAL`, forces the arm channel high when enabled. |
-| `drone_alt` | MSP altitude | Current altitude used by takeoff and failsafe controllers. |
-| `drone_rc` | MSP RC readback | Current RC values used by manual matching. |
+1. emits `on_before_state_changed` with the source and destination;
+2. changes its state;
+3. updates `ctx.state`;
+4. logs the transition and emits `on_state_changed`.
 
 ## States
 
-| State | Purpose | RC output |
-| --- | --- | --- |
-| `IDLE` | Default safe state. No active flight control command. | Sends eight low channels: `[1000] * 8`. |
-| `MANUAL` | Passes joystick channels through the ZMQ adapter, with manual matching rules. | Joystick channels, optionally with arm forced high by `auto_arm`. |
-| `ARM` | Performs the arming sequence before takeoff. | Holds throttle low and arm low for `DISABLED_HOLD_TIME`, then sets arm high. |
-| `TAKEOFF` | Runs altitude PID toward the takeoff setpoint. | Armed angle-mode channels with PID-controlled throttle. |
-| `FAILSAFE` | Runs failsafe controller while joystick failsafe is active. | Armed channels with altitude-hold style throttle. |
-| `TRACKING` | Declared in `RobotState`, but no active transition is currently configured. | Not implemented in RC selector. |
-| `RECOVERY` | Declared in `RobotState`, but no active transition is currently configured. | Not implemented in RC selector. |
-
-## Transition Conditions
-
-All active transitions use the `resolve` trigger. Invalid triggers are ignored,
-and transitions are evaluated in the order they are registered in
-`Robot_StateMachine.__init__`.
-
-| From | To | Guard method | Condition |
-| --- | --- | --- | --- |
-| `IDLE` | `MANUAL` | `enter_manual_mode` | `force_manual_mode == True` |
-| `MANUAL` | `FAILSAFE` | `enter_failsafe` | `armable == True` and `joy_fail_safe == True` |
-| `IDLE` | `ARM` | `enter_arm` | `takeoff_interrupt == True` and `force_manual_interrupt == False` |
-| `ARM` | `TAKEOFF` | `enter_takeoff_from_arm` | `armed == True` |
-| `IDLE` | `MANUAL` | `enter_manual_from_idle` | `force_manual_interrupt == True` and `takeoff_interrupt == False` |
-| `MANUAL` | `IDLE` | `enter_idle_from_manual` | `force_manual_interrupt == False` and `takeoff_interrupt == False` and `armable == False` |
-| `TAKEOFF` | `MANUAL` | `enter_manual_from_takeoff` | `armed == True` and `force_manual_interrupt == True` |
-
-### Transition Side Effects
-
-| Transition | Side effect |
+| State | Purpose |
 | --- | --- |
-| Any successful transition | `ctx.state` is updated to the destination state and the transition is logged. |
-| Any transition into `IDLE` | `ctx.auto_arm` is set to `True`. |
-| `IDLE -> ARM` | `on_before_state_changed` resets the `ARMController` timer. |
-| `TAKEOFF -> MANUAL` | `ctx.take_control` is set to `False` and `ctx.auto_arm` is set to `True`. |
+| `IDLE` | Disarmed, inactive state and initial state. |
+| `ARM` | Runs the arming sequence. |
+| `MANUAL` | Uses the operator's RC commands. |
+| `TAKEOFF` | Climbs to the configured altitude setpoint. |
+| `ALT_HOLD` | Holds altitude while accepting hover/yaw commands. |
+| `FAILSAFE` | Holds altitude while joystick failsafe is active. |
+| `TRACKING` | Runs cursor or target-tracking automatic control. |
+| `RECOVERY` | Declared in `RobotState`, but has no registered transitions or RC handler. |
 
-## Mermaid Diagram
+## Active Transitions
+
+Every transition uses the `resolve` trigger. Conditions in a row are combined
+with logical AND unless stated otherwise.
+
+| From | To | Guard | Conditions |
+| --- | --- | --- | --- |
+| `IDLE` | `ARM` | `enter_arm` | (`joy_takeoff_request` OR `joy_manual_request`) and `armable` and not `armed` and `joy_arm_requested` |
+| `ARM` | `MANUAL` | `enter_manual_mode_from_arm` | `armed` and `joy_manual_request` |
+| `MANUAL` | `TAKEOFF` | `enter_takeoff_from_manual` | `armed` and `joy_takeoff_request` and `drone_alt < alt_setpoint` |
+| `MANUAL` | `FAILSAFE` | `enter_failsafe` | `armed` and `joy_fail_safe` |
+| `MANUAL` | `IDLE` | `enter_idle_from_manual` | `joy_manual_request` and not `arm_switch` and low throttle |
+| `MANUAL` | `ALT_HOLD` | `enter_hover_from_manual` | requested throttle > 1050 and not `joy_manual_request` and `armed` |
+| `TAKEOFF` | `ALT_HOLD` | `enter_hover_from_takeoff` | `takeoff_reach` |
+| `TAKEOFF` | `MANUAL` | `enter_manual_from_takeoff` | `armed` and `joy_manual_request` and not `joy_takeoff_request` |
+| `ALT_HOLD` | `FAILSAFE` | `enter_failsafe` | `armed` and `joy_fail_safe` |
+| `ALT_HOLD` | `MANUAL` | `enter_manual_mode_from_hover` | `joy_manual_request` and `armed` |
+| `ALT_HOLD` | `TRACKING` | `enter_tracking_mode_from_alt_hold` | `auto_mode_type` is `TRACKING` or `CURSOR`, and `armed` |
+| `TRACKING` | `ALT_HOLD` | `enter_alt_hold_mode_from_auto` | `auto_mode_type` is `DISABLED`, `armed`, and not `joy_manual_request` |
+| `FAILSAFE` | `ALT_HOLD` | `exit_failsafe` | `armed` and not `joy_fail_safe` |
+| `FAILSAFE` | `IDLE` | `exit_failsafe_to_idle` | not `joy_fail_safe`, not `joy_manual_request`, and not `joy_takeoff_request` |
+
+For states with multiple outgoing transitions, registration order determines
+priority when more than one guard is true:
+
+- `MANUAL`: `TAKEOFF`, `FAILSAFE`, `IDLE`, then `ALT_HOLD`.
+- `ALT_HOLD`: `FAILSAFE`, `MANUAL`, then `TRACKING`.
+- `TAKEOFF`: `ALT_HOLD`, then `MANUAL`.
+- `FAILSAFE`: `ALT_HOLD`, then `IDLE`.
+
+## Transition Diagram
 
 ```mermaid
 stateDiagram-v2
     [*] --> IDLE
 
-    IDLE --> MANUAL: resolve\nforce_manual_mode
-    IDLE --> ARM: resolve\ntakeoff_interrupt && !force_manual_interrupt
-    IDLE --> MANUAL: resolve\nforce_manual_interrupt && !takeoff_interrupt
+    IDLE --> ARM: arm/manual request\narmable, disarmed, arm gesture
+    ARM --> MANUAL: armed and manual requested
 
-    ARM --> TAKEOFF: resolve\narmed
+    MANUAL --> TAKEOFF: armed, takeoff requested\nbelow altitude setpoint
+    MANUAL --> FAILSAFE: armed and joystick failsafe
+    MANUAL --> IDLE: manual requested, arm off\nlow throttle
+    MANUAL --> ALT_HOLD: armed, manual released\nthrottle > 1050
 
-    TAKEOFF --> MANUAL: resolve\narmed && force_manual_interrupt
+    TAKEOFF --> ALT_HOLD: takeoff target reached
+    TAKEOFF --> MANUAL: armed, manual requested\ntakeoff released
 
-    MANUAL --> FAILSAFE: resolve\narmable && joy_fail_safe
-    MANUAL --> IDLE: resolve\n!force_manual_interrupt && !takeoff_interrupt && !armable
+    ALT_HOLD --> FAILSAFE: armed and joystick failsafe
+    ALT_HOLD --> MANUAL: armed and manual requested
+    ALT_HOLD --> TRACKING: armed and auto mode enabled
 
-    state "TRACKING\n(declared, not wired)" as TRACKING
+    TRACKING --> ALT_HOLD: armed, auto disabled\nmanual not requested
+
+    FAILSAFE --> ALT_HOLD: armed and failsafe cleared
+    FAILSAFE --> IDLE: failsafe cleared\nno manual or takeoff request
+
     state "RECOVERY\n(declared, not wired)" as RECOVERY
 ```
 
-## Event Sources
+## Guard Context
 
-### Joystick Interrupts
+The guards read these `Context` values:
 
-`JoyZmqAdapter` listens to joystick ZMQ messages and emits an interrupt when a
-registered channel changes:
-
-| Channel | Interrupt name | Context update |
-| --- | --- | --- |
-| `AUX4` | `takeoff` | `ctx.takeoff_interrupt = value == RC_MAX` |
-| `AUX5` | `force_manual` | `ctx.force_manual_interrupt = value == RC_MAX` |
-
-### Joystick Failsafe
-
-Joystick failsafe messages set `ctx.joy_fail_safe`:
-
-| Message state | Context update |
+| Field or method | Meaning in the state machine |
 | --- | --- |
-| Failsafe active | `ctx.joy_fail_safe = True` |
-| Failsafe cleared | `ctx.joy_fail_safe = False` |
+| `armed` | The vehicle/controller is considered armed. |
+| `armable` | The vehicle currently permits arming. |
+| `arm_switch` | The arm switch used when deciding whether manual mode may return to `IDLE`. |
+| `joy_arm_requested` | The operator completed the arm request/gesture. |
+| `joy_manual_request` | Manual mode is requested. |
+| `joy_takeoff_request` | Automatic takeoff is requested. |
+| `joy_fail_safe` | Joystick failsafe is active. |
+| `request_rc[THROTTLE]` | Requested throttle; values above 1050 allow `MANUAL -> ALT_HOLD`. |
+| `is_low_throttle()` | Returns whether requested joystick throttle is below 1050. |
+| `drone_alt` / `alt_setpoint` | Current and requested altitude used to admit takeoff. |
+| `takeoff_reach` | The takeoff controller has remained at its target long enough to enter `ALT_HOLD`. |
+| `auto_mode_type` | `DISABLED`, `CURSOR`, or `TRACKING`; controls entry to and exit from `TRACKING`. |
 
-### Vehicle State
+## Application Callbacks
 
-Each loop, the app reads the MSP vehicle state:
+`bt_app/bt_app/app.py` subscribes to both state-change events:
 
-| Vehicle value | Context update |
-| --- | --- |
-| `box_mode_flags == 3` | `ctx.armed = True` |
-| `armable` | `ctx.armable` |
-| `arming_disable_flags` | `ctx.arming_disable_flags` |
+- Before entering `ARM`, it resets the arm controller.
+- Before entering `TAKEOFF`, it resets the takeoff controller.
+- Before entering `MANUAL`, it resets the manual landing detector.
+- Before entering `IDLE`, it resets the arm and takeoff controllers and clears
+  arming/takeoff state.
+- Before entering `ALT_HOLD`, it initializes the altitude setpoint from the
+  current altitude and applies the hover throttle baseline.
+- Before entering `FAILSAFE`, it initializes the failsafe controller from the
+  current altitude and applies the hover throttle baseline.
+- After `MANUAL -> FAILSAFE`, it clears `joy_manual_request`, requiring the
+  operator to request manual mode again.
 
-## Implementation Notes
+## Current Limitations
 
-- The state machine uses one trigger, `resolve`, so transitions are polling-based
-  rather than event-specific.
-- `TRACKING` and `RECOVERY` are future states. Their transition blocks are present
-  as commented code in `sm.py`.
-- `enter_takeoff` exists but is not registered by an active transition.
-- The state machine writes `ctx.state` on transition. The RC selector in
-  `app.py` uses `ctx.state` to choose the controller for the current loop.
+- There is no direct `ARM -> IDLE` or `ARM -> TAKEOFF` transition. `ARM` can
+  currently advance only to `MANUAL`.
+- Failsafe transitions are registered only from `MANUAL` and `ALT_HOLD`, not
+  from `ARM`, `TAKEOFF`, or `TRACKING`.
+- `RECOVERY` is declared but not connected.
+- Landing confirmation is not part of `MANUAL -> IDLE`; the guard relies on
+  manual request, arm switch, and low throttle.
+- The failsafe exit guards do not yet include an airborne/landed check.

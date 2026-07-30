@@ -1,0 +1,1 @@
+- [ ] add ansible task to release uart debug console 

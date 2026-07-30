@@ -1,3 +1,3 @@
 #!/bin/bash
 
-${PWD}/bt_bringup/bin/betaflight_2025.12.2_SITL
+/home/user/projects/betaflight/obj/main/betaflight_SITL.elf

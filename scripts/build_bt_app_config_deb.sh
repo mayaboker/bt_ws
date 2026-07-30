@@ -27,6 +27,24 @@ prompt_default() {
   printf '%s' "${value:-$default}"
 }
 
+prompt_choice() {
+  local prompt="$1"
+  local choice
+  read -r -p "$prompt" choice
+  case "$choice" in
+    1|serial)
+      printf '%s' "serial"
+      ;;
+    2|tcp)
+      printf '%s' "tcp"
+      ;;
+    *)
+      echo "Invalid selection: ${choice}. Use 1 for serial or 2 for tcp." >&2
+      exit 1
+      ;;
+  esac
+}
+
 require_file "$VEHICLE_TEMPLATE" "Vehicle config template"
 require_file "$PARAMETERS_TEMPLATE" "Parameters template"
 require_file "$JOY_SERVER_TEMPLATE" "Joystick server config template"
@@ -70,6 +88,11 @@ DEFAULT_GCS_PORT="$(printf '%s\n' "$DEFAULTS" | sed -n '2p')"
 VERSION="$(printf '%s\n' "$DEFAULTS" | sed -n '3p')"
 
 VEHICLE_NAME="$(prompt_default "Vehicle/config name" "default")"
+CONNECTION_TYPE="$(prompt_choice "FCU connection type (1: serial, 2: tcp): ")"
+DRONE_SERIAL_PORT=""
+if [ "$CONNECTION_TYPE" = "serial" ]; then
+  DRONE_SERIAL_PORT="$(prompt_default "FCU serial device path" "/dev/ttyS2")"
+fi
 GCS_IP="$(prompt_default "GCS IP" "$DEFAULT_GCS_IP")"
 GCS_PORT="$(prompt_default "GCS port" "$DEFAULT_GCS_PORT")"
 
@@ -102,7 +125,7 @@ mkdir -p \
   "$PACKAGE_ROOT/usr/local/bin" \
   "$OUTPUT_DIR"
 
-python3 - "$VEHICLE_TEMPLATE" "$PACKAGE_ROOT${CONFIG_DIR}/vehicle_config.yaml" "$CONFIG_DIR/parameters.yaml" "$GCS_IP" "$GCS_PORT" <<'PY'
+python3 - "$VEHICLE_TEMPLATE" "$PACKAGE_ROOT${CONFIG_DIR}/vehicle_config.yaml" "$CONFIG_DIR/parameters.yaml" "$GCS_IP" "$GCS_PORT" "$CONNECTION_TYPE" "$DRONE_SERIAL_PORT" <<'PY'
 from pathlib import Path
 import sys
 
@@ -113,6 +136,8 @@ output_path = Path(sys.argv[2])
 parameters_path = sys.argv[3]
 gcs_ip = sys.argv[4]
 gcs_port_raw = sys.argv[5]
+connection_type = sys.argv[6]
+drone_serial_port = sys.argv[7]
 
 try:
     gcs_port = int(gcs_port_raw)
@@ -120,6 +145,13 @@ except ValueError as exc:
     raise SystemExit(f"GCS port must be an integer: {gcs_port_raw}") from exc
 
 data = yaml.safe_load(template_path.read_text(encoding="utf-8")) or {}
+if connection_type == "serial":
+    data["drone_sink"] = 1
+    data["drone_serial_port"] = drone_serial_port
+elif connection_type == "tcp":
+    data["drone_sink"] = 2
+else:
+    raise SystemExit(f"Unsupported FCU connection type: {connection_type}")
 data["gcs_ip"] = gcs_ip
 data["gcs_port"] = gcs_port
 data["config_name"] = parameters_path

@@ -1,0 +1,35 @@
+# 
+
+# diff
+
+# version
+# Betaflight / SITL (SITL) 2026.6.0-alpha Jul 30 2026 / 12:07:16 (norevision) MSP API: 1.48
+
+# start the command batch
+batch start
+
+
+# feature
+feature -RX_UDP
+feature -TELEMETRY
+feature RX_MSP
+
+# aux
+aux 0 0 0 1700 2100 0 0
+aux 1 1 1 1700 2100 0 0
+aux 2 3 2 1700 2100 0 0
+aux 3 50 3 1700 2100 0 0
+
+# master
+set msp_override_channels_mask = 15
+
+profile 0
+
+rateprofile 0
+
+battery_profile 0
+
+# end the command batch
+batch end
+
+# 
