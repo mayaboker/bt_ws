@@ -632,13 +632,15 @@ class App:
                 self.__update_state()
                 self._update_controllers()
                 self._notification_center()
+                # resolve state machine state
                 self.robot_sm.resolve()
+                # get rc data from the right controller
                 rc_channels = self._resolve_rc()
-                if not rc_channels:
-                    log.error(f"rc not valid: {rc_channels} in state {self.ctx.state}")
-                    continue
+                # validate rc channel
                 self.ctx.sent_rc = self._sanitize_rc_channels(rc_channels)
+                # log for diagnostic
                 self.rc_recorder.record(self.ctx.state, self.ctx.sent_rc)
+                # send to FCU
                 self.drone_adapter.dispatcher.set_rc(self.ctx.sent_rc)
                 time.sleep(1/FREQ_HZ)
         except KeyboardInterrupt:
