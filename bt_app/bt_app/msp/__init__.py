@@ -27,7 +27,12 @@ from bt_app.msp.command_dispatcher import (
     ScheduledCommand,
 )
 from bt_app.msp.protocol import MspCodec, MspFrame, MspProtocolError
-from bt_app.msp.transport import SerialMspTransport, TcpMspTransport, UdpMspTransport
+from bt_app.msp.transport import (
+    MspTransportDependencyError,
+    SerialMspTransport,
+    TcpMspTransport,
+    UdpMspTransport,
+)
 
 __all__ = [
     "BetaflightMspClient",
@@ -38,6 +43,7 @@ __all__ = [
     "MspCodec",
     "MspFrame",
     "MspProtocolError",
+    "MspTransportDependencyError",
     "RawRcCommand",
     "RcCommandDispatcher",
     "ReadAltitudeCommand",

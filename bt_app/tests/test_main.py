@@ -147,6 +147,27 @@ def test_run_missing_serial_port_exits_three_in_standalone_mode(tmp_path):
     assert exc_info.value.code == AppExitCode.SERIAL_PORT_NOT_FOUND
 
 
+def test_fcu_connection_failure_exits_four_without_traceback(monkeypatch, capsys):
+    from bt_app.errors import AppStartupError
+    import bt_app.main as main_module
+
+    def fail_dispatch(_options, _config):
+        raise AppStartupError(
+            "Unable to connect to FCU over TCP at 127.0.0.1:5761",
+            exit_code=AppExitCode.FCU_CONNECTION_FAILED,
+        )
+
+    monkeypatch.setattr(main_module, "dispatch_command", fail_dispatch)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["version"], standalone_mode=True)
+
+    stderr = capsys.readouterr().err
+    assert exc_info.value.code == AppExitCode.FCU_CONNECTION_FAILED
+    assert "Unable to connect to FCU" in stderr
+    assert "Traceback" not in stderr
+
+
 def test_run_missing_parameters_file_exits_one_in_standalone_mode(tmp_path):
     parameters_path = tmp_path / "missing_parameters.yaml"
     config_path = _write_vehicle_config(tmp_path, parameters_path)

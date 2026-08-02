@@ -6,6 +6,7 @@ class AppExitCode(IntEnum):
     STARTUP_ERROR = 1
     CLI_USAGE_ERROR = 2
     SERIAL_PORT_NOT_FOUND = 3
+    FCU_CONNECTION_FAILED = 4
 
 
 class AppStartupError(RuntimeError):

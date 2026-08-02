@@ -4,6 +4,10 @@ import socket
 from abc import ABC, abstractmethod
 
 
+class MspTransportDependencyError(RuntimeError):
+    """A required optional dependency for an MSP transport is unavailable."""
+
+
 class MspTransport(ABC):
     @abstractmethod
     def open(self) -> None:
@@ -120,7 +124,7 @@ class SerialMspTransport(MspTransport):
         try:
             import serial
         except ImportError as exc:
-            raise RuntimeError(
+            raise MspTransportDependencyError(
                 "Serial MSP transport requires pyserial. Install the bt-app "
                 "package dependencies or install pyserial."
             ) from exc

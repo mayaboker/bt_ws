@@ -21,6 +21,7 @@ from bt_app.context import Context, DEFAULT_RC_CHANNELS
 from bt_app.vehicle_config import DroneSink, VehicleConfig
 from bt_app.errors import AppExitCode, AppStartupError
 from bt_app.msp_adapter import MSPAdapter
+from bt_app.msp import MspTransportDependencyError
 from bt_app.mavlink_wrapper import MavlinkService
 from bt_app.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
 from bt_app.control.land_detector import LandDetector
@@ -59,6 +60,10 @@ from bt_joy.server.mavlink import (
 )
 
 
+FCU_CONNECT_ATTEMPTS = 3
+FCU_CONNECT_RETRY_DELAY_S = 1.0
+
+
 class App:
     def __init__(self, config: VehicleConfig):
         """
@@ -82,22 +87,29 @@ class App:
         # loaded controllers
         self.controllers = {}
         self.__validate_startup_config()
-        self.__params = self.__load_parameters()
-        self.ctx.alt_setpoint = self.__params.get(ParameterKey.TAKEOFF_ALTITUDE)
-        self.manual_land_detector = self.__load_manual_land_detector()
-        self._manual_land_detection_started_notified = False
-        self._manual_land_confirmed_notified = False
-        self._last_rc_channel = None
-        self.__load_drone_interface()
-        self.__load_controllers()
-        self.mavlink_service = MavlinkService(
-            context=self.ctx,
-            qopenhd_addr=(self.config.gcs_ip, self.config.gcs_port),
-        )
-        self.mavlink_service.start()
-        self.rc_recorder = self.__load_rc_recorder()
-        self.mavlink_service.send_text_to_gcs("Application started", MavSeverity.INFO)
-        self.__banner()
+        try:
+            self.__params = self.__load_parameters()
+            self.ctx.alt_setpoint = self.__params.get(ParameterKey.TAKEOFF_ALTITUDE)
+            self.manual_land_detector = self.__load_manual_land_detector()
+            self._manual_land_detection_started_notified = False
+            self._manual_land_confirmed_notified = False
+            self._last_rc_channel = None
+            self.__load_drone_interface()
+            self.__load_controllers()
+            self.mavlink_service = MavlinkService(
+                context=self.ctx,
+                qopenhd_addr=(self.config.gcs_ip, self.config.gcs_port),
+            )
+            self.mavlink_service.start()
+            self.rc_recorder = self.__load_rc_recorder()
+            self.mavlink_service.send_text_to_gcs(
+                "Application started",
+                MavSeverity.INFO,
+            )
+            self.__banner()
+        except BaseException:
+            self._shutdown()
+            raise
 
     def __banner(self):
         log.info("Application Start v{}", __version__)
@@ -144,7 +156,53 @@ class App:
     def __load_drone_interface(self):
         """Create and start betaflight msp adapter"""
         self.drone_adapter = MSPAdapter(self.config)
-        self.drone_adapter.start()
+        transport_name, endpoint = self._fcu_connection_description()
+
+        for attempt in range(1, FCU_CONNECT_ATTEMPTS + 1):
+            try:
+                self.drone_adapter.start()
+                return
+            except OSError as exc:
+                self.drone_adapter.msp.close()
+                reason = self._connection_failure_reason(exc)
+                if attempt == FCU_CONNECT_ATTEMPTS:
+                    raise AppStartupError(
+                        f"Unable to connect to FCU over {transport_name} at "
+                        f"{endpoint} after {FCU_CONNECT_ATTEMPTS} attempts: "
+                        f"{reason}",
+                        exit_code=AppExitCode.FCU_CONNECTION_FAILED,
+                    ) from exc
+                log.warning(
+                    "FCU connection failed transport={} endpoint={} "
+                    "attempt={}/{} reason={}",
+                    transport_name,
+                    endpoint,
+                    attempt,
+                    FCU_CONNECT_ATTEMPTS,
+                    reason,
+                )
+                time.sleep(FCU_CONNECT_RETRY_DELAY_S)
+            except MspTransportDependencyError as exc:
+                raise AppStartupError(
+                    f"Unable to initialize FCU {transport_name} transport at "
+                    f"{endpoint}: {exc}",
+                    exit_code=AppExitCode.FCU_CONNECTION_FAILED,
+                ) from exc
+
+    def _fcu_connection_description(self) -> tuple[str, str]:
+        if self.config.drone_sink == DroneSink.SERIAL.value:
+            return "serial", f"{self.config.drone_serial_port}@115200"
+        return "TCP", f"{self.config.drone_eth_host}:{self.config.drone_eth_port}"
+
+    @staticmethod
+    def _connection_failure_reason(exc: OSError) -> str:
+        if isinstance(exc, ConnectionRefusedError):
+            return "connection refused"
+        if isinstance(exc, TimeoutError):
+            return "connection timed out"
+        if isinstance(exc, PermissionError):
+            return "permission denied"
+        return str(exc) or exc.__class__.__name__
 
     def __load_rc_recorder(self):
         if not self.config.rc_record_enabled:
