@@ -8,6 +8,7 @@ from importlib import metadata
 import logging
 from pathlib import Path
 import shlex
+import signal
 import sys
 
 import yaml
@@ -74,9 +75,28 @@ def dispatch_command(options: CliOptions, config: VehicleConfig | None = None) -
 
         if config is None:
             raise RuntimeError("run command requires vehicle config")
-        App(config=config).run()
+        _run_application(App(config=config))
         return
     raise RuntimeError(f"unknown command: {options.command}")
+
+
+def _run_application(app) -> None:
+    """Run an application with temporary SIGINT and SIGTERM handlers."""
+    handled_signals = (signal.SIGINT, signal.SIGTERM)
+    previous_handlers = {
+        signum: signal.getsignal(signum) for signum in handled_signals
+    }
+
+    def request_stop(signum, _frame) -> None:
+        app.request_stop(signum)
+
+    try:
+        for signum in handled_signals:
+            signal.signal(signum, request_stop)
+        app.run()
+    finally:
+        for signum, previous_handler in previous_handlers.items():
+            signal.signal(signum, previous_handler)
 
 
 def build_alias_output(config_path: object | None = None) -> str:

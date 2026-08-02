@@ -1,10 +1,11 @@
 import shlex
+import signal
 
 import pytest
 
 from bt_app.context import Context
 from bt_app.errors import AppExitCode
-from bt_app.main import main
+from bt_app.main import _run_application, main
 from bt_app.vehicle_config import VehicleConfig
 
 
@@ -163,3 +164,44 @@ def test_run_invalid_parameters_file_exits_cleanly_non_standalone(tmp_path):
 
     with pytest.raises(RuntimeError, match="Failed to load parameters from"):
         main(["run", "-c", str(config_path)], standalone_mode=False)
+
+
+@pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])
+def test_run_application_converts_signal_to_stop_request_and_restores_handlers(
+    monkeypatch,
+    signum,
+):
+    installed_handlers = {}
+    restored_handlers = {}
+    previous_handlers = {
+        signal.SIGINT: object(),
+        signal.SIGTERM: object(),
+    }
+
+    def fake_getsignal(requested_signum):
+        return previous_handlers[requested_signum]
+
+    def fake_signal(requested_signum, handler):
+        if callable(handler):
+            installed_handlers[requested_signum] = handler
+        else:
+            restored_handlers[requested_signum] = handler
+
+    class FakeApp:
+        def __init__(self):
+            self.stop_requests = []
+
+        def request_stop(self, requested_signum):
+            self.stop_requests.append(requested_signum)
+
+        def run(self):
+            installed_handlers[signum](signum, None)
+
+    monkeypatch.setattr(signal, "getsignal", fake_getsignal)
+    monkeypatch.setattr(signal, "signal", fake_signal)
+    app = FakeApp()
+
+    _run_application(app)
+
+    assert app.stop_requests == [signum]
+    assert restored_handlers == previous_handlers

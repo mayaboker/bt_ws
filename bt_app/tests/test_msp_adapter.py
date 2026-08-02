@@ -7,9 +7,13 @@ class FakeMspClient:
     def __init__(self, transport):
         self.transport = transport
         self.opened = False
+        self.closed = False
 
     def open(self):
         self.opened = True
+
+    def close(self):
+        self.closed = True
 
 
 class FakeTransport:
@@ -29,6 +33,8 @@ class FakeDispatcher:
         self.on_error = on_error
         self.scheduled = []
         self.started = False
+        self.stopped = False
+        self.stop_timeout = None
 
     def schedule_state(self, interval_s):
         self.scheduled.append(("state", interval_s))
@@ -44,6 +50,10 @@ class FakeDispatcher:
 
     def start(self):
         self.started = True
+
+    def stop(self, timeout=2.0):
+        self.stopped = True
+        self.stop_timeout = timeout
 
 
 def test_msp_adapter_schedules_battery_at_0_5_hz(monkeypatch):
@@ -72,3 +82,30 @@ def test_msp_adapter_uses_serial_transport(monkeypatch):
     adapter = MSPAdapter(config)
 
     assert adapter.msp.transport.device == "/dev/ttyACM0"
+
+
+def test_msp_adapter_stops_dispatcher_before_closing_client(monkeypatch):
+    events = []
+
+    class OrderedMspClient(FakeMspClient):
+        def close(self):
+            events.append("client")
+            super().close()
+
+    class OrderedDispatcher(FakeDispatcher):
+        def stop(self, timeout=2.0):
+            events.append("dispatcher")
+            super().stop(timeout=timeout)
+
+    monkeypatch.setattr(msp_adapter_module, "BetaflightMspClient", OrderedMspClient)
+    monkeypatch.setattr(msp_adapter_module, "TcpMspTransport", FakeTransport)
+    monkeypatch.setattr(msp_adapter_module, "MspCommandDispatcher", OrderedDispatcher)
+    config = VehicleConfig()
+    config.drone_sink = DroneSink.ETHERNET.value
+    adapter = MSPAdapter(config)
+
+    adapter.stop(timeout=0.5)
+
+    assert events == ["dispatcher", "client"]
+    assert adapter.dispatcher.stop_timeout == 0.5
+    assert adapter.msp.closed

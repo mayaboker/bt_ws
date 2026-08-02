@@ -2,6 +2,8 @@
 Application entry point
 """
 import pathlib
+import signal
+import threading
 
 from bt_app.control import (
     joy_zmq_adapter
@@ -65,6 +67,8 @@ class App:
         """
         # application configuration
         self.config = config
+        self._stop_event = threading.Event()
+        self._shutdown_signal: int | None = None
         # hold application state
         self.ctx = Context()
         
@@ -616,6 +620,33 @@ class App:
         channels[RCChannel.ANGLE] = RC_MAX
         return channels
 
+    def request_stop(self, signum: int | None = None) -> None:
+        """Request a graceful stop from a signal handler or another thread."""
+        if signum is not None and self._shutdown_signal is None:
+            self._shutdown_signal = signum
+        self._stop_event.set()
+
+    def _shutdown(self) -> None:
+        """Stop all application services, keeping MSP shutdown first."""
+        resources = (
+            ("MSP adapter", getattr(self, "drone_adapter", None)),
+            (
+                "joystick listener",
+                getattr(self, "controllers", {}).get(RobotState.MANUAL),
+            ),
+            ("MAVLink service", getattr(self, "mavlink_service", None)),
+            ("RC state recorder", getattr(self, "rc_recorder", None)),
+            ("parameter service", getattr(self, "_App__params", None)),
+        )
+        for resource_name, resource in resources:
+            stop = getattr(resource, "stop", None)
+            if stop is None:
+                continue
+            try:
+                stop()
+            except Exception as exc:
+                log.exception("Failed to stop {}: {}", resource_name, exc)
+
     def run(self):
         """
         Application entry and running loop
@@ -628,7 +659,7 @@ class App:
         """
 
         try:
-            while True:
+            while not self._stop_event.is_set():
                 self.__update_state()
                 self._update_controllers()
                 self._notification_center()
@@ -638,19 +669,20 @@ class App:
                 rc_channels = self._resolve_rc()
                 # validate rc channel
                 self.ctx.sent_rc = self._sanitize_rc_channels(rc_channels)
+                if self._stop_event.is_set():
+                    break
                 # log for diagnostic
                 self.rc_recorder.record(self.ctx.state, self.ctx.sent_rc)
                 # send to FCU
                 self.drone_adapter.dispatcher.set_rc(self.ctx.sent_rc)
-                time.sleep(1/FREQ_HZ)
-        except KeyboardInterrupt:
-            log.warning("Stopping...")
+                self._stop_event.wait(1/FREQ_HZ)
         finally:
-            self.mavlink_service.stop()
-            try:
-                self.rc_recorder.stop()
-            except Exception as exc:
-                log.exception("Failed to stop RC state recorder: {}", exc)
+            if self._shutdown_signal is None:
+                log.info("Application shutdown requested")
+            else:
+                signal_name = signal.Signals(self._shutdown_signal).name
+                log.info("Application shutdown requested by {}", signal_name)
+            self._shutdown()
 
 def main(config: VehicleConfig):
     app = App(config=config)

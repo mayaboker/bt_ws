@@ -60,3 +60,10 @@ class MSPAdapter:
         self.dispatcher.schedule_rc(interval_s=1.0)
         
         self.dispatcher.start()
+
+    def stop(self, timeout: float | None = 2.0) -> None:
+        """Stop scheduled MSP work before closing the transport."""
+        try:
+            self.dispatcher.stop(timeout=timeout)
+        finally:
+            self.msp.close()
