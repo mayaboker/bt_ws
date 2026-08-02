@@ -63,6 +63,11 @@ resolution, a controller, the recorder, or MSP scheduling exits through
 `finally` without a top-level traceback or a flight-state snapshot. The MSP
 dispatcher may also continue transmitting its previously scheduled command.
 
+Progress (2026-08-02): `KeyboardInterrupt` control flow was removed. `SIGINT`
+and `SIGTERM` now set an application stop event, the loop exits normally, and
+MSP output is stopped first so the FC's configured RX-loss failsafe takes over.
+Unexpected-exception snapshot logging remains open under this item.
+
 Required changes:
 
 - Add a real process/control-loop exception boundary.
@@ -284,6 +289,14 @@ Required changes:
 - Log individual cleanup failures with `log.exception()` at `ERROR` while still
   attempting the remaining cleanup operations.
 
+Progress (2026-08-02): signal handlers are temporary and restored after the run;
+shutdown now attempts MSP, joystick, MAVLink, recorder, and parameter cleanup in
+order, and one cleanup failure no longer prevents the remaining stops. The
+application now also retries FCU connection three times, reports expected
+connection failures without a traceback using exit code `4`, and cleans up
+partially initialized resources. The remaining general startup and lifecycle
+logging improvements are still open.
+
 Verification:
 
 - Test normal startup/shutdown and failures at each partial-startup stage.
@@ -365,4 +378,3 @@ Use the following policy consistently:
 10. APP-DIAG-012: timing watchdog.
 11. APP-DIAG-010: lifecycle log cleanup.
 12. APP-DIAG-011: general noise and misleading telemetry cleanup.
-
