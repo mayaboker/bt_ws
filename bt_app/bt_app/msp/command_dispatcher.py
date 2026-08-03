@@ -16,8 +16,24 @@ RcChannels = tuple[int, int, int, int, int, int, int, int]
 StateCallback = Callable[[dict[str, object]], None]
 AltitudeCallback = Callable[[dict[str, float]], None]
 BatteryCallback = Callable[[dict[str, int | float]], None]
-ErrorCallback = Callable[[BaseException], None]
+ErrorCallback = Callable[["MspCommandExecutionError"], None]
 CommandCallback = Callable[["MspCommandDispatcher", Any], None]
+
+
+class MspCommandExecutionError(RuntimeError):
+    """Report a command that failed in the MSP worker thread."""
+
+    def __init__(self, command: "MspCommand", cause: Exception) -> None:
+        self.command_key = command.key
+        failed_command = command
+        while isinstance(failed_command, ScheduledCommand):
+            failed_command = failed_command.command
+        self.command_name = type(failed_command).__name__
+        self.cause = cause
+        super().__init__(
+            f"MSP command {self.command_name} "
+            f"(key={self.command_key!r}) failed: {cause}"
+        )
 
 
 class MspCommand(ABC):
@@ -169,6 +185,7 @@ class MspCommandDispatcher:
         self._queue: list[tuple[float, int, object | None, MspCommand]] = []
         self._active_tokens: dict[str, object] = {}
         self._thread: threading.Thread | None = None
+        self._fatal_error: MspCommandExecutionError | None = None
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -188,6 +205,13 @@ class MspCommandDispatcher:
         if self._thread is not None:
             self._thread.join(timeout=timeout)
             self._thread = None
+
+    def raise_if_failed(self) -> None:
+        """Raise the first fatal command error reported by the worker."""
+        with self._lock:
+            error = self._fatal_error
+        if error is not None:
+            raise error from error.cause
 
     def submit(self, command: MspCommand, delay_s: float = 0.0) -> None:
         token = object() if command.key is not None else None
@@ -290,8 +314,8 @@ class MspCommandDispatcher:
             _, _, token, command = item
             try:
                 command.execute(self)
-            except BaseException as exc:
-                self._handle_error(exc)
+            except Exception as exc:
+                self._handle_error(command, exc)
 
             if command.repeat_interval_s is not None and not self._stop_event.is_set():
                 if self._is_token_active(command, token):
@@ -322,11 +346,18 @@ class MspCommandDispatcher:
         self._wake_event.wait(delay_s)
         self._wake_event.clear()
 
-    def _handle_error(self, exc: BaseException) -> None:
+    def _handle_error(self, command: MspCommand, exc: Exception) -> None:
+        error = MspCommandExecutionError(command, exc)
+        if command.key == RawRcCommand.key:
+            with self._lock:
+                if self._fatal_error is None:
+                    self._fatal_error = error
+            self._stop_event.set()
+            self._wake_event.set()
+
         if self._on_error is not None:
-            self._on_error(exc)
-            return
-        raise exc
+            self._on_error(error)
+        return
 
     def _is_token_active(self, command: MspCommand, token: object | None) -> bool:
         if command.key is None:

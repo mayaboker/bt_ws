@@ -1,5 +1,8 @@
 from bt_app.msp import BetaflightMspClient, SerialMspTransport, TcpMspTransport
-from bt_app.msp.command_dispatcher import MspCommandDispatcher
+from bt_app.msp.command_dispatcher import (
+    MspCommandDispatcher,
+    MspCommandExecutionError,
+)
 from bt_app.vehicle_config import VehicleConfig, DroneSink
 from loguru import logger as log
 
@@ -17,8 +20,16 @@ class MSPAdapter:
 
         self.dispatcher = MspCommandDispatcher(
             self.msp,
-            on_error=lambda exc: log.exception(f"MSP dispatcher error: {exc}"),
+            on_error=self._handle_dispatcher_error,
         )
+
+    @staticmethod
+    def _handle_dispatcher_error(exc: MspCommandExecutionError) -> None:
+        log.error("MSP dispatcher error: {}", exc)
+
+    def raise_if_failed(self) -> None:
+        """Raise a fatal error reported by the dispatcher worker."""
+        self.dispatcher.raise_if_failed()
 
     def get_rc(self):
         """

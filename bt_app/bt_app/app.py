@@ -705,19 +705,48 @@ class App:
             except Exception as exc:
                 log.exception("Failed to stop {}: {}", resource_name, exc)
 
-    def run(self):
-        """
-        Application entry and running loop
+    def _raise_if_msp_failed(self) -> None:
+        """Surface fatal errors reported by the MSP worker thread."""
+        adapter = getattr(self, "drone_adapter", None)
+        raise_if_failed = getattr(adapter, "raise_if_failed", None)
+        if raise_if_failed is not None:
+            raise_if_failed()
 
-        loop
-            - update state from drone and other sources
-            - run the active state controller
-            - validate and inforce rc output before send to drone
-            - send via dispatcher
+    def _log_control_loop_failure(self, exc: Exception) -> None:
+        """Log an unexpected loop failure with flight-state context."""
+        ctx = getattr(self, "ctx", None)
+        log.opt(exception=exc).critical(
+            "Control loop terminated unexpectedly: state={} armed={} "
+            "requested_rc={} sent_rc={} altitude_m={} vertical_speed_m_s={} "
+            "arming_disable_flags={}",
+            getattr(ctx, "state", None),
+            getattr(ctx, "armed", None),
+            getattr(ctx, "request_rc", None),
+            getattr(ctx, "sent_rc", None),
+            getattr(ctx, "drone_alt", None),
+            getattr(ctx, "drone_vertical_speed", None),
+            getattr(ctx, "arming_disable_flags", None),
+        )
+
+    def run(self):
+        """Run the RC control loop until a stop is requested.
+
+        Each iteration updates application state and controllers, resolves and
+        sanitizes the active controller's RC channels, records them, and sends
+        them to the flight controller.  A stop request is checked again before
+        recording and dispatch so shutdown cannot emit one final RC command.
+
+        Exceptions from the loop are allowed to propagate, but all initialized
+        services are given a chance to stop before this method returns or
+        raises.
         """
+
+        period_s = 1.0 / FREQ_HZ
+        next_deadline_s = time.monotonic()
 
         try:
             while not self._stop_event.is_set():
+                self._raise_if_msp_failed()
                 self.__update_state()
                 self._update_controllers()
                 self._notification_center()
@@ -733,7 +762,17 @@ class App:
                 self.rc_recorder.record(self.ctx.state, self.ctx.sent_rc)
                 # send to FCU
                 self.drone_adapter.dispatcher.set_rc(self.ctx.sent_rc)
-                self._stop_event.wait(1/FREQ_HZ)
+                next_deadline_s += period_s
+                now_s = time.monotonic()
+                if next_deadline_s <= now_s:
+                    missed_periods = int((now_s - next_deadline_s) // period_s) + 1
+                    next_deadline_s += missed_periods * period_s
+                self._stop_event.wait(next_deadline_s - now_s)
+
+            self._raise_if_msp_failed()
+        except Exception as exc:
+            self._log_control_loop_failure(exc)
+            raise
         finally:
             if self._shutdown_signal is None:
                 log.info("Application shutdown requested")

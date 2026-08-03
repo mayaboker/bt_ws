@@ -578,3 +578,153 @@ def test_app_shutdown_stops_resources_in_order_and_continues_after_error():
     app._shutdown()
 
     assert events == ["msp", "joystick", "mavlink", "recorder", "parameters"]
+
+
+def test_app_run_logs_context_and_cleans_up_after_loop_failure(monkeypatch):
+    events = []
+    critical_calls = []
+
+    class FakeLog:
+        def opt(self, **kwargs):
+            critical_calls.append(("exception", kwargs["exception"]))
+            return self
+
+        def critical(self, message, *args):
+            critical_calls.append((message, args))
+
+        def info(self, *_args):
+            return None
+
+        def exception(self, *_args):
+            return None
+
+    class Resource:
+        def __init__(self, name):
+            self.name = name
+
+        def stop(self):
+            events.append(self.name)
+
+    class Adapter(Resource):
+        def raise_if_failed(self):
+            return None
+
+    app = App.__new__(App)
+    app.ctx = Context()
+    app.ctx.state = RobotState.MANUAL
+    app.ctx.armed = True
+    app.ctx.drone_alt = 3.5
+    app.ctx.drone_vertical_speed = -0.2
+    app.ctx.arming_disable_flags = ["RX_FAILSAFE"]
+    app._stop_event = threading.Event()
+    app._shutdown_signal = None
+    app.drone_adapter = Adapter("msp")
+    app.controllers = {}
+    app.mavlink_service = Resource("mavlink")
+    app.rc_recorder = Resource("recorder")
+    app._App__params = Resource("parameters")
+    failure = RuntimeError("state machine failed")
+    app.robot_sm = type("RobotSm", (), {"resolve": lambda self: (_ for _ in ()).throw(failure)})()
+
+    monkeypatch.setattr(app_module, "log", FakeLog())
+    monkeypatch.setattr(App, "_App__update_state", lambda self: None)
+    monkeypatch.setattr(App, "_update_controllers", lambda self: None)
+    monkeypatch.setattr(App, "_notification_center", lambda self: None)
+
+    with pytest.raises(RuntimeError, match="state machine failed"):
+        app.run()
+
+    assert critical_calls[0] == ("exception", failure)
+    assert critical_calls[1][1][0] == RobotState.MANUAL
+    assert critical_calls[1][1][1] is True
+    assert critical_calls[1][1][4:7] == (3.5, -0.2, ["RX_FAILSAFE"])
+    assert events == ["msp", "mavlink", "recorder", "parameters"]
+
+
+@pytest.mark.parametrize(
+    ("work_time_s", "expected_wait_s"),
+    ((0.005, 0.015), (0.025, 0.015)),
+)
+def test_app_run_uses_deadlines_and_skips_overrun_catchup(
+    monkeypatch, work_time_s, expected_wait_s
+):
+    clock = [0.0]
+
+    class StopEvent:
+        def __init__(self):
+            self.stopped = False
+            self.waits = []
+
+        def is_set(self):
+            return self.stopped
+
+        def wait(self, timeout):
+            self.waits.append(timeout)
+            clock[0] += timeout
+            self.stopped = True
+
+    class Dispatcher:
+        def set_rc(self, _channels):
+            return None
+
+    class Adapter:
+        dispatcher = Dispatcher()
+
+        def raise_if_failed(self):
+            return None
+
+        def stop(self):
+            return None
+
+    stop_event = StopEvent()
+    app = App.__new__(App)
+    app.ctx = Context()
+    app._stop_event = stop_event
+    app._shutdown_signal = None
+    app.drone_adapter = Adapter()
+    app.controllers = {}
+    app.robot_sm = type("RobotSm", (), {"resolve": lambda self: None})()
+    app.rc_recorder = FakeRcRecorder()
+
+    monkeypatch.setattr(app_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(App, "_App__update_state", lambda self: None)
+    monkeypatch.setattr(App, "_update_controllers", lambda self: None)
+    monkeypatch.setattr(App, "_notification_center", lambda self: None)
+
+    def resolve_rc(_self):
+        clock[0] += work_time_s
+        return [1500, 1500, 1000, 1500, 1000, 1000, 1000, 1000]
+
+    monkeypatch.setattr(App, "_resolve_rc", resolve_rc)
+
+    app.run()
+
+    assert stop_event.waits == pytest.approx([expected_wait_s])
+
+
+def test_app_run_surfaces_fatal_msp_worker_error_and_stops_output(monkeypatch):
+    failure = RuntimeError("RC worker failed")
+    stopped = []
+
+    class Adapter:
+        dispatcher = object()
+
+        def raise_if_failed(self):
+            raise failure
+
+        def stop(self):
+            stopped.append("msp")
+
+    app = App.__new__(App)
+    app.ctx = Context()
+    app._stop_event = threading.Event()
+    app._shutdown_signal = None
+    app.drone_adapter = Adapter()
+    app.controllers = {}
+
+    monkeypatch.setattr(App, "_log_control_loop_failure", lambda self, exc: None)
+
+    with pytest.raises(RuntimeError, match="RC worker failed"):
+        app.run()
+
+    assert stopped == ["msp"]

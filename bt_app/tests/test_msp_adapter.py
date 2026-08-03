@@ -55,6 +55,9 @@ class FakeDispatcher:
         self.stopped = True
         self.stop_timeout = timeout
 
+    def raise_if_failed(self):
+        return None
+
 
 def test_msp_adapter_schedules_battery_at_0_5_hz(monkeypatch):
     monkeypatch.setattr(msp_adapter_module, "BetaflightMspClient", FakeMspClient)
@@ -109,3 +112,19 @@ def test_msp_adapter_stops_dispatcher_before_closing_client(monkeypatch):
     assert events == ["dispatcher", "client"]
     assert adapter.dispatcher.stop_timeout == 0.5
     assert adapter.msp.closed
+
+
+def test_msp_adapter_surfaces_dispatcher_failure(monkeypatch):
+    monkeypatch.setattr(msp_adapter_module, "BetaflightMspClient", FakeMspClient)
+    monkeypatch.setattr(msp_adapter_module, "TcpMspTransport", FakeTransport)
+    monkeypatch.setattr(msp_adapter_module, "MspCommandDispatcher", FakeDispatcher)
+    config = VehicleConfig()
+    config.drone_sink = DroneSink.ETHERNET.value
+    adapter = MSPAdapter(config)
+
+    called = []
+    adapter.dispatcher.raise_if_failed = lambda: called.append(True)
+
+    adapter.raise_if_failed()
+
+    assert called == [True]

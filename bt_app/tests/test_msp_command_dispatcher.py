@@ -1,4 +1,12 @@
-from bt_app.msp.command_dispatcher import MspCommandDispatcher, ReadBatteryCommand
+import threading
+
+import pytest
+
+from bt_app.msp.command_dispatcher import (
+    MspCommandDispatcher,
+    MspCommandExecutionError,
+    ReadBatteryCommand,
+)
 
 
 class FakeMsp:
@@ -40,3 +48,51 @@ def test_schedule_battery_uses_0_5_hz_default():
     _run_at, _sequence, _token, command = dispatcher._queue[0]
     assert command.repeat_interval_s == 2.0
     assert isinstance(command.command, ReadBatteryCommand)
+
+
+def test_rc_failure_stops_dispatcher_and_surfaces_worker_error():
+    attempted = threading.Event()
+    errors = []
+
+    class FailingMsp(FakeMsp):
+        def send_raw_rc(self, _channels):
+            attempted.set()
+            raise ConnectionError("FCU disconnected")
+
+    dispatcher = MspCommandDispatcher(FailingMsp(), on_error=errors.append)
+    dispatcher.set_rc((1500, 1500, 1000, 1500, 1000, 1000, 1000, 1000))
+    dispatcher.start()
+
+    assert attempted.wait(1.0)
+    dispatcher.stop()
+
+    with pytest.raises(MspCommandExecutionError) as exc_info:
+        dispatcher.raise_if_failed()
+
+    assert exc_info.value.command_name == "RawRcCommand"
+    assert exc_info.value.command_key == "rc"
+    assert isinstance(exc_info.value.__cause__, ConnectionError)
+    assert errors == [exc_info.value]
+    assert dispatcher._queue == []
+
+
+def test_telemetry_failure_is_reported_but_remains_nonfatal():
+    attempted = threading.Event()
+    errors = []
+
+    class FailingMsp(FakeMsp):
+        def read_state(self):
+            attempted.set()
+            raise TimeoutError("state timeout")
+
+    dispatcher = MspCommandDispatcher(FailingMsp(), on_error=errors.append)
+    dispatcher.schedule_state(interval_s=0.01)
+    dispatcher.start()
+
+    assert attempted.wait(1.0)
+    dispatcher.stop()
+
+    dispatcher.raise_if_failed()
+    assert errors
+    assert errors[0].command_key == "state"
+    assert isinstance(errors[0].cause, TimeoutError)
