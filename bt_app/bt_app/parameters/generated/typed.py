@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Protocol, cast
 
 from bt_app.parameters.generated.keys import ParameterKey
 
@@ -19,149 +19,129 @@ class TypedParameters:
         self._parameters = parameters
 
     @property
-    def altitude_kd(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.ALTITUDE_KD))
+    def fs_hold_time(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.FS_HOLD_TIME))
 
     @property
-    def altitude_ki(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.ALTITUDE_KI))
+    def fs_desc_rate(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.FS_DESC_RATE))
 
     @property
-    def altitude_kp(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.ALTITUDE_KP))
+    def fs_min_alt(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.FS_MIN_ALT))
 
     @property
-    def altitude_output_limits(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.ALTITUDE_OUTPUT_LIMITS))
+    def fs_land_alt(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.FS_LAND_ALT))
 
     @property
-    def betaflight_yaw_rate_full_stick_dps(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.BETAFLIGHT_YAW_RATE_FULL_STICK_DPS))
+    def fs_land_vspeed(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.FS_LAND_VSPEED))
 
     @property
-    def fail_shape_alt(self) -> int:
-        return cast(int, self._parameters.get(ParameterKey.FAIL_SHAPE_ALT))
+    def fs_land_confirm(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.FS_LAND_CONFIRM))
 
     @property
-    def failsafe_descent_rate_m_s(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.FAILSAFE_DESCENT_RATE_M_S))
+    def mi_land_confirm(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.MI_LAND_CONFIRM))
 
     @property
-    def failsafe_hold_time_s(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.FAILSAFE_HOLD_TIME_S))
+    def joy_timeout(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.JOY_TIMEOUT))
 
     @property
-    def failsafe_land_altitude_m(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.FAILSAFE_LAND_ALTITUDE_M))
+    def alt_kp(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.ALT_KP))
 
     @property
-    def failsafe_land_confirm_s(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.FAILSAFE_LAND_CONFIRM_S))
+    def alt_ki(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.ALT_KI))
 
     @property
-    def failsafe_land_vertical_speed_m_s(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.FAILSAFE_LAND_VERTICAL_SPEED_M_S))
+    def alt_kd(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.ALT_KD))
 
     @property
-    def failsafe_min_altitude(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.FAILSAFE_MIN_ALTITUDE))
+    def alt_out_limit(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.ALT_OUT_LIMIT))
 
     @property
-    def flight_mode(self) -> Literal['stabilize', 'altitude', 'position']:
-        return cast(Literal['stabilize', 'altitude', 'position'], self._parameters.get(ParameterKey.FLIGHT_MODE))
+    def hov_kp(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HOV_KP))
 
     @property
-    def hover_altitude_rate_m_s(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.HOVER_ALTITUDE_RATE_M_S))
+    def hov_ki(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HOV_KI))
 
     @property
-    def hover_baseline(self) -> int:
-        return cast(int, self._parameters.get(ParameterKey.HOVER_BASELINE))
+    def hov_kd(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HOV_KD))
 
     @property
-    def hover_kd(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.HOVER_KD))
+    def hov_out_limit(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HOV_OUT_LIMIT))
 
     @property
-    def hover_ki(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.HOVER_KI))
+    def hov_baseline(self) -> int:
+        return cast(int, self._parameters.get(ParameterKey.HOV_BASELINE))
 
     @property
-    def hover_kp(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.HOVER_KP))
+    def hov_alt_rate(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HOV_ALT_RATE))
 
     @property
-    def hover_min_altitude(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.HOVER_MIN_ALTITUDE))
+    def hov_thr_db(self) -> int:
+        return cast(int, self._parameters.get(ParameterKey.HOV_THR_DB))
 
     @property
-    def hover_output_limits(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.HOVER_OUTPUT_LIMITS))
+    def hov_min_alt(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HOV_MIN_ALT))
 
     @property
-    def hover_throttle_deadband(self) -> int:
-        return cast(int, self._parameters.get(ParameterKey.HOVER_THROTTLE_DEADBAND))
+    def takeoff_alt(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TAKEOFF_ALT))
 
     @property
-    def hover_yaw_altitude(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.HOVER_YAW_ALTITUDE))
+    def hy_max_rate(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HY_MAX_RATE))
 
     @property
-    def hover_yaw_deadband(self) -> int:
-        return cast(int, self._parameters.get(ParameterKey.HOVER_YAW_DEADBAND))
+    def hy_deadband(self) -> int:
+        return cast(int, self._parameters.get(ParameterKey.HY_DEADBAND))
 
     @property
-    def hover_yaw_expo(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.HOVER_YAW_EXPO))
+    def hy_expo(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.HY_EXPO))
 
     @property
-    def hover_yaw_max_rate_dps(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.HOVER_YAW_MAX_RATE_DPS))
+    def vis_hov_thr(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.VIS_HOV_THR))
 
     @property
-    def hover_yaw_yaw_rate(self) -> int:
-        return cast(int, self._parameters.get(ParameterKey.HOVER_YAW_YAW_RATE))
+    def vis_fwd_pitch(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.VIS_FWD_PITCH))
 
     @property
-    def joystick_server_timeout_s(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.JOYSTICK_SERVER_TIMEOUT_S))
+    def vis_max_pitch(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.VIS_MAX_PITCH))
 
     @property
-    def manual_idle_land_confirm_s(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.MANUAL_IDLE_LAND_CONFIRM_S))
+    def vis_max_thr(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.VIS_MAX_THR))
 
     @property
-    def takeoff_altitude(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.TAKEOFF_ALTITUDE))
+    def vis_kp_yaw(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.VIS_KP_YAW))
 
     @property
-    def visual_final_tracking_distance(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VISUAL_FINAL_TRACKING_DISTANCE))
+    def vis_kp_pitch(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.VIS_KP_PITCH))
 
     @property
-    def visual_forward_pitch_deg(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VISUAL_FORWARD_PITCH_DEG))
+    def vis_kp_thr(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.VIS_KP_THR))
 
     @property
-    def visual_hover_throttle(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VISUAL_HOVER_THROTTLE))
-
-    @property
-    def visual_kp_pitch_y(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VISUAL_KP_PITCH_Y))
-
-    @property
-    def visual_kp_throttle_y(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VISUAL_KP_THROTTLE_Y))
-
-    @property
-    def visual_kp_yaw(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VISUAL_KP_YAW))
-
-    @property
-    def visual_max_pitch_deg(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VISUAL_MAX_PITCH_DEG))
-
-    @property
-    def visual_max_throttle(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VISUAL_MAX_THROTTLE))
+    def bf_yaw_rate(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.BF_YAW_RATE))

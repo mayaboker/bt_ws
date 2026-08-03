@@ -25,10 +25,10 @@ class TakeoffController:
 
     def _setup(self):
         self.alt_pid = PID(
-            kp=self.params.get(ParameterKey.ALTITUDE_KP),
-            ki=self.params.get(ParameterKey.ALTITUDE_KI),
-            kd=self.params.get(ParameterKey.ALTITUDE_KD),
-            output_limits=self.params.get(ParameterKey.ALTITUDE_OUTPUT_LIMITS)
+            kp=self.params.get(ParameterKey.ALT_KP),
+            ki=self.params.get(ParameterKey.ALT_KI),
+            kd=self.params.get(ParameterKey.ALT_KD),
+            output_limits=self.params.get(ParameterKey.ALT_OUT_LIMIT)
         )
 
     # region properties
@@ -69,13 +69,12 @@ class TakeoffController:
     
     def on_parameter_changed(self, name: str, value: Any) -> None:
         log.info("Parameter changed: {} = {}", name, value)
-        if name == ParameterKey.ALTITUDE_KP:
+        if name == ParameterKey.ALT_KP:
             self.alt_pid.kp = value
-        elif name == ParameterKey.ALTITUDE_KI:
+        elif name == ParameterKey.ALT_KI:
             self.alt_pid.ki = value
-        elif name == ParameterKey.ALTITUDE_KD:
+        elif name == ParameterKey.ALT_KD:
             self.alt_pid.kd = value
-        elif name == ParameterKey.ALTITUDE_OUTPUT_LIMITS:
+        elif name == ParameterKey.ALT_OUT_LIMIT:
             self.alt_pid.set_output_limits(value)
-
 

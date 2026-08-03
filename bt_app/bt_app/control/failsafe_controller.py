@@ -27,7 +27,7 @@ class FailSafeController:
 
     def __init__(self, params: Parameters):
         self.params = params
-        self._baseline = 0.0
+        self._baseline = float(self.params.get(ParameterKey.HOV_BASELINE))
         self._setpoint = 0.0
         self.phase = FailSafePhase.HOLD
         self._phase_started_s = time.monotonic()
@@ -35,14 +35,14 @@ class FailSafeController:
         self._land_candidate_since_s: float | None = None
         self._descent_started_event = False
         self._landed_event = False
-        self.hold_time_s = self.params.get(ParameterKey.FAILSAFE_HOLD_TIME_S)
-        self.descent_rate_m_s = self.params.get(ParameterKey.FAILSAFE_DESCENT_RATE_M_S)
-        self.min_altitude = self.params.get(ParameterKey.FAILSAFE_MIN_ALTITUDE)
-        self.land_altitude_m = self.params.get(ParameterKey.FAILSAFE_LAND_ALTITUDE_M)
+        self.hold_time_s = self.params.get(ParameterKey.FS_HOLD_TIME)
+        self.descent_rate_m_s = self.params.get(ParameterKey.FS_DESC_RATE)
+        self.min_altitude = self.params.get(ParameterKey.FS_MIN_ALT)
+        self.land_altitude_m = self.params.get(ParameterKey.FS_LAND_ALT)
         self.land_vertical_speed_m_s = self.params.get(
-            ParameterKey.FAILSAFE_LAND_VERTICAL_SPEED_M_S
+            ParameterKey.FS_LAND_VSPEED
         )
-        self.land_confirm_s = self.params.get(ParameterKey.FAILSAFE_LAND_CONFIRM_S)
+        self.land_confirm_s = self.params.get(ParameterKey.FS_LAND_CONFIRM)
         self.params.on_parameter_changed.subscribe(self.on_parameter_changed)
         self._setup()
         self._banner()
@@ -52,10 +52,10 @@ class FailSafeController:
 
     def _setup(self):
         self.alt_pid = PID(
-            kp=self.params.get(ParameterKey.HOVER_KP),
-            ki=self.params.get(ParameterKey.HOVER_KI),
-            kd=self.params.get(ParameterKey.HOVER_KD),
-            output_limits=self.params.get(ParameterKey.HOVER_OUTPUT_LIMITS),
+            kp=self.params.get(ParameterKey.HOV_KP),
+            ki=self.params.get(ParameterKey.HOV_KI),
+            kd=self.params.get(ParameterKey.HOV_KD),
+            output_limits=self.params.get(ParameterKey.HOV_OUT_LIMIT),
         )
 
     @property
@@ -173,24 +173,26 @@ class FailSafeController:
 
     def on_parameter_changed(self, name: str, value: Any) -> None:
         log.info("Parameter changed: {} = {}", name, value)
-        if name == ParameterKey.HOVER_KP:
+        if name == ParameterKey.HOV_KP:
             self.alt_pid.kp = value
-        elif name == ParameterKey.HOVER_KI:
+        elif name == ParameterKey.HOV_KI:
             self.alt_pid.ki = value
-        elif name == ParameterKey.HOVER_KD:
+        elif name == ParameterKey.HOV_KD:
             self.alt_pid.kd = value
-        elif name == ParameterKey.HOVER_OUTPUT_LIMITS:
+        elif name == ParameterKey.HOV_OUT_LIMIT:
             self.alt_pid.set_output_limits(value)
-        elif name == ParameterKey.FAILSAFE_HOLD_TIME_S:
+        elif name == ParameterKey.FS_HOLD_TIME:
             self.hold_time_s = value
-        elif name == ParameterKey.FAILSAFE_DESCENT_RATE_M_S:
+        elif name == ParameterKey.FS_DESC_RATE:
             self.descent_rate_m_s = value
-        elif name == ParameterKey.FAILSAFE_MIN_ALTITUDE:
+        elif name == ParameterKey.FS_MIN_ALT:
             self.min_altitude = value
             self.setpoint = self._setpoint
-        elif name == ParameterKey.FAILSAFE_LAND_ALTITUDE_M:
+        elif name == ParameterKey.FS_LAND_ALT:
             self.land_altitude_m = value
-        elif name == ParameterKey.FAILSAFE_LAND_VERTICAL_SPEED_M_S:
+        elif name == ParameterKey.FS_LAND_VSPEED:
             self.land_vertical_speed_m_s = value
-        elif name == ParameterKey.FAILSAFE_LAND_CONFIRM_S:
+        elif name == ParameterKey.FS_LAND_CONFIRM:
             self.land_confirm_s = value
+        elif name == ParameterKey.HOV_BASELINE:
+            self._baseline = float(value)

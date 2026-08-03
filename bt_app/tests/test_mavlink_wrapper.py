@@ -53,8 +53,9 @@ class FakeSocket:
 class FakeMavlinkService:
     instances = []
 
-    def __init__(self, *, context, qopenhd_addr=None):
+    def __init__(self, *, context, parameter_service=None, qopenhd_addr=None):
         self.context = context
+        self.parameter_service = parameter_service
         self.qopenhd_addr = qopenhd_addr
         self.started = False
         self.stopped = False
@@ -412,7 +413,19 @@ def test_channel_status_v2_extension_uses_safe_defaults_without_sent_rc():
 def test_app_starts_mavlink_service_with_shared_context(monkeypatch):
     FakeMavlinkService.instances = []
     monkeypatch.setattr(app_module, "MavlinkService", FakeMavlinkService)
-    monkeypatch.setattr(App, "_App__load_parameters", lambda self: object())
+    class FakeEvent:
+        def subscribe(self, _callback):
+            return None
+
+    class FakeParameters:
+        service = object()
+        on_parameter_changed = FakeEvent()
+
+        def get(self, _name):
+            return 2.0
+
+    parameters = FakeParameters()
+    monkeypatch.setattr(App, "_App__load_parameters", lambda self: parameters)
     monkeypatch.setattr(App, "_App__load_manual_land_detector", lambda self: object())
     monkeypatch.setattr(App, "_App__load_drone_interface", lambda self: None)
     monkeypatch.setattr(App, "_App__load_controllers", lambda self: None)
@@ -421,6 +434,7 @@ def test_app_starts_mavlink_service_with_shared_context(monkeypatch):
 
     assert isinstance(app.mavlink_service, FakeMavlinkService)
     assert app.mavlink_service.context is app.ctx
+    assert app.mavlink_service.parameter_service is parameters.service
     assert app.mavlink_service.qopenhd_addr == ("127.0.0.1", 14550)
     assert app.mavlink_service.started
 

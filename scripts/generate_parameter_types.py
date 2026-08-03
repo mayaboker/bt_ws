@@ -11,7 +11,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT = ROOT / "bt_app" / "config" / "parameters.yaml"
+DEFAULT_INPUT = ROOT / "bt_app" / "parameters.yaml"
 DEFAULT_OUTPUT_DIR = ROOT / "bt_app" / "bt_app" / "parameters" / "generated"
 
 TYPE_MAP = {
@@ -34,6 +34,11 @@ def load_parameters(path: Path) -> dict[str, dict[str, Any]]:
     for name, definition in raw_parameters.items():
         if not isinstance(name, str):
             raise ValueError(f"Parameter name must be a string: {name!r}")
+        if re.fullmatch(r"[A-Z][A-Z0-9_]{0,15}", name) is None:
+            raise ValueError(
+                f"Parameter name must be an uppercase MAVLink ID of at most "
+                f"16 characters: {name!r}"
+            )
         if not isinstance(definition, dict):
             raise ValueError(f"Parameter {name!r} definition must be a mapping")
         if "type" not in definition:
@@ -57,7 +62,9 @@ def constant_name(parameter_name: str) -> str:
 def attribute_name(parameter_name: str) -> str:
     name = re.sub(r"[^0-9A-Za-z]+", "_", parameter_name).strip("_").lower()
     if not name:
-        raise ValueError(f"Cannot build attribute name for parameter {parameter_name!r}")
+        raise ValueError(
+            f"Cannot build attribute name for parameter {parameter_name!r}"
+        )
     if name[0].isdigit():
         name = f"param_{name}"
     if keyword.iskeyword(name):
@@ -113,17 +120,17 @@ def render_keys(parameters: dict[str, dict[str, Any]], source: Path) -> str:
         "",
         "",
         "class ParameterKey:",
-        f"    \"\"\"Parameter keys generated from {source.as_posix()}.\"\"\"",
+        f'    """Parameter keys generated from {source.as_posix()}."""',
     ]
 
-    for name in sorted(parameters):
+    for name in parameters:
         const = constant_name(name)
         lines.append(f"    {const}: Final[Literal[{name!r}]] = {name!r}")
 
     lines.append("")
     lines.append("")
     lines.append("ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (")
-    for name in sorted(parameters):
+    for name in parameters:
         lines.append(f"    {name!r},")
     lines.append(")")
     lines.append("")
@@ -131,12 +138,18 @@ def render_keys(parameters: dict[str, dict[str, Any]], source: Path) -> str:
 
 
 def render_typed(parameters: dict[str, dict[str, Any]], source: Path) -> str:
+    typing_imports = "Any, Protocol, cast"
+    if any(
+        python_type(name, definition).startswith("Literal[")
+        for name, definition in parameters.items()
+    ):
+        typing_imports = "Any, Literal, Protocol, cast"
     lines = [
         '"""Auto-generated typed parameter accessors."""',
         "",
         "from __future__ import annotations",
         "",
-        "from typing import Any, Literal, Protocol, cast",
+        f"from typing import {typing_imports}",
         "",
         "from bt_app.parameters.generated.keys import ParameterKey",
         "",
@@ -147,13 +160,13 @@ def render_typed(parameters: dict[str, dict[str, Any]], source: Path) -> str:
         "",
         "",
         "class TypedParameters:",
-        f"    \"\"\"Typed parameter accessors generated from {source.as_posix()}.\"\"\"",
+        f'    """Typed parameter accessors generated from {source.as_posix()}."""',
         "",
         "    def __init__(self, parameters: SupportsParameterGet) -> None:",
         "        self._parameters = parameters",
     ]
 
-    for name in sorted(parameters):
+    for name in parameters:
         attr = attribute_name(name)
         const = constant_name(name)
         typ = python_type(name, parameters[name])

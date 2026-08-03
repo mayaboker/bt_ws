@@ -6,6 +6,7 @@ from bt_app.parameters.models import ParameterLimits
 from bt_app.parameters.storage import ParameterStorage
 from bt_app.parameters.event import Event
 
+
 class ParameterService:
     def __init__(self, storage: ParameterStorage) -> None:
         self._storage = storage
@@ -35,9 +36,13 @@ class ParameterService:
     def describe(self) -> dict[str, dict[str, Any]]:
         return self._storage.describe()
 
+    def snapshot(self) -> tuple[tuple[str, str, Any], ...]:
+        return self._storage.snapshot()
+
     def get(self, name: str) -> Any:
         return self._storage.get(name)
 
     def set(self, name: str, value: Any) -> Any:
-        self.on_parameter_changed.emit(name, value)
-        return self._storage.set(name, value)
+        stored_value = self._storage.set(name, value)
+        self.on_parameter_changed.emit(name, stored_value)
+        return stored_value

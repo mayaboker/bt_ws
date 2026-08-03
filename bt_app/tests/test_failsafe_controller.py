@@ -19,16 +19,17 @@ class FakeParameters:
     def __init__(self):
         self.on_parameter_changed = FakeEvent()
         self.values = {
-            ParameterKey.HOVER_KP: 80.0,
-            ParameterKey.HOVER_KI: 10.0,
-            ParameterKey.HOVER_KD: 20.0,
-            ParameterKey.HOVER_OUTPUT_LIMITS: 400.0,
-            ParameterKey.FAILSAFE_HOLD_TIME_S: 5.0,
-            ParameterKey.FAILSAFE_DESCENT_RATE_M_S: 0.5,
-            ParameterKey.FAILSAFE_MIN_ALTITUDE: 0.0,
-            ParameterKey.FAILSAFE_LAND_ALTITUDE_M: 0.15,
-            ParameterKey.FAILSAFE_LAND_VERTICAL_SPEED_M_S: 0.1,
-            ParameterKey.FAILSAFE_LAND_CONFIRM_S: 1.0,
+            ParameterKey.HOV_KP: 80.0,
+            ParameterKey.HOV_KI: 10.0,
+            ParameterKey.HOV_KD: 20.0,
+            ParameterKey.HOV_OUT_LIMIT: 400.0,
+            ParameterKey.HOV_BASELINE: 1300,
+            ParameterKey.FS_HOLD_TIME: 5.0,
+            ParameterKey.FS_DESC_RATE: 0.5,
+            ParameterKey.FS_MIN_ALT: 0.0,
+            ParameterKey.FS_LAND_ALT: 0.15,
+            ParameterKey.FS_LAND_VSPEED: 0.1,
+            ParameterKey.FS_LAND_CONFIRM: 1.0,
         }
 
     def get(self, name):
@@ -58,6 +59,14 @@ def test_reset_starts_hold_phase_at_current_altitude(monkeypatch):
     assert controller.phase == FailSafePhase.HOLD
     assert controller.setpoint == 4.0
     assert not controller.consume_descent_started_event()
+
+
+def test_baseline_parameter_change_applies_live(monkeypatch):
+    controller = controller_with_times(monkeypatch, [0.0])
+
+    controller.on_parameter_changed(ParameterKey.HOV_BASELINE, 1450)
+
+    assert controller._baseline == 1450.0
 
 
 def test_holds_altitude_before_timeout(monkeypatch):

@@ -66,7 +66,7 @@ class FakeParams:
         self.baseline = baseline
 
     def get(self, key):
-        if key == ParameterKey.HOVER_BASELINE:
+        if key == ParameterKey.HOV_BASELINE:
             return self.baseline
         return 42
 

@@ -19,18 +19,18 @@ class FakeParameters:
     def __init__(self):
         self.on_parameter_changed = FakeEvent()
         self.values = {
-            ParameterKey.HOVER_KP: 80.0,
-            ParameterKey.HOVER_KI: 10.0,
-            ParameterKey.HOVER_KD: 20.0,
-            ParameterKey.HOVER_OUTPUT_LIMITS: 400.0,
-            ParameterKey.HOVER_ALTITUDE_RATE_M_S: 1.0,
-            ParameterKey.HOVER_THROTTLE_DEADBAND: 200,
-            ParameterKey.HOVER_MIN_ALTITUDE: 2.0,
-            ParameterKey.HOVER_YAW_YAW_RATE: 0,
-            ParameterKey.HOVER_YAW_MAX_RATE_DPS: 120.0,
-            ParameterKey.HOVER_YAW_DEADBAND: 30,
-            ParameterKey.HOVER_YAW_EXPO: 0.35,
-            ParameterKey.BETAFLIGHT_YAW_RATE_FULL_STICK_DPS: 67.0,
+            ParameterKey.HOV_KP: 80.0,
+            ParameterKey.HOV_KI: 10.0,
+            ParameterKey.HOV_KD: 20.0,
+            ParameterKey.HOV_OUT_LIMIT: 400.0,
+            ParameterKey.HOV_BASELINE: 1300,
+            ParameterKey.HOV_ALT_RATE: 1.0,
+            ParameterKey.HOV_THR_DB: 200,
+            ParameterKey.HOV_MIN_ALT: 2.0,
+            ParameterKey.HY_MAX_RATE: 120.0,
+            ParameterKey.HY_DEADBAND: 30,
+            ParameterKey.HY_EXPO: 0.35,
+            ParameterKey.BF_YAW_RATE: 67.0,
         }
 
     def get(self, name):
@@ -58,6 +58,14 @@ def test_reset_setpoint_clamps_to_min_altitude(monkeypatch):
     controller.reset_setpoint(1.0)
 
     assert controller.setpoint == 2.0
+
+
+def test_baseline_parameter_change_applies_live(monkeypatch):
+    controller = controller_with_times(monkeypatch, [0.0])
+
+    controller.on_parameter_changed(ParameterKey.HOV_BASELINE, 1450)
+
+    assert controller._baseline == 1450.0
 
 
 def test_centered_throttle_does_not_change_setpoint(monkeypatch):

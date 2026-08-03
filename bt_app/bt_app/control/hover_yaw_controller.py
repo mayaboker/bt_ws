@@ -20,16 +20,16 @@ class HoverYawController:
 
     def __init__(self, params: Parameters):
         self.params = params
-        self._baseline = 0.0
+        self._baseline = float(self.params.get(ParameterKey.HOV_BASELINE))
         self._setpoint = 0.0
-        self.altitude_rate_m_s = self.params.get(ParameterKey.HOVER_ALTITUDE_RATE_M_S)
-        self.throttle_deadband = self.params.get(ParameterKey.HOVER_THROTTLE_DEADBAND)
-        self.min_altitude = self.params.get(ParameterKey.HOVER_MIN_ALTITUDE)
-        self.yaw_rate = self.params.get(ParameterKey.HOVER_YAW_YAW_RATE)
-        self.max_yaw_rate_dps = self.params.get(ParameterKey.HOVER_YAW_MAX_RATE_DPS)
-        self.yaw_deadband = self.params.get(ParameterKey.HOVER_YAW_DEADBAND)
-        self.yaw_expo = self.params.get(ParameterKey.HOVER_YAW_EXPO)
-        self.yaw_stick_range = self.params.get(ParameterKey.BETAFLIGHT_YAW_RATE_FULL_STICK_DPS)
+        self.altitude_rate_m_s = self.params.get(ParameterKey.HOV_ALT_RATE)
+        self.throttle_deadband = self.params.get(ParameterKey.HOV_THR_DB)
+        self.min_altitude = self.params.get(ParameterKey.HOV_MIN_ALT)
+        self.yaw_rate = 0.0
+        self.max_yaw_rate_dps = self.params.get(ParameterKey.HY_MAX_RATE)
+        self.yaw_deadband = self.params.get(ParameterKey.HY_DEADBAND)
+        self.yaw_expo = self.params.get(ParameterKey.HY_EXPO)
+        self.yaw_stick_range = self.params.get(ParameterKey.BF_YAW_RATE)
         self._last_setpoint_update_s = time.monotonic()
         self._throttle_outside_deadband = False
         self._altitude_setpoint_request_event = False
@@ -40,10 +40,10 @@ class HoverYawController:
 
     def _setup(self):
         self.alt_pid = PID(
-            kp=self.params.get(ParameterKey.HOVER_KP),
-            ki=self.params.get(ParameterKey.HOVER_KI),
-            kd=self.params.get(ParameterKey.HOVER_KD),
-            output_limits=self.params.get(ParameterKey.HOVER_OUTPUT_LIMITS),
+            kp=self.params.get(ParameterKey.HOV_KP),
+            ki=self.params.get(ParameterKey.HOV_KI),
+            kd=self.params.get(ParameterKey.HOV_KD),
+            output_limits=self.params.get(ParameterKey.HOV_OUT_LIMIT),
         )
         
         log.info("HoverYawController initialized with PID: \n" \
@@ -142,7 +142,6 @@ class HoverYawController:
         if controller is not enabled, do nothing. On first run, initialize hover altitude from current altitude.
          Then read current altitude, compute throttle output from PID, compute yaw output from yaw_rate parameter, and send RC commands to MSP.
         """
-        CHANGE_SIGN = -1
         throttle_output = int(self.alt_pid.update(setpoint, current))
         throttle_output += self._baseline
         
@@ -168,29 +167,29 @@ class HoverYawController:
 
     def on_parameter_changed(self, name: str, value: Any) -> None:
         log.info("Parameter changed: {} = {}", name, value)
-        if name == ParameterKey.HOVER_KP:
+        if name == ParameterKey.HOV_KP:
             self.alt_pid.kp = value
-        elif name == ParameterKey.HOVER_KI:
+        elif name == ParameterKey.HOV_KI:
             self.alt_pid.ki = value
-        elif name == ParameterKey.HOVER_KD:
+        elif name == ParameterKey.HOV_KD:
             self.alt_pid.kd = value
-        elif name == ParameterKey.HOVER_OUTPUT_LIMITS:
+        elif name == ParameterKey.HOV_OUT_LIMIT:
             self.alt_pid.set_output_limits(value)
-        elif name == ParameterKey.HOVER_ALTITUDE_RATE_M_S:
+        elif name == ParameterKey.HOV_ALT_RATE:
             self.altitude_rate_m_s = value
-        elif name == ParameterKey.HOVER_THROTTLE_DEADBAND:
+        elif name == ParameterKey.HOV_THR_DB:
             self.throttle_deadband = value
-        elif name == ParameterKey.HOVER_MIN_ALTITUDE:
+        elif name == ParameterKey.HOV_MIN_ALT:
             self.min_altitude = value
             self.setpoint = self._setpoint
-        elif name == ParameterKey.HOVER_YAW_YAW_RATE:
-            self.yaw_rate = value
-        elif name == ParameterKey.HOVER_YAW_MAX_RATE_DPS:
+        elif name == ParameterKey.HY_MAX_RATE:
             self.max_yaw_rate_dps = value
-        elif name == ParameterKey.HOVER_YAW_DEADBAND:
+        elif name == ParameterKey.HY_DEADBAND:
             self.yaw_deadband = value
-        elif name == ParameterKey.HOVER_YAW_EXPO:
+        elif name == ParameterKey.HY_EXPO:
             self.yaw_expo = value
-        elif name == ParameterKey.BETAFLIGHT_YAW_RATE_FULL_STICK_DPS:
+        elif name == ParameterKey.BF_YAW_RATE:
             self.yaw_stick_range = value
             self.rc_mapper.yaw_rate_full_stick_dps = value
+        elif name == ParameterKey.HOV_BASELINE:
+            self._baseline = float(value)

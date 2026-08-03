@@ -14,16 +14,17 @@ from bt_app.common import State
 from bt_app import FREQ_HZ
 from bt_app.control import PID
 from bt_app.control.rc_mapper import BetaflightRcMapper, clamp
+from bt_app.parameters.generated import ParameterKey
 
 VISUAL_TRACKER_PARAMETERS = {
-    "visual.hover_throttle": "hover_throttle",
-    "visual.forward_pitch_deg": "forward_pitch_deg",
-    "visual.max_pitch_deg": "max_pitch_deg",
-    "visual.max_throttle": "max_throttle",
-    "visual.kp_yaw": "kp_yaw",
-    "visual.kp_pitch_y": "kp_pitch_y",
-    "visual.kp_throttle_y": "kp_throttle_y",
-    "betaflight_yaw_rate_full_stick_dps": "betaflight_yaw_rate_full_stick_dps",
+    ParameterKey.VIS_HOV_THR: "hover_throttle",
+    ParameterKey.VIS_FWD_PITCH: "forward_pitch_deg",
+    ParameterKey.VIS_MAX_PITCH: "max_pitch_deg",
+    ParameterKey.VIS_MAX_THR: "max_throttle",
+    ParameterKey.VIS_KP_YAW: "kp_yaw",
+    ParameterKey.VIS_KP_PITCH: "kp_pitch_y",
+    ParameterKey.VIS_KP_THR: "kp_throttle_y",
+    ParameterKey.BF_YAW_RATE: "betaflight_yaw_rate_full_stick_dps",
 }
 
 # region Utility functions
@@ -425,15 +426,15 @@ class VisualTrackerManager():
     
     def build_config(self, params: Parameters) -> ControllerConfig:
         return ControllerConfig(
-            hover_throttle=params.get("visual.hover_throttle"),
-            forward_pitch_deg=params.get("visual.forward_pitch_deg"),
-            max_pitch_deg=params.get("visual.max_pitch_deg"),
-            max_throttle=params.get("visual.max_throttle"),
-            kp_yaw=params.get("visual.kp_yaw"),
-            kp_pitch_y=params.get("visual.kp_pitch_y"),
-            kp_throttle_y=params.get("visual.kp_throttle_y"),
+            hover_throttle=params.get(ParameterKey.VIS_HOV_THR),
+            forward_pitch_deg=params.get(ParameterKey.VIS_FWD_PITCH),
+            max_pitch_deg=params.get(ParameterKey.VIS_MAX_PITCH),
+            max_throttle=params.get(ParameterKey.VIS_MAX_THR),
+            kp_yaw=params.get(ParameterKey.VIS_KP_YAW),
+            kp_pitch_y=params.get(ParameterKey.VIS_KP_PITCH),
+            kp_throttle_y=params.get(ParameterKey.VIS_KP_THR),
             betaflight_yaw_rate_full_stick_dps=params.get(
-                "betaflight_yaw_rate_full_stick_dps"
+                ParameterKey.BF_YAW_RATE
             ),
         )
 

@@ -14,6 +14,7 @@ from bt_app.control import (
     TakeoffController,
     ARMController,
     HoverYawController,
+    MavlinkListenerError,
     MavlinkListenerService
 )
 from bt_app.sm import Robot_StateMachine
@@ -89,8 +90,11 @@ class App:
         self.__validate_startup_config()
         try:
             self.__params = self.__load_parameters()
-            self.ctx.alt_setpoint = self.__params.get(ParameterKey.TAKEOFF_ALTITUDE)
+            self.ctx.alt_setpoint = self.__params.get(ParameterKey.TAKEOFF_ALT)
             self.manual_land_detector = self.__load_manual_land_detector()
+            parameter_event = getattr(self.__params, "on_parameter_changed", None)
+            if parameter_event is not None:
+                parameter_event.subscribe(self._on_application_parameter_changed)
             self._manual_land_detection_started_notified = False
             self._manual_land_confirmed_notified = False
             self._last_rc_channel = None
@@ -98,6 +102,7 @@ class App:
             self.__load_controllers()
             self.mavlink_service = MavlinkService(
                 context=self.ctx,
+                parameter_service=getattr(self.__params, "service", None),
                 qopenhd_addr=(self.config.gcs_ip, self.config.gcs_port),
             )
             self.mavlink_service.start()
@@ -146,12 +151,20 @@ class App:
 
     def __load_manual_land_detector(self):
         return LandDetector(
-            confirm_s=self.__params.get(ParameterKey.MANUAL_IDLE_LAND_CONFIRM_S),
-            land_altitude_m=self.__params.get(ParameterKey.FAILSAFE_LAND_ALTITUDE_M),
+            confirm_s=self.__params.get(ParameterKey.MI_LAND_CONFIRM),
+            land_altitude_m=self.__params.get(ParameterKey.FS_LAND_ALT),
             land_vertical_speed_m_s=self.__params.get(
-                ParameterKey.FAILSAFE_LAND_VERTICAL_SPEED_M_S
+                ParameterKey.FS_LAND_VSPEED
             ),
         )
+
+    def _on_application_parameter_changed(self, name: str, value) -> None:
+        if name == ParameterKey.MI_LAND_CONFIRM:
+            self.manual_land_detector.confirm_s = float(value)
+        elif name == ParameterKey.FS_LAND_ALT:
+            self.manual_land_detector.land_altitude_m = float(value)
+        elif name == ParameterKey.FS_LAND_VSPEED:
+            self.manual_land_detector.land_vertical_speed_m_s = float(value)
 
     def __load_drone_interface(self):
         """Create and start betaflight msp adapter"""
@@ -240,9 +253,16 @@ class App:
             config=config,
             on_rc=self.__handle_joy_rc,
             on_timeout=self._joystick_fs_enter,
-            on_resume=self.__joystick_fs_exit
+            on_resume=self.__joystick_fs_exit,
+            on_failure=self._joystick_listener_failed,
         )
-        joy_adapter.start()
+        self.controllers[RobotState.MANUAL] = joy_adapter
+        try:
+            joy_adapter.start()
+        except MavlinkListenerError as exc:
+            raise AppStartupError(
+                f"Unable to start joystick MAVLink listener: {exc}"
+            ) from exc
         log.info(f"------------------------- {config}")
         # joy_adapter = joy_zmq_adapter.JoyZmqAdapter(self.__params)
         # joy_adapter.start()
@@ -251,7 +271,6 @@ class App:
         # joy_adapter.on_interrupt += self.__handle_joy_interrupt
         # TODO: convert to const and mapping
         # self.register_joy_interrupt(joy_adapter)
-        self.controllers[RobotState.MANUAL] = joy_adapter
         log.info("load joy adapter")
         #endregion
 
@@ -317,7 +336,7 @@ class App:
                 self._reset_manual_land_detector()
 
             case RobotState.ALT_HOLD:
-                base_line = self.__params.get(ParameterKey.HOVER_BASELINE)
+                base_line = self.__params.get(ParameterKey.HOV_BASELINE)
                 self.controllers[RobotState.ALT_HOLD].reset_setpoint(self.ctx.drone_alt)
                 self.controllers[RobotState.ALT_HOLD].set_baseline(base_line)# AETR1234.THROTTLE
                 self.mavlink_service.send_named_value_to_gcs(
@@ -328,7 +347,7 @@ class App:
 
             case RobotState.FAILSAFE:
                 # set the failsafe controller setpoint to the current altitude
-                base_line = self.__params.get(ParameterKey.HOVER_BASELINE)
+                base_line = self.__params.get(ParameterKey.HOV_BASELINE)
                 self.controllers[RobotState.FAILSAFE].reset(self.ctx.drone_alt)
                 self.controllers[RobotState.FAILSAFE].set_baseline(base_line)# AETR1234.THROTTLE 
                 self.mavlink_service.send_named_value_to_gcs(
@@ -373,13 +392,44 @@ class App:
         
 
     
-    def _joystick_fs_enter(self, event: NoCommunicationEvent):
-        log.warning("Joystick Failsafe Entered")
+    def _enter_joystick_failsafe(self) -> None:
+        """Clear stale joystick intent and request application failsafe."""
+        safe_channels = DEFAULT_RC_CHANNELS.copy()
+        self._last_rc_channel = safe_channels
+        self.ctx.request_rc = safe_channels.copy()
         self.ctx.joy_fail_safe = True
+        self.ctx.joy_takeoff_request = False
+        self.ctx.joy_manual_request = False
+        self.ctx.joy_arm_requested = False
+        self.ctx.armed_allowed = False
+        self.ctx.arm_switch = False
+        self.ctx.auto_mode_enable = False
+
+    def _joystick_fs_enter(self, event: NoCommunicationEvent):
+        log.warning(
+            "Joystick failsafe entered stage={} timeout_s={}",
+            event.stage,
+            event.timeout_s,
+        )
+        self._enter_joystick_failsafe()
+
+    def _joystick_listener_failed(self, error: MavlinkListenerError) -> None:
+        log.error("Joystick MAVLink listener failed: {}", error)
+        self._enter_joystick_failsafe()
 
     def __joystick_fs_exit(self, event: CommunicationResumedEvent):
-        log.warning("Joystick Failsafe Exited")
+        log.info(
+            "Joystick communication resumed previous_stage={}",
+            event.previous_stage,
+        )
         self.ctx.joy_fail_safe = False
+
+    def _dispatch_pending_joystick_events(self) -> None:
+        """Apply listener events on the application control-loop thread."""
+        listener = getattr(self, "controllers", {}).get(RobotState.MANUAL)
+        dispatch_pending = getattr(listener, "dispatch_pending", None)
+        if dispatch_pending is not None:
+            dispatch_pending()
 
     def _update_state_from_joystick(self):
         """
@@ -443,7 +493,7 @@ class App:
         - triggrt takeoff_reach flag
         """
         
-        setpoint = self.__params.get(ParameterKey.TAKEOFF_ALTITUDE)
+        setpoint = self.__params.get(ParameterKey.TAKEOFF_ALT)
         #TODO: setpoint is alt_ref + setpoint validate again the start alt is zero
         rc = self.controllers[RobotState.TAKEOFF].update(setpoint, self.ctx.drone_alt)
         # time 
@@ -747,6 +797,7 @@ class App:
         try:
             while not self._stop_event.is_set():
                 self._raise_if_msp_failed()
+                self._dispatch_pending_joystick_events()
                 self.__update_state()
                 self._update_controllers()
                 self._notification_center()

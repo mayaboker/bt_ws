@@ -45,20 +45,27 @@ class JoyZmqAdapter:
         self.on_interrupt = Event()
         self.__interrupt_mask = []
         self.server_timeout_s = self._load_server_timeout_s(params)
+        parameter_event = getattr(params, "on_parameter_changed", None)
+        if parameter_event is not None:
+            parameter_event.subscribe(self.on_parameter_changed)
         self._server_seen = False
         self._server_timed_out = False
         self._last_message_at: float | None = None
 
     def _load_server_timeout_s(self, params) -> float:
         try:
-            return params.get(ParameterKey.JOYSTICK_SERVER_TIMEOUT_S)
+            return params.get(ParameterKey.JOY_TIMEOUT)
         except (AttributeError, KeyError):
             return params.declare(
-                ParameterKey.JOYSTICK_SERVER_TIMEOUT_S,
+                ParameterKey.JOY_TIMEOUT,
                 DEFAULT_SERVER_TIMEOUT_S,
                 {"min": 0.1, "max": 10.0},
                 "float",
             )
+
+    def on_parameter_changed(self, name: str, value: Any) -> None:
+        if name == ParameterKey.JOY_TIMEOUT:
+            self.server_timeout_s = float(value)
 
     def __check_for_interrupt(self, current):
         """

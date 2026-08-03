@@ -11,6 +11,8 @@ from pymavlink import mavutil
 
 from bt_app.common import MavSeverity
 from bt_app.context import Context
+from bt_app.parameters.mavlink import MavlinkParameterProtocol, MavlinkParameterResponse
+from bt_app.parameters.service import ParameterService
 from bt_app.scheduler import Command, CommandScheduler, SchedulerContext
 
 
@@ -120,11 +122,25 @@ class SendTextToGcsCommand(Command):
         self.service._send_text_to_gcs(self.text, self.severity)
 
 
+@dataclass
+class SendProtocolMessageCommand(Command):
+    key: ClassVar[str | None] = None
+    service: "MavlinkService"
+    response: MavlinkParameterResponse
+
+    def execute(self, context: SchedulerContext) -> None:
+        self.service._send_message_to(
+            self.response.message,
+            self.response.destination,
+        )
+
+
 class MavlinkService:
     def __init__(
         self,
         *,
         context: Context,
+        parameter_service: ParameterService | None = None,
         qopenhd_addr=QOPENHD_ADDR,
         local_addr=LOCAL_ADDR,
         heartbeat_interval_s: float = 1.0,
@@ -141,13 +157,30 @@ class MavlinkService:
         self.global_position_interval_s = global_position_interval_s
         self.sys_status_interval_s = sys_status_interval_s
         self.rc_channels_interval_s = rc_channels_interval_s
-        self.v2_extension_channel_status_interval_s = v2_extension_channel_status_interval_s
+        self.v2_extension_channel_status_interval_s = (
+            v2_extension_channel_status_interval_s
+        )
         self.poll_interval_s = poll_interval_s
         self._started = False
         self._socket = None
         self._boot_time_s = time.monotonic()
-        self._mav = mavutil.mavlink.MAVLink(None, srcSystem=SYS_ID, srcComponent=COMP_ID)
+        self._mav = mavutil.mavlink.MAVLink(
+            None, srcSystem=SYS_ID, srcComponent=COMP_ID
+        )
         self._parser = mavutil.mavlink.MAVLink(None)
+        self._parser.robust_parsing = True
+        self._parameter_protocol = (
+            MavlinkParameterProtocol(
+                service=parameter_service,
+                mav=self._mav,
+                system_id=SYS_ID,
+                component_id=COMP_ID,
+                gcs_addr=self.qopenhd_addr,
+                is_armed=lambda: bool(self.context.armed),
+            )
+            if parameter_service is not None
+            else None
+        )
         self._scheduler = CommandScheduler(
             context=self.context,
             on_error=lambda exc, command: log.exception(
@@ -188,7 +221,7 @@ class MavlinkService:
         #     interval_s=self.v2_extension_channel_status_interval_s,
         #     key=SendChannelStatusV2ExtensionCommand.key,
         # )
-      
+
         self._scheduler.schedule(
             ReceivePendingCommand(self),
             interval_s=self.poll_interval_s,
@@ -212,7 +245,6 @@ class MavlinkService:
         severity: int = MavSeverity.INFO,
     ) -> None:
         self._scheduler.submit(SendTextToGcsCommand(self, text, severity))
-
 
     def send_named_value_to_gcs(self, name, value):
         self._scheduler.submit(NamedValueFloatCommand(self, name, value))
@@ -300,7 +332,9 @@ class MavlinkService:
 
         AETR_CHANNELS = 4
         COMMAND_CHANNELS = 18
-        channels = tuple(int(channel) for channel in getattr(self.context, "drone_rc", ()))
+        channels = tuple(
+            int(channel) for channel in getattr(self.context, "drone_rc", ())
+        )
         channel_count = min(len(channels), AETR_CHANNELS)
         raw_channels = [MAX_UINT16] * COMMAND_CHANNELS
         raw_channels[:channel_count] = channels[:channel_count]
@@ -346,18 +380,12 @@ class MavlinkService:
             self._make_channel_status_payload(),
         )
 
-    def _send_named_value_float(
-        self,
-        named: str,
-        value: float
-    ) -> None:
+    def _send_named_value_float(self, named: str, value: float) -> None:
         if self._socket is None:
             return
 
         msg = self._mav.named_value_float_encode(
-            self._time_boot_ms(),
-            self._named_value_name_bytes(named),
-            value
+            self._time_boot_ms(), self._named_value_name_bytes(named), value
         )
         self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
 
@@ -386,10 +414,30 @@ class MavlinkService:
         except BlockingIOError:
             return
 
-        for byte in data:
-            msg = self._parser.parse_char(bytes([byte]))
-            # if msg is not None:
-            #     log.debug("Received MAVLink: {} from {}", msg.get_type(), addr)
+        try:
+            for byte in data:
+                msg = self._parser.parse_char(bytes([byte]))
+                if msg is not None and self._parameter_protocol is not None:
+                    self._schedule_protocol_responses(
+                        self._parameter_protocol.handle(msg, addr)
+                    )
+        except mavutil.mavlink.MAVError as exc:
+            log.warning("Discarding malformed MAVLink packet from {}: {}", addr, exc)
+
+    def _schedule_protocol_responses(
+        self,
+        responses: list[MavlinkParameterResponse],
+    ) -> None:
+        for response in responses:
+            self._scheduler.submit(
+                SendProtocolMessageCommand(self, response),
+                delay_s=response.delay_s,
+            )
+
+    def _send_message_to(self, message, destination: tuple[str, int]) -> None:
+        if self._socket is None:
+            return
+        self._socket.sendto(message.pack(self._mav), destination)
 
     def _time_boot_ms(self) -> int:
         return int((time.monotonic() - self._boot_time_s) * 1000.0) & 0xFFFFFFFF

@@ -9,7 +9,7 @@ class FakeParams:
 
     def declare(self, name, default, limits=None, value_type=None):
         self.declared.append((name, default, limits, value_type))
-        if name == ParameterKey.JOYSTICK_SERVER_TIMEOUT_S:
+        if name == ParameterKey.JOY_TIMEOUT:
             return self.timeout_s
         return default
 
@@ -20,13 +20,21 @@ class ExistingParamStore:
         self.declare_called = False
 
     def get(self, name):
-        if name == ParameterKey.JOYSTICK_SERVER_TIMEOUT_S:
+        if name == ParameterKey.JOY_TIMEOUT:
             return self.timeout_s
         raise KeyError(name)
 
     def declare(self, name, default, limits=None, value_type=None):
         self.declare_called = True
         return default
+
+
+class FakeParameterEvent:
+    def __init__(self):
+        self.subscribers = []
+
+    def subscribe(self, callback):
+        self.subscribers.append(callback)
 
 
 def test_existing_timeout_parameter_is_read_without_redeclare():
@@ -36,6 +44,16 @@ def test_existing_timeout_parameter_is_read_without_redeclare():
 
     assert adapter.server_timeout_s == 0.75
     assert params.declare_called is False
+
+
+def test_timeout_parameter_change_applies_live():
+    params = ExistingParamStore()
+    params.on_parameter_changed = FakeParameterEvent()
+    adapter = JoyZmqAdapter(params)
+
+    params.on_parameter_changed.subscribers[0](ParameterKey.JOY_TIMEOUT, 2.5)
+
+    assert adapter.server_timeout_s == 2.5
 
 
 def test_server_timeout_is_not_reported_before_first_valid_message():

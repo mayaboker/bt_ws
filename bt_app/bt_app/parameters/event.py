@@ -2,9 +2,12 @@ from collections.abc import Callable
 from threading import Lock
 from typing import Generic, TypeVar
 
+from loguru import logger
+
 
 K = TypeVar("K")
 V = TypeVar("V")
+
 
 class Event(Generic[K, V]):
     """Small thread-safe callback event for non-Qt model notifications.
@@ -25,4 +28,13 @@ class Event(Generic[K, V]):
             subscribers = tuple(self._subscribers)
 
         for callback in subscribers:
-            callback(name, value)
+            try:
+                callback(name, value)
+            except Exception as exc:
+                logger.exception(
+                    "Parameter callback {} failed for {}={}: {}",
+                    getattr(callback, "__qualname__", repr(callback)),
+                    name,
+                    value,
+                    exc,
+                )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any
 
 
@@ -8,8 +9,8 @@ SUPPORTED_PARAMETER_TYPES = {
     "bool": bool,
     "float": float,
     "int": int,
-    "str": str,
 }
+PARAMETER_NAME_PATTERN = re.compile(r"[A-Z][A-Z0-9_]{0,15}\Z")
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ class ParameterDefinition:
 
     @classmethod
     def from_config(cls, name: str, config: dict[str, Any]) -> "ParameterDefinition":
+        cls._validate_name(name)
         if "default" not in config:
             raise ValueError(f"Parameter {name} is missing a default value")
 
@@ -74,6 +76,7 @@ class ParameterDefinition:
         limits: ParameterLimits,
         value_type: type | str | None = None,
     ) -> "ParameterDefinition":
+        cls._validate_name(name)
         resolved_type = cls._resolve_type(name, value_type, default)
         definition = cls(
             name=name,
@@ -85,7 +88,9 @@ class ParameterDefinition:
         return definition
 
     @staticmethod
-    def _resolve_type(name: str, configured_type: type | str | None, default: Any) -> type:
+    def _resolve_type(
+        name: str, configured_type: type | str | None, default: Any
+    ) -> type:
         if isinstance(configured_type, type):
             return configured_type
 
@@ -100,6 +105,14 @@ class ParameterDefinition:
                 ) from exc
 
         return type(default)
+
+    @staticmethod
+    def _validate_name(name: str) -> None:
+        if PARAMETER_NAME_PATTERN.fullmatch(name) is None:
+            raise ValueError(
+                f"Parameter name must be an uppercase MAVLink ID of at most "
+                f"16 characters: {name!r}"
+            )
 
     def validate(self, value: Any) -> None:
         if not self._matches_type(value):
