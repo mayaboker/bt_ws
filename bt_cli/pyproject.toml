@@ -8,7 +8,7 @@ version = "0.0.1"
 description = "BTI command line interface"
 requires-python = ">=3.10"
 dependencies = [
-    "pyzmq",
+    "pymavlink>=2.4.49",
     "typer",
 ]
 
