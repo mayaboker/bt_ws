@@ -6,11 +6,8 @@ windows:
     shell_command_before:
       - echo "before"
     panes:
-      - shell_command: 
-          - printf '\033]2;%s\033\\' 'server'
-          - bt-joy-server run -c joy_config/server.yaml
-        focus: true
       - shell_command:
           - printf '\033]2;%s\033\\' 'client'
-          - bt-joy run -c joy_config/interlink.yaml
+          - printf 'check boxer model: usb-all-se'
+          - bt-joy run -c output/boxer.yaml
       

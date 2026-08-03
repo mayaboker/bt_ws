@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+#region
 from collections.abc import Callable
 import threading
 
@@ -13,7 +12,9 @@ from bt_joy.server.mavlink import (
     RcChannelsOverrideEvent,
 )
 
+#endregion
 
+#region errors
 class MavlinkListenerError(RuntimeError):
     """Report a MAVLink listener startup or runtime failure."""
 
@@ -24,7 +25,7 @@ class MavlinkListenerError(RuntimeError):
 
 class MavlinkListenerShutdownError(MavlinkListenerError):
     """Report a listener thread that could not be stopped cleanly."""
-
+#endregion
 
 class MavlinkListenerService:
     """Run a MAVLink listener and dispatch its events on the caller thread."""
@@ -189,6 +190,18 @@ class MavlinkListenerService:
                 self._on_failure(event)
 
     def _run(self) -> None:
+        """Own the listener lifecycle inside the background thread.
+
+        Open the MAVLink connection, signal :meth:`start` when initialization
+        has completed, and process incoming messages until :meth:`stop`
+        requests termination.  Runtime failures are recorded for later
+        dispatch on the application thread; exceptions caused by an active
+        stop request are treated as expected receive-loop interruption.
+
+        The ready event is always set so a failed startup cannot leave
+        :meth:`start` blocked, and the listener connection is always closed.
+        Any close failure is retained for :meth:`stop` to report.
+        """
         listener = self.listener
         if listener is None:
             self._record_failure(

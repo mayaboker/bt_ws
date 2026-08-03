@@ -1,6 +1,8 @@
 """
 Application entry point
 """
+
+#region
 import pathlib
 import signal
 import threading
@@ -59,7 +61,7 @@ from bt_joy.server.mavlink import (
     NoCommunicationEvent,
     CommunicationResumedEvent
 )
-
+#endregion
 
 FCU_CONNECT_ATTEMPTS = 3
 FCU_CONNECT_RETRY_DELAY_S = 1.0
@@ -371,10 +373,6 @@ class App:
         self.ctx.joy_manual_request = self._last_rc_channel[InternalJoy.MANUAL] == RC_MIN
         # self.ctx.auto_mode_type = AutoModeType(self._last_rc_channel[AETR1234.AUX2])
         self.ctx.auto_mode_enable = self._last_rc_channel[InternalJoy.ENABLER] == RC_MAX
-        
-        
-        
-        # print(current)
         
         self.ctx.arm_switch = self._last_rc_channel[InternalJoy.ARM] == RC_MAX
         throttle_for_arm = self._last_rc_channel[InternalJoy.THROTTLE] < 1050
