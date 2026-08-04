@@ -10,6 +10,7 @@ from bt_app.app import App
 from bt_app.common import RobotState
 from bt_app.context import Context
 from bt_app.mavlink_wrapper import (
+    AttitudeCommand,
     GlobalPositionIntCommand,
     HeartbeatCommand,
     MavlinkService,
@@ -253,6 +254,25 @@ def test_global_position_int_command_sends_global_position():
     GlobalPositionIntCommand(service).execute(service.context)
 
     assert socket.sent
+
+
+def test_attitude_reads_context_orientation_in_radians():
+    ctx = Context()
+    ctx.drone_roll_deg = 10.0
+    ctx.drone_pitch_deg = -5.0
+    ctx.drone_heading_deg = 90.0
+    service = MavlinkService(context=ctx)
+    socket = FakeSocket()
+    service._socket = socket
+
+    AttitudeCommand(service).execute(service.context)
+
+    payload, _addr = socket.sent[0]
+    msg = decode_mavlink(payload)
+    assert msg.get_type() == "ATTITUDE"
+    assert msg.roll == pytest.approx(0.17453, abs=1e-4)
+    assert msg.pitch == pytest.approx(-0.08727, abs=1e-4)
+    assert msg.yaw == pytest.approx(1.5708, abs=1e-4)
 
 
 def test_sys_status_reads_context_battery_voltage():

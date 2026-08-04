@@ -49,6 +49,8 @@ STATE_NAMES = {
     STATE_TAKEOFF: "TAKEOFF",
     STATE_ALT_HOLD: "ALT_HOLD",
 }
+ANSI_BOLD_CYAN = "\033[1;36m"
+ANSI_RESET = "\033[0m"
 
 
 class ScenarioError(RuntimeError):
@@ -335,8 +337,14 @@ class MavlinkRcScenario:
                 return
             for byte in payload:
                 message = self._parser.parse_char(bytes([byte]))
-                if message is not None and self.telemetry.consume(message):
-                    self._phase(self.telemetry.describe())
+                if message is not None:
+                    previous_state = self.telemetry.state
+                    if self.telemetry.consume(message):
+                        state_changed = self.telemetry.state != previous_state
+                        self._phase(
+                            self.telemetry.describe(),
+                            color=ANSI_BOLD_CYAN if state_changed else None,
+                        )
 
     def _send_for(self, channels: Sequence[int], duration_s: float) -> None:
         deadline = time.monotonic() + duration_s
@@ -363,8 +371,11 @@ class MavlinkRcScenario:
             self._socket = None
 
     @staticmethod
-    def _phase(message: str) -> None:
-        print(f"{time.strftime('%H:%M:%S')} - {message}", flush=True)
+    def _phase(message: str, color: str | None = None) -> None:
+        line = f"{time.strftime('%H:%M:%S')} - {message}"
+        if color:
+            line = f"{color}{line}{ANSI_RESET}"
+        print(line, flush=True)
 
 
 def build_parser() -> argparse.ArgumentParser:

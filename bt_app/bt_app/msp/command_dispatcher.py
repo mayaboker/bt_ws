@@ -16,6 +16,7 @@ RcChannels = tuple[int, int, int, int, int, int, int, int]
 StateCallback = Callable[[dict[str, object]], None]
 AltitudeCallback = Callable[[dict[str, float]], None]
 BatteryCallback = Callable[[dict[str, int | float]], None]
+AttitudeCallback = Callable[[dict[str, float | int]], None]
 ErrorCallback = Callable[["MspCommandExecutionError"], None]
 CommandCallback = Callable[["MspCommandDispatcher", Any], None]
 
@@ -96,6 +97,18 @@ class ReadBatteryCommand(MspCommand):
 
 
 @dataclass
+class ReadAttitudeCommand(MspCommand):
+    key: ClassVar[str | None] = "attitude"
+    repeat_interval_s: float | None = None
+
+    def execute(self, dispatcher: "MspCommandDispatcher") -> dict[str, float | int]:
+        dispatcher.last_attitude = dispatcher.msp.read_attitude()
+        if dispatcher.on_attitude is not None:
+            dispatcher.on_attitude(dispatcher.last_attitude)
+        return dispatcher.last_attitude
+
+
+@dataclass
 class ReadRCCommand(MspCommand):
     #TODO: move the names to class commands
     key: ClassVar[str | None] = "current_rc"
@@ -167,16 +180,19 @@ class MspCommandDispatcher:
         on_state: StateCallback | None = None,
         on_altitude: AltitudeCallback | None = None,
         on_battery: BatteryCallback | None = None,
+        on_attitude: AttitudeCallback | None = None,
         on_error: ErrorCallback | None = None,
     ) -> None:
         self.msp = msp
         self.on_state = on_state
         self.on_altitude = on_altitude
         self.on_battery = on_battery
+        self.on_attitude = on_attitude
         self.current_channels = self.normalize_channels(initial_channels)
         self.last_state: dict[str, object] | None = None
         self.last_altitude: dict[str, float] | None = None
         self.last_battery: dict[str, int | float] | None = None
+        self.last_attitude: dict[str, float | int] | None = None
         self.last_rc: list[int] | None = None
         self._on_error = on_error
         self._stop_event = threading.Event()
@@ -269,6 +285,9 @@ class MspCommandDispatcher:
 
     def schedule_battery(self, interval_s: float = 2.0) -> None:
         self.schedule(ReadBatteryCommand(), interval_s=interval_s)
+
+    def schedule_attitude(self, interval_s: float = 0.5) -> None:
+        self.schedule(ReadAttitudeCommand(), interval_s=interval_s)
 
     def schedule_rc(self, interval_s: float = 0.1) -> None:
         self.schedule(ReadRCCommand(), interval_s=interval_s)

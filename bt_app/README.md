@@ -57,6 +57,19 @@ then returns to MANUAL and controls vertical speed to a 1 m/s descent before
 touchdown and disarm. The descent controller may command above the 1660 hover
 throttle, up to 1800, to brake excessive downward speed.
 
+To test automatic takeoff followed by clockwise and counter-clockwise yaw turns
+in ALT_HOLD, run:
+
+```bash
+uv run python example/send_rc_auto_yaw.py
+```
+
+The script uses a conservative yaw input of 1650 (approximately 10 degrees per
+second), publishes MSP attitude through MAVLink, and accumulates wrapped heading
+changes until each measured turn reaches 360 degrees. It centers yaw between
+turns, then performs the controlled 1 m/s MANUAL descent and disarms after
+touchdown. State transitions are printed in bold cyan.
+
 ## Usage
 
 Radiomaster BOXER config

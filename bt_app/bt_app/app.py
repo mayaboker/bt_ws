@@ -466,6 +466,11 @@ class App:
         if altitude and "vertical_speed_m_s" in altitude:
             self.ctx.drone_vertical_speed = altitude["vertical_speed_m_s"]
             self.ctx.drone_alt_received_at_s = altitude.get("received_at_s", 0.0)
+        attitude = self.drone_adapter.dispatcher.last_attitude
+        if attitude:
+            self.ctx.drone_roll_deg = float(attitude.get("roll_deg", 0.0))
+            self.ctx.drone_pitch_deg = float(attitude.get("pitch_deg", 0.0))
+            self.ctx.drone_heading_deg = float(attitude.get("heading_deg", 0.0))
         ## read last drone rc
         rc = self.drone_adapter.get_rc()
         if rc:

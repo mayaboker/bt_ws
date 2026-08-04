@@ -40,6 +40,9 @@ class Context:
     drone_alt: float = 0.0
     drone_vertical_speed: float = 0.0
     drone_alt_received_at_s: float = 0.0
+    drone_roll_deg: float = 0.0
+    drone_pitch_deg: float = 0.0
+    drone_heading_deg: float = 0.0
     #current rc read from drone (use to switch between external and internal pilot and controller switch)
     drone_rc: list = field(default_factory=lambda: DEFAULT_RC_CHANNELS.copy())
     # last joystick rc state
@@ -86,6 +89,9 @@ class Context:
         self.drone_alt = 0.0
         self.drone_vertical_speed = 0.0
         self.drone_alt_received_at_s = 0.0
+        self.drone_roll_deg = 0.0
+        self.drone_pitch_deg = 0.0
+        self.drone_heading_deg = 0.0
         self.drone_rc = DEFAULT_RC_CHANNELS.copy()
         self.request_rc = DEFAULT_RC_CHANNELS.copy()
         self.sent_rc = DEFAULT_RC_CHANNELS.copy()

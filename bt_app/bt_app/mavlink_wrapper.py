@@ -3,6 +3,7 @@
 import socket
 import struct
 import time
+import math
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -22,6 +23,7 @@ LOCAL_ADDR = ("0.0.0.0", 14551)
 SYS_ID = 1
 COMP_ID = mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1
 GLOBAL_POSITION_INT_INTERVAL_S = 0.5
+ATTITUDE_INTERVAL_S = 0.5
 SYS_STATUS_INTERVAL_S = 2.0
 RC_CHANNELS_INTERVAL_S = 0.5
 V2_EXTENSION_CHANNEL_STATUS_INTERVAL_S = 0.1
@@ -62,6 +64,15 @@ class GlobalPositionIntCommand(Command):
 
     def execute(self, context: SchedulerContext) -> None:
         self.service._send_global_position_int()
+
+
+@dataclass
+class AttitudeCommand(Command):
+    key: ClassVar[str | None] = "mavlink_attitude"
+    service: "MavlinkService"
+
+    def execute(self, context: SchedulerContext) -> None:
+        self.service._send_attitude()
 
 
 @dataclass
@@ -145,6 +156,7 @@ class MavlinkService:
         local_addr=LOCAL_ADDR,
         heartbeat_interval_s: float = 1.0,
         global_position_interval_s: float = GLOBAL_POSITION_INT_INTERVAL_S,
+        attitude_interval_s: float = ATTITUDE_INTERVAL_S,
         sys_status_interval_s: float = SYS_STATUS_INTERVAL_S,
         rc_channels_interval_s: float = RC_CHANNELS_INTERVAL_S,
         v2_extension_channel_status_interval_s: float = V2_EXTENSION_CHANNEL_STATUS_INTERVAL_S,
@@ -155,6 +167,7 @@ class MavlinkService:
         self.local_addr = local_addr
         self.heartbeat_interval_s = heartbeat_interval_s
         self.global_position_interval_s = global_position_interval_s
+        self.attitude_interval_s = attitude_interval_s
         self.sys_status_interval_s = sys_status_interval_s
         self.rc_channels_interval_s = rc_channels_interval_s
         self.v2_extension_channel_status_interval_s = (
@@ -205,6 +218,11 @@ class MavlinkService:
             GlobalPositionIntCommand(self),
             interval_s=self.global_position_interval_s,
             key=GlobalPositionIntCommand.key,
+        )
+        self._scheduler.schedule(
+            AttitudeCommand(self),
+            interval_s=self.attitude_interval_s,
+            key=AttitudeCommand.key,
         )
         self._scheduler.schedule(
             SysStatusCommand(self),
@@ -297,6 +315,20 @@ class MavlinkService:
             0,
             0,
             UNKNOWN_GLOBAL_POSITION_HEADING,
+        )
+        self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
+
+    def _send_attitude(self) -> None:
+        if self._socket is None:
+            return
+        msg = self._mav.attitude_encode(
+            self._time_boot_ms(),
+            math.radians(float(self.context.drone_roll_deg)),
+            math.radians(float(self.context.drone_pitch_deg)),
+            math.radians(float(self.context.drone_heading_deg)),
+            0.0,
+            0.0,
+            0.0,
         )
         self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
 

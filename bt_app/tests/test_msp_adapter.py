@@ -45,6 +45,9 @@ class FakeDispatcher:
     def schedule_battery(self, interval_s):
         self.scheduled.append(("battery", interval_s))
 
+    def schedule_attitude(self, interval_s):
+        self.scheduled.append(("attitude", interval_s))
+
     def schedule_rc(self, interval_s):
         self.scheduled.append(("rc", interval_s))
 
@@ -71,6 +74,7 @@ def test_msp_adapter_schedules_battery_at_0_5_hz(monkeypatch):
 
     assert adapter.msp.opened
     assert ("battery", 2.0) in adapter.dispatcher.scheduled
+    assert ("attitude", 0.5) in adapter.dispatcher.scheduled
     assert adapter.dispatcher.started
 
 

@@ -5,6 +5,7 @@ import pytest
 from bt_app.msp.command_dispatcher import (
     MspCommandDispatcher,
     MspCommandExecutionError,
+    ReadAttitudeCommand,
     ReadBatteryCommand,
 )
 
@@ -19,6 +20,23 @@ class FakeMsp:
 
     def read_battery_state(self):
         return self.battery
+
+    def read_attitude(self):
+        return {"roll_deg": 1.5, "pitch_deg": -2.5, "heading_deg": 90}
+
+
+def test_read_attitude_command_updates_latest_attitude():
+    callback_results = []
+    dispatcher = MspCommandDispatcher(
+        FakeMsp(),
+        on_attitude=callback_results.append,
+    )
+
+    result = ReadAttitudeCommand().execute(dispatcher)
+
+    assert result == {"roll_deg": 1.5, "pitch_deg": -2.5, "heading_deg": 90}
+    assert dispatcher.last_attitude == result
+    assert callback_results == [result]
 
 
 def test_read_battery_command_updates_last_battery_and_callback():
