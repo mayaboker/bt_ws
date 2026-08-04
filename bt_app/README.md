@@ -86,6 +86,20 @@ script logs commanded roll, measured attitude, derived roll rate, peak roll,
 and altitude span. It enforces roll and altitude safety limits, waits for
 centered recovery, then descends at 1 m/s and disarms.
 
+To run the same balanced maneuver on the pitch axis, run:
+
+```bash
+uv run python example/send_rc_auto_pitch.py
+```
+
+The pitch joystick command is restricted to RC 1400–1600. The default uses a
+16-second raised-cosine profile through center → forward → center → backward →
+center → forward → center. This removes abrupt reversals while preserving the
+balanced negative/positive/negative command areas. Larger pitch amplitudes are
+rejected before flight rather than relying only on the measured-angle cutoff.
+It logs pitch angle, derived pitch rate, roll, yaw, altitude, peak pitch, and
+altitude span while enforcing 25-degree pitch and 1 m altitude-drift limits.
+
 ## Usage
 
 Radiomaster BOXER config
