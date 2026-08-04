@@ -195,7 +195,8 @@ class AutoYawScenario(ManualReentryScenario):
                     delta = (current_yaw - previous_yaw + 180.0) % 360.0 - 180.0
                     accumulated_deg += delta
                     self._phase(
-                        f"{label} yaw progress={accumulated_deg:+.1f} deg "
+                        f"{label} yaw command_rc={commanded_yaw_rc} "
+                        f"progress={accumulated_deg:+.1f} deg "
                         f"heading={current_yaw:.1f} deg"
                     )
                     if abs(accumulated_deg) >= self.turn_angle_deg:

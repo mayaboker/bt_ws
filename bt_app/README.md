@@ -68,7 +68,23 @@ The script uses a conservative yaw input of 1650 (approximately 10 degrees per
 second), publishes MSP attitude through MAVLink, and accumulates wrapped heading
 changes until each measured turn reaches 360 degrees. It centers yaw between
 turns, then performs the controlled 1 m/s MANUAL descent and disarms after
-touchdown. State transitions are printed in bold cyan.
+touchdown. State transitions are printed in bold cyan. `--cw-yaw-rc` controls
+the simulated joystick input; `--yaw-rate` is an expected-rate value used for
+timing and diagnostics, while the application controller still enforces its
+configured `HY_MAX_RATE`, deadband, and expo.
+
+To test a conservative balanced roll maneuver after automatic takeoff, run:
+
+```bash
+uv run python example/send_rc_auto_roll.py
+```
+
+The default ALT_HOLD pattern commands roll RC 1300 left for two seconds, 1700
+right for four seconds, then 1300 left for two seconds before centering. This
+L-R-L impulse approximately cancels lateral velocity and displacement. The
+script logs commanded roll, measured attitude, derived roll rate, peak roll,
+and altitude span. It enforces roll and altitude safety limits, waits for
+centered recovery, then descends at 1 m/s and disarms.
 
 ## Usage
 
