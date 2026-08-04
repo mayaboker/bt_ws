@@ -77,6 +77,7 @@ class ReadAltitudeCommand(MspCommand):
 
     def execute(self, dispatcher: "MspCommandDispatcher") -> dict[str, float]:
         dispatcher.last_altitude = dispatcher.msp.read_altitude()
+        dispatcher.last_altitude["received_at_s"] = time.monotonic()
         if dispatcher.on_altitude is not None:
             dispatcher.on_altitude(dispatcher.last_altitude)
         return dispatcher.last_altitude

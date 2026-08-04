@@ -67,6 +67,10 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.ALT_OUT_LIMIT))
 
     @property
+    def takeoff_rate(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TAKEOFF_RATE))
+
+    @property
     def hov_kp(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.HOV_KP))
 

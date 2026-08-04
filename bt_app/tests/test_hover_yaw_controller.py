@@ -88,7 +88,7 @@ def test_throttle_inside_enlarged_deadband_does_not_change_setpoint(monkeypatch)
 
 
 def test_high_throttle_increases_setpoint(monkeypatch):
-    controller = controller_with_times(monkeypatch, [0.0, 0.0, 1.0])
+    controller = controller_with_times(monkeypatch, [0.0, 0.0, 0.0, 1.0])
     controller.reset_setpoint(3.0)
 
     controller.update_setpoint_from_throttle(2000)
@@ -116,7 +116,7 @@ def test_altitude_setpoint_request_event_fires_when_throttle_exits_deadband(monk
 
 
 def test_low_throttle_decreases_setpoint_but_not_below_min_altitude(monkeypatch):
-    controller = controller_with_times(monkeypatch, [0.0, 0.0, 2.0])
+    controller = controller_with_times(monkeypatch, [0.0, 0.0, 0.0, 2.0])
     controller.reset_setpoint(3.0)
 
     controller.update_setpoint_from_throttle(1000)
@@ -132,6 +132,34 @@ def test_centered_yaw_stick_outputs_mid_yaw(monkeypatch):
 
     assert controller.yaw_rate == 0.0
     assert channels[RCChannel.YAW] == RC_MID
+
+
+def test_upward_vertical_speed_reduces_hover_throttle(monkeypatch):
+    controller = controller_with_times(monkeypatch, [0.0])
+    controller.update_pitch_roll(RC_MID, RC_MID)
+    controller.update(setpoint=2.0, current=1.0, altitude_sample_time_s=0.0)
+
+    channels = controller.update(
+        setpoint=2.0,
+        current=2.0,
+        altitude_sample_time_s=1.0,
+    )
+
+    assert channels[RCChannel.THROTTLE] == 1280
+
+
+def test_velocity_damping_is_included_in_hover_output_limit(monkeypatch):
+    controller = controller_with_times(monkeypatch, [0.0])
+    controller.on_parameter_changed(ParameterKey.HOV_OUT_LIMIT, 100.0)
+    controller.update(setpoint=2.0, current=0.0, altitude_sample_time_s=0.0)
+
+    channels = controller.update(
+        setpoint=2.0,
+        current=10.0,
+        altitude_sample_time_s=1.0,
+    )
+
+    assert channels[RCChannel.THROTTLE] == 1200
 
 
 def test_yaw_stick_inside_deadband_outputs_mid_yaw(monkeypatch):
@@ -201,17 +229,22 @@ def test_hover_handler_updates_setpoint_from_requested_throttle():
         def update_yaw_from_joystick(self, yaw_rc):
             self.yaw_rc = yaw_rc
 
+        def update_pitch_roll(self, pitch, roll):
+            pass
+
         def consume_altitude_setpoint_request_event(self):
             return False
 
-        def update(self, setpoint, current):
-            self.update_args = (setpoint, current)
+        def update(self, setpoint, current, altitude_sample_time_s):
+            self.update_args = (setpoint, current, altitude_sample_time_s)
             return [1500] * 8
 
     app = App.__new__(App)
     app.ctx = Context()
     app.ctx.state = RobotState.ALT_HOLD
     app.ctx.drone_alt = 4.2
+    app.ctx.drone_vertical_speed = 0.3
+    app.ctx.drone_alt_received_at_s = 123.0
     app.ctx.alt_setpoint = 5.0
     app.ctx.request_rc = [1500] * 8
     app.ctx.request_rc[AETR1234.THROTTLE] = 1800
@@ -223,7 +256,7 @@ def test_hover_handler_updates_setpoint_from_requested_throttle():
 
     assert hover_controller.throttle_rc == 1800
     assert hover_controller.yaw_rc == 1700
-    assert hover_controller.update_args == (5.0, 4.2)
+    assert hover_controller.update_args == (5.0, 4.2, 123.0)
     assert rc == [1500] * 8
 
 
@@ -239,13 +272,16 @@ def test_hover_handler_sends_low_severity_text_when_setpoint_request_starts():
         def update_yaw_from_joystick(self, yaw_rc):
             pass
 
+        def update_pitch_roll(self, pitch, roll):
+            pass
+
         def consume_altitude_setpoint_request_event(self):
             if not self.event_pending:
                 return False
             self.event_pending = False
             return True
 
-        def update(self, setpoint, current):
+        def update(self, setpoint, current, altitude_sample_time_s):
             return [1500] * 8
 
     class FakeMavlinkService:

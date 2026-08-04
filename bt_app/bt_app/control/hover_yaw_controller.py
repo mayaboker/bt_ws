@@ -21,7 +21,14 @@ class HoverYawController:
     def __init__(self, params: Parameters):
         self.params = params
         self._baseline = float(self.params.get(ParameterKey.HOV_BASELINE))
+        self._vertical_speed_gain = float(self.params.get(ParameterKey.HOV_KD))
+        self._output_limit = abs(float(self.params.get(ParameterKey.HOV_OUT_LIMIT)))
         self._setpoint = 0.0
+        self._pitch = RC_MID
+        self._roll = RC_MID
+        self._previous_altitude_m: float | None = None
+        self._previous_altitude_time_s: float | None = None
+        self._derived_vertical_speed_m_s = 0.0
         self.altitude_rate_m_s = self.params.get(ParameterKey.HOV_ALT_RATE)
         self.throttle_deadband = self.params.get(ParameterKey.HOV_THR_DB)
         self.min_altitude = self.params.get(ParameterKey.HOV_MIN_ALT)
@@ -42,7 +49,7 @@ class HoverYawController:
         self.alt_pid = PID(
             kp=self.params.get(ParameterKey.HOV_KP),
             ki=self.params.get(ParameterKey.HOV_KI),
-            kd=self.params.get(ParameterKey.HOV_KD),
+            kd=0.0,
             output_limits=self.params.get(ParameterKey.HOV_OUT_LIMIT),
         )
         
@@ -62,7 +69,11 @@ class HoverYawController:
         self._setpoint = max(float(value), float(self.min_altitude))
 
     def reset_setpoint(self, current_altitude: float) -> None:
+        self.alt_pid.reset()
         self.setpoint = current_altitude
+        self._previous_altitude_m = float(current_altitude)
+        self._previous_altitude_time_s = time.monotonic()
+        self._derived_vertical_speed_m_s = 0.0
         self._last_setpoint_update_s = time.monotonic()
         self._throttle_outside_deadband = False
         self._altitude_setpoint_request_event = False
@@ -137,13 +148,29 @@ class HoverYawController:
         self._baseline = current_throttle
 
 
-    def update(self, setpoint: float, current: float):
+    def update(
+        self,
+        setpoint: float,
+        current: float,
+        altitude_sample_time_s: float | None = None,
+    ):
         """
         if controller is not enabled, do nothing. On first run, initialize hover altitude from current altitude.
          Then read current altitude, compute throttle output from PID, compute yaw output from yaw_rate parameter, and send RC commands to MSP.
         """
-        throttle_output = int(self.alt_pid.update(setpoint, current))
-        throttle_output += self._baseline
+        now_s = time.monotonic()
+        sample_time_s = (
+            now_s
+            if altitude_sample_time_s is None
+            else float(altitude_sample_time_s)
+        )
+        vertical_speed_m_s = self._derive_vertical_speed(current, sample_time_s)
+        correction = (
+            self.alt_pid.update(setpoint, current)
+            - self._vertical_speed_gain * vertical_speed_m_s
+        )
+        correction = max(-self._output_limit, min(self._output_limit, correction))
+        throttle_output = int(self._baseline + correction)
         
         rc_yaw = self.rc_mapper.yaw_rate_to_rc(self.yaw_rate)
 
@@ -154,6 +181,26 @@ class HoverYawController:
         )
 
         return channels
+
+    def _derive_vertical_speed(self, altitude_m: float, now_s: float) -> float:
+        altitude_m = float(altitude_m)
+        if self._previous_altitude_m is None:
+            self._previous_altitude_m = altitude_m
+            self._previous_altitude_time_s = now_s
+            self._derived_vertical_speed_m_s = 0.0
+            return 0.0
+        previous_time_s = self._previous_altitude_time_s
+        if previous_time_s is not None and now_s <= previous_time_s:
+            return self._derived_vertical_speed_m_s
+
+        dt_s = 0.0 if previous_time_s is None else now_s - previous_time_s
+        if dt_s > 0.0:
+            self._derived_vertical_speed_m_s = (
+                altitude_m - self._previous_altitude_m
+            ) / dt_s
+        self._previous_altitude_m = altitude_m
+        self._previous_altitude_time_s = now_s
+        return self._derived_vertical_speed_m_s
 
     def make_channels(self, throttle: int = 0, yaw: int = 0) -> list[int]:
         channels = [RC_MID] * NO_RC_CHANNELS
@@ -172,8 +219,9 @@ class HoverYawController:
         elif name == ParameterKey.HOV_KI:
             self.alt_pid.ki = value
         elif name == ParameterKey.HOV_KD:
-            self.alt_pid.kd = value
+            self._vertical_speed_gain = float(value)
         elif name == ParameterKey.HOV_OUT_LIMIT:
+            self._output_limit = abs(float(value))
             self.alt_pid.set_output_limits(value)
         elif name == ParameterKey.HOV_ALT_RATE:
             self.altitude_rate_m_s = value

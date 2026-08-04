@@ -465,6 +465,7 @@ class App:
         altitude = self.drone_adapter.dispatcher.last_altitude
         if altitude and "vertical_speed_m_s" in altitude:
             self.ctx.drone_vertical_speed = altitude["vertical_speed_m_s"]
+            self.ctx.drone_alt_received_at_s = altitude.get("received_at_s", 0.0)
         ## read last drone rc
         rc = self.drone_adapter.get_rc()
         if rc:
@@ -493,7 +494,11 @@ class App:
         
         setpoint = self.__params.get(ParameterKey.TAKEOFF_ALT)
         #TODO: setpoint is alt_ref + setpoint validate again the start alt is zero
-        rc = self.controllers[RobotState.TAKEOFF].update(setpoint, self.ctx.drone_alt)
+        rc = self.controllers[RobotState.TAKEOFF].update(
+            setpoint,
+            self.ctx.drone_alt,
+            self.ctx.drone_alt_received_at_s,
+        )
         # time 
         self.ctx.takeoff_reach = self.controllers[RobotState.TAKEOFF].time_in_alt >= 1
 
@@ -529,7 +534,11 @@ class App:
             controller.update_pitch_roll(RC_MID, RC_MID)
 
             setpoint = controller.setpoint
-            rc = controller.update(setpoint, self.ctx.drone_alt)
+            rc = controller.update(
+                setpoint,
+                self.ctx.drone_alt,
+                self.ctx.drone_alt_received_at_s,
+            )
             return rc
 
 
@@ -573,7 +582,11 @@ class App:
                 )
             self.ctx.alt_setpoint = setpoint
         
-        rc = controller.update(setpoint, self.ctx.drone_alt)
+        rc = controller.update(
+            setpoint,
+            self.ctx.drone_alt,
+            self.ctx.drone_alt_received_at_s,
+        )
         return rc
     
     def failsafe_handler(self):

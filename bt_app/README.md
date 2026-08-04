@@ -17,6 +17,21 @@
 uv run bt-app run -c config/vehicle_config.yaml
 ```
 
+### MAVLink RC takeoff and landing scenario
+
+With Gazebo, SITL, and `bt-app` already running, execute the self-checking RC
+override scenario from the `bt_app` directory:
+
+```bash
+uv run python example/send_rc.py
+```
+
+The script waits for live MAVLink state and altitude telemetry while it arms,
+requests automatic takeoff, confirms `ALT_HOLD`, switches to `MANUAL`, descends,
+lands, and disarms. It is intended for SITL only. Run `--help` to override the
+UDP endpoints, timeouts, RC rate, five-second ALT_HOLD dwell, slow-descent
+throttle, or touchdown altitude.
+
 ## Usage
 
 Radiomaster BOXER config

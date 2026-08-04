@@ -131,6 +131,22 @@ def test_state_machine_transition_assigns_robot_state_member():
     assert isinstance(ctx.state, RobotState)
 
 
+def test_manual_to_takeoff_uses_initialized_altitude_setpoint():
+    ctx = Context()
+    machine = Robot_StateMachine(ctx, VehicleConfig())
+    machine.machine.set_state(RobotState.MANUAL)
+    ctx.state = RobotState.MANUAL
+    ctx.armed = True
+    ctx.joy_manual_request = False
+    ctx.joy_takeoff_request = True
+    ctx.drone_alt = 0.0
+    ctx.alt_setpoint = 2.0
+
+    machine.resolve()
+
+    assert ctx.state == RobotState.TAKEOFF
+
+
 @pytest.mark.parametrize(
     ("state", "controller_key"),
     [

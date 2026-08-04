@@ -45,10 +45,10 @@ def decode_int32(value: float) -> int:
     return struct.unpack("<i", struct.pack("<f", value))[0]
 
 
-def test_canonical_parameter_registry_has_32_mavlink_names():
+def test_canonical_parameter_registry_has_33_mavlink_names():
     service = make_service()
 
-    assert len(ALL_PARAMETER_KEYS) == 32
+    assert len(ALL_PARAMETER_KEYS) == 33
     assert tuple(name for name, _, _ in service.snapshot()) == ALL_PARAMETER_KEYS
     assert all(
         re.fullmatch(r"[A-Z][A-Z0-9_]{0,15}", name) for name in ALL_PARAMETER_KEYS
@@ -76,7 +76,7 @@ def test_rejected_set_does_not_emit_change():
     with pytest.raises(ValueError):
         service.set("HOV_BASELINE", 999)
 
-    assert service.get("HOV_BASELINE") == 1300
+    assert service.get("HOV_BASELINE") == 1660
     assert changes == []
 
 
@@ -125,9 +125,9 @@ def test_list_read_and_int_set_use_canonical_names():
 
     responses = protocol.handle(mav.param_request_list_encode(1, 1), source)
 
-    assert len(responses) == 32
+    assert len(responses) == 33
     assert responses[0].message.param_id == "FS_HOLD_TIME"
-    assert responses[-1].delay_s == pytest.approx(0.62)
+    assert responses[-1].delay_s == pytest.approx(0.64)
 
     request = mav.param_set_encode(
         1,
@@ -159,8 +159,8 @@ def test_invalid_set_echoes_current_value_without_mutating():
 
     responses = protocol.handle(request, ("127.0.0.1", 40000))
 
-    assert service.get("HOV_BASELINE") == 1300
-    assert decode_int32(responses[0].message.param_value) == 1300
+    assert service.get("HOV_BASELINE") == 1660
+    assert decode_int32(responses[0].message.param_value) == 1660
 
 
 def test_explicit_save_is_denied_armed_and_persists_disarmed(tmp_path):

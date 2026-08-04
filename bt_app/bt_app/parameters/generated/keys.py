@@ -19,6 +19,7 @@ class ParameterKey:
     ALT_KI: Final[Literal['ALT_KI']] = 'ALT_KI'
     ALT_KD: Final[Literal['ALT_KD']] = 'ALT_KD'
     ALT_OUT_LIMIT: Final[Literal['ALT_OUT_LIMIT']] = 'ALT_OUT_LIMIT'
+    TAKEOFF_RATE: Final[Literal['TAKEOFF_RATE']] = 'TAKEOFF_RATE'
     HOV_KP: Final[Literal['HOV_KP']] = 'HOV_KP'
     HOV_KI: Final[Literal['HOV_KI']] = 'HOV_KI'
     HOV_KD: Final[Literal['HOV_KD']] = 'HOV_KD'
@@ -54,6 +55,7 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'ALT_KI',
     'ALT_KD',
     'ALT_OUT_LIMIT',
+    'TAKEOFF_RATE',
     'HOV_KP',
     'HOV_KI',
     'HOV_KD',
