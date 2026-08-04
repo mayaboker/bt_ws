@@ -74,7 +74,9 @@ def rc_channels(
 NEUTRAL_DISARMED = rc_channels()
 ARM_IN_MANUAL = rc_channels(armed=True, manual=True)
 AUTO_TAKEOFF_ARMED = rc_channels(armed=True, auto_takeoff=True)
-ALT_HOLD_ARMED = rc_channels(armed=True)
+# Centered throttle requests no altitude-setpoint change in ALT_HOLD and also
+# satisfies the MANUAL -> ALT_HOLD state-machine guard (throttle > 1050).
+ALT_HOLD_ARMED = rc_channels(armed=True, throttle=RC_MID)
 MANUAL_DESCENT_ARMED = rc_channels(armed=True, manual=True, throttle=1550)
 MANUAL_DISARMED = rc_channels(manual=True, throttle=RC_MIN)
 

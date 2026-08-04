@@ -32,6 +32,19 @@ lands, and disarms. It is intended for SITL only. Run `--help` to override the
 UDP endpoints, timeouts, RC rate, five-second ALT_HOLD dwell, slow-descent
 throttle, or touchdown altitude.
 
+To test a purely manual climb to 3 m before entering ALT_HOLD for 10 seconds,
+then return to MANUAL for landing and disarm, run:
+
+```bash
+uv run python example/send_rc_manual_alt_hold.py
+```
+
+The MANUAL throttle starts at 1500 and ramps at 10 PWM per second, capped at
+1680 (just above the configured 1660 hover baseline), until altitude reaches
+3 m. The low cap limits upward momentum before ALT_HOLD. Use `--help` to adjust
+the target, throttle ramp, maximum throttle, hold duration, descent throttle,
+and safety timeouts.
+
 ## Usage
 
 Radiomaster BOXER config

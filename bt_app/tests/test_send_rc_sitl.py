@@ -66,6 +66,7 @@ def test_manual_descent_stays_armed_and_releases_takeoff():
 
 
 def test_alt_hold_dwell_releases_mode_requests_and_stays_armed():
+    assert ALT_HOLD_ARMED[2] == 1500
     assert ALT_HOLD_ARMED[ARM] == RC_MAX
     assert ALT_HOLD_ARMED[MANUAL] == RC_MAX
     assert ALT_HOLD_ARMED[AUTO_TAKEOFF] == RC_MIN
