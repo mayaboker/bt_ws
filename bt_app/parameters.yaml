@@ -61,7 +61,7 @@ parameters:
       max: 200.0
   ALT_KD:
     type: float
-    default: 0.1
+    default: 2.0
     limits:
       min: 0.0
       max: 200.0

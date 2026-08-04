@@ -10,7 +10,6 @@ from bt_app.msp.bt_v2 import (
 from loguru import logger as log
 
 ALT_REACH_DELTA = 0.5
-ALT_SETTLE_VERTICAL_SPEED_MPS = 0.5
 
 class TakeoffController:
     """
@@ -86,10 +85,7 @@ class TakeoffController:
         elif self._setpoint > final_setpoint:
             self._setpoint = max(final_setpoint, self._setpoint - maximum_step)
 
-        if (
-            abs(setpoint - current) < ALT_REACH_DELTA
-            and abs(vertical_speed_m_s) <= ALT_SETTLE_VERTICAL_SPEED_MPS
-        ):
+        if abs(setpoint - current) < ALT_REACH_DELTA:
             self.__time_in_alt += dt_s
         else:
             self.__time_in_alt = 0

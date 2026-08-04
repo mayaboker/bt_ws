@@ -104,7 +104,7 @@ def test_velocity_damping_is_included_in_takeoff_output_limit(monkeypatch):
     assert channels[RCChannel.THROTTLE] == 1560
 
 
-def test_takeoff_settle_time_requires_low_vertical_speed(monkeypatch):
+def test_takeoff_settle_time_uses_altitude_band_not_velocity(monkeypatch):
     times = iter([0.0, 0.0, 1.0, 1.0, 2.0, 2.0])
     monkeypatch.setattr(
         "bt_app.control.takeoff_controller.time.monotonic",
@@ -114,10 +114,10 @@ def test_takeoff_settle_time_requires_low_vertical_speed(monkeypatch):
 
     controller.update(2.0, 1.8, altitude_sample_time_s=0.0)
     controller.update(2.0, 2.0, altitude_sample_time_s=0.2)
-    assert controller.time_in_alt == 0.0
-
-    controller.update(2.0, 2.0, altitude_sample_time_s=1.2)
     assert controller.time_in_alt == 1.0
+
+    controller.update(2.0, 2.6, altitude_sample_time_s=1.2)
+    assert controller.time_in_alt == 0.0
 
 
 def test_takeoff_output_is_clamped_to_rc_range():
