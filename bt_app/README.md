@@ -45,6 +45,18 @@ The MANUAL throttle starts at 1500 and ramps at 10 PWM per second, capped at
 the target, throttle ramp, maximum throttle, hold duration, descent throttle,
 and safety timeouts.
 
+To test returning to MANUAL between two ALT_HOLD periods, run:
+
+```bash
+uv run python example/send_rc_manual_reentry.py
+```
+
+This scenario climbs slowly to 3 m, holds ALT_HOLD for 10 seconds, attempts a
+10-second MANUAL hover at throttle 1660, re-enters ALT_HOLD for 30 seconds,
+then returns to MANUAL and controls vertical speed to a 1 m/s descent before
+touchdown and disarm. The descent controller may command above the 1660 hover
+throttle, up to 1800, to brake excessive downward speed.
+
 ## Usage
 
 Radiomaster BOXER config
