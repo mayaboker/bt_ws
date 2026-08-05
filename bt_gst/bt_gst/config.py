@@ -79,6 +79,7 @@ SUPPORTED_CODECS = frozenset({DEFAULT_CODEC})
 @dataclass(frozen=True)
 class DetectorConfig:
     enabled: bool = False
+    overlay_enabled: bool = False
     low_h: int = 0
     low_s: int = 100
     low_v: int = 100
@@ -90,6 +91,7 @@ class DetectorConfig:
 @dataclass(frozen=True)
 class DetectorConfigOverrides:
     enabled: bool | None = None
+    overlay_enabled: bool | None = None
     low_h: int | None = None
     low_s: int | None = None
     low_v: int | None = None
@@ -168,6 +170,7 @@ def app_config_overrides_from_mapping(raw_config: dict[str, Any]) -> AppConfigOv
             raise ConfigError("detector must be a mapping")
         detector = DetectorConfigOverrides(
             enabled=_optional_bool(raw_detector, "enabled"),
+            overlay_enabled=_optional_bool(raw_detector, "overlay_enabled"),
             low_h=_optional_int(raw_detector, "low_h"),
             low_s=_optional_int(raw_detector, "low_s"),
             low_v=_optional_int(raw_detector, "low_v"),
@@ -250,6 +253,11 @@ def _resolve_detector_config(
         return current
     return DetectorConfig(
         enabled=override.enabled if override.enabled is not None else current.enabled,
+        overlay_enabled=(
+            override.overlay_enabled
+            if override.overlay_enabled is not None
+            else current.overlay_enabled
+        ),
         low_h=override.low_h if override.low_h is not None else current.low_h,
         low_s=override.low_s if override.low_s is not None else current.low_s,
         low_v=override.low_v if override.low_v is not None else current.low_v,
@@ -269,6 +277,7 @@ def merge_config(
             source=overrides.source,
             detector=DetectorConfigOverrides(
                 enabled=overrides.detector.enabled,
+                overlay_enabled=overrides.detector.overlay_enabled,
                 low_h=overrides.detector.low_h,
                 low_s=overrides.detector.low_s,
                 low_v=overrides.detector.low_v,
@@ -360,6 +369,10 @@ def validate_config(config: AppConfig) -> AppConfig:
 def _validate_detector_config(detector: DetectorConfig) -> None:
     if not isinstance(detector.enabled, bool):
         raise ConfigError("detector.enabled must be a bool")
+    if not isinstance(detector.overlay_enabled, bool):
+        raise ConfigError("detector.overlay_enabled must be a bool")
+    if detector.overlay_enabled and not detector.enabled:
+        raise ConfigError("detector.overlay_enabled requires detector.enabled")
     limits = {
         "low_h": 179,
         "high_h": 179,

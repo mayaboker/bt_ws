@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from threading import Lock
 
 
 RED_DETECTION_META_NAME = "GstRedDetectionMeta"
@@ -13,6 +14,26 @@ class RedDetection:
     width: int
     height: int
     pts_ns: int | None
+
+
+@dataclass
+class DetectionOverlayState:
+    _detection: RedDetection | None = None
+    _lock: Lock = field(default_factory=Lock, repr=False)
+
+    def update(self, detection: RedDetection | None) -> None:
+        with self._lock:
+            self._detection = detection
+
+    def detection_for_timestamp(self, timestamp: int) -> RedDetection | None:
+        with self._lock:
+            detection = self._detection
+        if detection is None:
+            return None
+        timestamp_ns = None if timestamp == GST_CLOCK_TIME_NONE else timestamp
+        if detection.pts_ns != timestamp_ns:
+            return None
+        return detection
 
 
 def read_red_detection(buffer: object) -> RedDetection | None:

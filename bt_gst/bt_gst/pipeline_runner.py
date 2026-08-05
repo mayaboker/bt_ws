@@ -2,7 +2,7 @@ from loguru import logger
 
 from bt_gst.config import AppConfig
 from bt_gst.pipeline_builder import PipelineBuildError, build_pipeline_description
-from bt_gst.red_detection import read_red_detection
+from bt_gst.red_detection import DetectionOverlayState, read_red_detection
 
 pipeline_runner_logger = logger.bind(component="bt_gst.pipeline_runner")
 
@@ -44,6 +44,27 @@ def run_pipeline(config: AppConfig) -> int:
                 "GStreamer element 'detection_sink' was not found"
             )
         detection_sink.connect("new-sample", _on_detection_sample, Gst)
+
+    if config.detector.overlay_enabled:
+        detection_overlay = pipeline.get_by_name("detection_overlay")
+        if detection_overlay is None:
+            pipeline.set_state(Gst.State.NULL)
+            raise PipelineRunError(
+                "GStreamer element 'detection_overlay' was not found"
+            )
+        overlay_sink_pad = detection_overlay.get_static_pad("sink")
+        if overlay_sink_pad is None:
+            pipeline.set_state(Gst.State.NULL)
+            raise PipelineRunError(
+                "GStreamer element 'detection_overlay' has no sink pad"
+            )
+        overlay_state = DetectionOverlayState()
+        overlay_sink_pad.add_probe(
+            Gst.PadProbeType.BUFFER,
+            _on_detection_overlay_buffer,
+            (overlay_state, Gst),
+        )
+        detection_overlay.connect("draw", _on_detection_overlay_draw, overlay_state)
 
     bus = pipeline.get_bus()
     pipeline.set_state(Gst.State.PLAYING)
@@ -99,3 +120,38 @@ def _on_detection_sample(sink: object, gst: object) -> object:
         detection.pts_ns,
     )
     return gst.FlowReturn.OK
+
+
+def _on_detection_overlay_buffer(
+    _pad: object,
+    info: object,
+    callback_data: tuple[DetectionOverlayState, object],
+) -> object:
+    state, gst = callback_data
+    buffer = info.get_buffer()
+    state.update(read_red_detection(buffer) if buffer is not None else None)
+    return gst.PadProbeReturn.OK
+
+
+def _on_detection_overlay_draw(
+    _overlay: object,
+    context: object,
+    timestamp: int,
+    _duration: int,
+    state: DetectionOverlayState,
+) -> None:
+    detection = state.detection_for_timestamp(timestamp)
+    if detection is None or not detection.found:
+        return
+
+    line_width = 3.0
+    half_line = line_width / 2.0
+    context.set_source_rgba(0.0, 1.0, 0.0, 1.0)
+    context.set_line_width(line_width)
+    context.rectangle(
+        detection.x + half_line,
+        detection.y + half_line,
+        max(0.0, detection.width - line_width),
+        max(0.0, detection.height - line_width),
+    )
+    context.stroke()

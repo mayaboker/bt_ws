@@ -60,6 +60,7 @@ Enable the detector and configure its HSV thresholds in YAML:
 ```yaml
 detector:
   enabled: true
+  overlay_enabled: true
   low_h: 0
   low_s: 100
   low_v: 100
@@ -69,7 +70,9 @@ detector:
 ```
 
 The detector runs before the video tee, so its output feeds both the RTP/UDP
-stream and the optional local preview.
+stream and the optional local preview. When `overlay_enabled` is true, a
+3-pixel green Cairo bounding box is drawn before the tee and therefore appears
+in both outputs.
 
 # run video
 

@@ -26,12 +26,21 @@ from bt_gst.config import (
 )
 from bt_gst import app as app_module
 from bt_gst import pipeline_runner
-from bt_gst.pipeline_runner import _on_detection_sample
+from bt_gst.pipeline_runner import (
+    _on_detection_overlay_buffer,
+    _on_detection_overlay_draw,
+    _on_detection_sample,
+)
 from bt_gst.pipeline_builder import (
     build_pipeline_description,
     build_source_pipeline_description,
 )
-from bt_gst.red_detection import GST_CLOCK_TIME_NONE, RedDetection, read_red_detection
+from bt_gst.red_detection import (
+    GST_CLOCK_TIME_NONE,
+    DetectionOverlayState,
+    RedDetection,
+    read_red_detection,
+)
 from bt_gst.tracker_app_backup import (
     GST_PLUGIN_PATH,
     SYNTHETIC_VIDEO_FPS,
@@ -274,6 +283,7 @@ def test_load_config_reads_detector_yaml(tmp_path: Path) -> None:
         "  topic: /camera\n"
         "detector:\n"
         "  enabled: true\n"
+        "  overlay_enabled: true\n"
         "  low_h: 2\n"
         "  high_h: 20\n",
         encoding="utf-8",
@@ -281,7 +291,12 @@ def test_load_config_reads_detector_yaml(tmp_path: Path) -> None:
 
     assert load_config(config_path) == AppConfig(
         source=SimulationSourceConfig(topic="/camera"),
-        detector=DetectorConfig(enabled=True, low_h=2, high_h=20),
+        detector=DetectorConfig(
+            enabled=True,
+            overlay_enabled=True,
+            low_h=2,
+            high_h=20,
+        ),
     )
 
 
@@ -290,12 +305,17 @@ def test_load_config_overrides_keeps_detector_fields_optional(tmp_path: Path) ->
     config_path.write_text(
         "detector:\n"
         "  enabled: true\n"
+        "  overlay_enabled: true\n"
         "  low_h: 2\n",
         encoding="utf-8",
     )
 
     assert load_config_overrides(config_path) == AppConfigOverrides(
-        detector=DetectorConfigOverrides(enabled=True, low_h=2)
+        detector=DetectorConfigOverrides(
+            enabled=True,
+            overlay_enabled=True,
+            low_h=2,
+        )
     )
 
 
@@ -527,6 +547,14 @@ def test_validate_config_rejects_invalid_stream_values() -> None:
             DetectorConfig(low_v=200, high_v=100),
             "detector.low_v must not exceed detector.high_v",
         ),
+        (
+            DetectorConfig(overlay_enabled=True),
+            "detector.overlay_enabled requires detector.enabled",
+        ),
+        (
+            DetectorConfig(enabled=True, overlay_enabled=1),
+            "detector.overlay_enabled must be a bool",
+        ),
     ],
 )
 def test_validate_config_rejects_invalid_detector_values(
@@ -661,6 +689,25 @@ def test_build_pipeline_description_omits_detection_sink_when_disabled() -> None
     assert "detection_sink" not in pipeline
 
 
+def test_build_pipeline_description_inserts_overlay_before_tee() -> None:
+    pipeline = build_pipeline_description(
+        AppConfig(
+            source=SimulationSourceConfig(topic="/camera"),
+            detector=DetectorConfig(enabled=True, overlay_enabled=True),
+        )
+    )
+
+    overlay = (
+        "controlledreddetect detection-enabled=true low-h=0 low-s=100 "
+        "low-v=100 high-h=10 high-s=255 high-v=255 ! videoconvert ! "
+        "video/x-raw,format=BGRx ! cairooverlay name=detection_overlay"
+    )
+    assert overlay in pipeline
+    assert pipeline.index("cairooverlay name=detection_overlay") < pipeline.index(
+        "tee name=video_tee"
+    )
+
+
 @pytest.mark.parametrize(
     ("pts", "expected_pts"),
     [(123456, 123456), (GST_CLOCK_TIME_NONE, None)],
@@ -734,6 +781,88 @@ def test_detection_sample_callback_reads_buffer(monkeypatch) -> None:
     )
 
     assert _on_detection_sample(Sink(), Gst) == "ok"
+
+
+def test_detection_overlay_state_matches_buffer_timestamp() -> None:
+    detection = RedDetection(True, 1, 2, 30, 40, 123)
+    state = DetectionOverlayState()
+    state.update(detection)
+
+    assert state.detection_for_timestamp(123) == detection
+    assert state.detection_for_timestamp(124) is None
+
+
+def test_detection_overlay_buffer_probe_updates_state(monkeypatch) -> None:
+    detection = RedDetection(True, 1, 2, 30, 40, 123)
+    buffer = object()
+    state = DetectionOverlayState()
+
+    class Info:
+        def get_buffer(self):
+            return buffer
+
+    class PadProbeReturn:
+        OK = "ok"
+
+    Gst = type("Gst", (), {"PadProbeReturn": PadProbeReturn})
+    monkeypatch.setattr(
+        pipeline_runner,
+        "read_red_detection",
+        lambda candidate: detection if candidate is buffer else None,
+    )
+
+    assert _on_detection_overlay_buffer(None, Info(), (state, Gst)) == "ok"
+    assert state.detection_for_timestamp(123) == detection
+
+
+def test_detection_overlay_draws_green_bounding_box() -> None:
+    calls = []
+
+    class Context:
+        def set_source_rgba(self, *values):
+            calls.append(("color", values))
+
+        def set_line_width(self, width):
+            calls.append(("line-width", width))
+
+        def rectangle(self, *values):
+            calls.append(("rectangle", values))
+
+        def stroke(self):
+            calls.append(("stroke",))
+
+    state = DetectionOverlayState()
+    state.update(RedDetection(True, 10, 20, 30, 40, 123))
+
+    _on_detection_overlay_draw(None, Context(), 123, 33, state)
+
+    assert calls == [
+        ("color", (0.0, 1.0, 0.0, 1.0)),
+        ("line-width", 3.0),
+        ("rectangle", (11.5, 21.5, 27.0, 37.0)),
+        ("stroke",),
+    ]
+
+
+@pytest.mark.parametrize(
+    "detection",
+    [
+        None,
+        RedDetection(False, 10, 20, 30, 40, 123),
+        RedDetection(True, 10, 20, 30, 40, 124),
+    ],
+)
+def test_detection_overlay_does_not_draw_without_matching_detection(
+    detection: RedDetection | None,
+) -> None:
+    class Context:
+        def __getattr__(self, name):
+            raise AssertionError(f"unexpected Cairo call: {name}")
+
+    state = DetectionOverlayState()
+    state.update(detection)
+
+    _on_detection_overlay_draw(None, Context(), 123, 33, state)
 
 
 def test_build_video_pipeline_description_uses_explicit_gtksink_pipeline() -> None:
@@ -1360,7 +1489,7 @@ def test_run_command_dispatches_simulation_config_to_pipeline_runner(monkeypatch
     assert calls == [
         AppConfig(
             source=SimulationSourceConfig(topic="/camera", rate=30),
-            detector=DetectorConfig(enabled=True),
+            detector=DetectorConfig(enabled=True, overlay_enabled=True),
             video_local=False,
             port=5600,
             mtu=800,

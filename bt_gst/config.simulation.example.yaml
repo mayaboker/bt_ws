@@ -4,6 +4,7 @@ source:
   rate: 30
 detector:
   enabled: true
+  overlay_enabled: true
   low_h: 0
   low_s: 100
   low_v: 100

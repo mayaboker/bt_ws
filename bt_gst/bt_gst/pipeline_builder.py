@@ -57,11 +57,18 @@ def build_source_pipeline_description(source: SourceConfig) -> str:
 def build_processing_pipeline_description(detector: DetectorConfig) -> str:
     if not detector.enabled:
         return "! videoconvert"
-    return (
+    detector_description = (
         "! videoconvert ! video/x-raw,format=RGB ! controlledreddetect "
         f"detection-enabled=true low-h={detector.low_h} low-s={detector.low_s} "
         f"low-v={detector.low_v} high-h={detector.high_h} "
         f"high-s={detector.high_s} high-v={detector.high_v}"
+    )
+    if not detector.overlay_enabled:
+        return detector_description
+    return (
+        f"{detector_description} ! videoconvert ! "
+        "video/x-raw,format=BGRx ! "
+        "cairooverlay name=detection_overlay"
     )
 
 
