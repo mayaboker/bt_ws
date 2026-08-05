@@ -117,6 +117,7 @@ class VisualTargetComm:
                     except zmq.ZMQError:
                         return
                     result = self._decode_result(payload)
+                    print(result)
                     if self.on_result is not None:
                         self.on_result(result)
         finally:

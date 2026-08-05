@@ -74,6 +74,9 @@ stream and the optional local preview. When `overlay_enabled` is true, a
 3-pixel green Cairo bounding box is drawn before the tee and therefore appears
 in both outputs.
 
+Detection and tracker ZMQ channels and message schemas are documented in
+[`docs/design/zmq_bridge.md`](docs/design/zmq_bridge.md).
+
 # run video
 
 ```

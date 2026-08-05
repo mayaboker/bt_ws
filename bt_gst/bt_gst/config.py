@@ -74,6 +74,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5000
 DEFAULT_MTU = 1200
 SUPPORTED_CODECS = frozenset({DEFAULT_CODEC})
+DEFAULT_ZMQ_TELEMETRY_ENDPOINT = "tcp://127.0.0.1:5556"
 
 
 @dataclass(frozen=True)
@@ -101,9 +102,24 @@ class DetectorConfigOverrides:
 
 
 @dataclass(frozen=True)
+class ZmqConfig:
+    enabled: bool = False
+    telemetry_endpoint: str = DEFAULT_ZMQ_TELEMETRY_ENDPOINT
+    bind: bool = True
+
+
+@dataclass(frozen=True)
+class ZmqConfigOverrides:
+    enabled: bool | None = None
+    telemetry_endpoint: str | None = None
+    bind: bool | None = None
+
+
+@dataclass(frozen=True)
 class AppConfig:
     source: SourceConfig | None = None
     detector: DetectorConfig = DetectorConfig()
+    zmq: ZmqConfig = ZmqConfig()
     video_local: bool = DEFAULT_VIDEO_LOCAL
     codec: str = DEFAULT_CODEC
     host: str = DEFAULT_HOST
@@ -115,6 +131,7 @@ class AppConfig:
 class AppConfigOverrides:
     source: SourceOverride | None = None
     detector: DetectorConfigOverrides | None = None
+    zmq: ZmqConfigOverrides | None = None
     video_local: bool | None = None
     codec: str | None = None
     host: str | None = None
@@ -179,9 +196,21 @@ def app_config_overrides_from_mapping(raw_config: dict[str, Any]) -> AppConfigOv
             high_v=_optional_int(raw_detector, "high_v"),
         )
 
+    raw_zmq = raw_config.get("zmq")
+    zmq = None
+    if raw_zmq is not None:
+        if not isinstance(raw_zmq, dict):
+            raise ConfigError("zmq must be a mapping")
+        zmq = ZmqConfigOverrides(
+            enabled=_optional_bool(raw_zmq, "enabled"),
+            telemetry_endpoint=_optional_string(raw_zmq, "telemetry_endpoint"),
+            bind=_optional_bool(raw_zmq, "bind"),
+        )
+
     return AppConfigOverrides(
         source=source,
         detector=detector,
+        zmq=zmq,
         video_local=_optional_bool(raw_config, "video_local"),
         codec=_optional_string(raw_config, "codec"),
         host=_optional_string(raw_config, "host"),
@@ -232,6 +261,7 @@ def resolve_config(
         config = AppConfig(
             source=_resolve_source_config(config.source, override.source),
             detector=_resolve_detector_config(config.detector, override.detector),
+            zmq=_resolve_zmq_config(config.zmq, override.zmq),
             video_local=(
                 override.video_local
                 if override.video_local is not None
@@ -267,6 +297,23 @@ def _resolve_detector_config(
     )
 
 
+def _resolve_zmq_config(
+    current: ZmqConfig,
+    override: ZmqConfigOverrides | None,
+) -> ZmqConfig:
+    if override is None:
+        return current
+    return ZmqConfig(
+        enabled=override.enabled if override.enabled is not None else current.enabled,
+        telemetry_endpoint=(
+            override.telemetry_endpoint
+            if override.telemetry_endpoint is not None
+            else current.telemetry_endpoint
+        ),
+        bind=override.bind if override.bind is not None else current.bind,
+    )
+
+
 def merge_config(
     base: AppConfig | None,
     overrides: AppConfigOverrides | AppConfig,
@@ -284,6 +331,11 @@ def merge_config(
                 high_h=overrides.detector.high_h,
                 high_s=overrides.detector.high_s,
                 high_v=overrides.detector.high_v,
+            ),
+            zmq=ZmqConfigOverrides(
+                enabled=overrides.zmq.enabled,
+                telemetry_endpoint=overrides.zmq.telemetry_endpoint,
+                bind=overrides.zmq.bind,
             ),
         )
     return resolve_config(base or AppConfig(), overrides)
@@ -363,6 +415,7 @@ def validate_config(config: AppConfig) -> AppConfig:
     if config.mtu <= 0:
         raise ConfigError("mtu must be greater than 0")
     _validate_detector_config(config.detector)
+    _validate_zmq_config(config.zmq, config.detector)
     return config
 
 
@@ -390,6 +443,17 @@ def _validate_detector_config(detector: DetectorConfig) -> None:
     for low, high in (("low_h", "high_h"), ("low_s", "high_s"), ("low_v", "high_v")):
         if getattr(detector, low) > getattr(detector, high):
             raise ConfigError(f"detector.{low} must not exceed detector.{high}")
+
+
+def _validate_zmq_config(zmq: ZmqConfig, detector: DetectorConfig) -> None:
+    if not isinstance(zmq.enabled, bool):
+        raise ConfigError("zmq.enabled must be a bool")
+    if not isinstance(zmq.bind, bool):
+        raise ConfigError("zmq.bind must be a bool")
+    if not isinstance(zmq.telemetry_endpoint, str) or not zmq.telemetry_endpoint:
+        raise ConfigError("zmq.telemetry_endpoint must be a non-empty string")
+    if zmq.enabled and not detector.enabled:
+        raise ConfigError("zmq.enabled requires detector.enabled")
 
 
 def _required_string(raw_source: dict[str, Any], field: str, source_type: str) -> str:

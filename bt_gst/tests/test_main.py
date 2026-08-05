@@ -18,6 +18,8 @@ from bt_gst.config import (
     FileSourceConfigOverrides,
     SimulationSourceConfig,
     SimulationSourceConfigOverrides,
+    ZmqConfig,
+    ZmqConfigOverrides,
     load_config,
     load_config_overrides,
     merge_config,
@@ -27,10 +29,12 @@ from bt_gst.config import (
 from bt_gst import app as app_module
 from bt_gst import pipeline_runner
 from bt_gst.pipeline_runner import (
+    DetectionTelemetryState,
     _on_detection_overlay_buffer,
     _on_detection_overlay_draw,
     _on_detection_sample,
 )
+from bt_gst.bridge.zmq_models import RedDetectionMessage
 from bt_gst.pipeline_builder import (
     build_pipeline_description,
     build_source_pipeline_description,
@@ -319,6 +323,41 @@ def test_load_config_overrides_keeps_detector_fields_optional(tmp_path: Path) ->
     )
 
 
+def test_load_config_reads_zmq_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: simulation\n"
+        "  topic: /camera\n"
+        "detector:\n"
+        "  enabled: true\n"
+        "zmq:\n"
+        "  enabled: true\n"
+        "  telemetry_endpoint: tcp://127.0.0.1:6000\n"
+        "  bind: false\n",
+        encoding="utf-8",
+    )
+
+    assert load_config(config_path) == AppConfig(
+        source=SimulationSourceConfig(topic="/camera"),
+        detector=DetectorConfig(enabled=True),
+        zmq=ZmqConfig(
+            enabled=True,
+            telemetry_endpoint="tcp://127.0.0.1:6000",
+            bind=False,
+        ),
+    )
+
+
+def test_load_config_overrides_keeps_zmq_fields_optional(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("zmq:\n  enabled: true\n", encoding="utf-8")
+
+    assert load_config_overrides(config_path) == AppConfigOverrides(
+        zmq=ZmqConfigOverrides(enabled=True)
+    )
+
+
 def test_merge_config_uses_cli_overrides() -> None:
     assert merge_config(
         AppConfig(
@@ -570,6 +609,16 @@ def test_validate_config_rejects_invalid_detector_values(
         )
 
 
+def test_validate_config_rejects_zmq_without_detector() -> None:
+    with pytest.raises(ConfigError, match="zmq.enabled requires detector.enabled"):
+        validate_config(
+            AppConfig(
+                source=SimulationSourceConfig(topic="/camera"),
+                zmq=ZmqConfig(enabled=True),
+            )
+        )
+
+
 def test_build_pipeline_description_for_file_source() -> None:
     pipeline = build_pipeline_description(
         AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")))
@@ -756,8 +805,14 @@ def test_read_red_detection_returns_none_without_metadata() -> None:
 
 
 def test_detection_sample_callback_reads_buffer(monkeypatch) -> None:
-    detection = RedDetection(True, 1, 2, 3, 4, 5)
+    detections = iter(
+        [
+            RedDetection(True, 1, 2, 3, 4, 5),
+            RedDetection(False, 0, 0, 0, 0, 6),
+        ]
+    )
     buffer = object()
+    published = []
 
     class Sample:
         def get_buffer(self):
@@ -774,13 +829,23 @@ def test_detection_sample_callback_reads_buffer(monkeypatch) -> None:
 
     Gst = type("Gst", (), {"FlowReturn": FlowReturn})
 
+    class Publisher:
+        def publish_red_detection(self, message):
+            published.append(message)
+
     monkeypatch.setattr(
         pipeline_runner,
         "read_red_detection",
-        lambda candidate: detection if candidate is buffer else None,
+        lambda candidate: next(detections) if candidate is buffer else None,
     )
+    telemetry_state = DetectionTelemetryState(Publisher())
 
-    assert _on_detection_sample(Sink(), Gst) == "ok"
+    assert _on_detection_sample(Sink(), (Gst, telemetry_state)) == "ok"
+    assert _on_detection_sample(Sink(), (Gst, telemetry_state)) == "ok"
+    assert published == [
+        RedDetectionMessage(1, 5, True, 1, 2, 3, 4),
+        RedDetectionMessage(2, 6, False, 0, 0, 0, 0),
+    ]
 
 
 def test_detection_overlay_state_matches_buffer_timestamp() -> None:
@@ -1319,6 +1384,10 @@ def test_configure_gst_plugin_path_preserves_existing_entries(monkeypatch) -> No
 def test_run_pipeline_initializes_gstreamer_before_parse(monkeypatch) -> None:
     calls = []
 
+    class FakePublisher:
+        def close(self):
+            calls.append(("publisher_close", None))
+
     class FakeMessageType:
         ERROR = 1
         EOS = 2
@@ -1366,11 +1435,18 @@ def test_run_pipeline_initializes_gstreamer_before_parse(monkeypatch) -> None:
 
     monkeypatch.setitem(sys.modules, "gi", FakeGi)
     monkeypatch.setitem(sys.modules, "gi.repository", FakeRepository)
+    monkeypatch.setattr(
+        pipeline_runner,
+        "_build_telemetry_publisher",
+        lambda _config: FakePublisher(),
+    )
 
     assert pipeline_runner.run_pipeline(
         AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")))
     ) == 0
     assert calls.index(("gst_init", None)) < calls.index(("parse_launch", None))
+    assert ("set_state", "null") in calls
+    assert ("publisher_close", None) in calls
 
 
 def test_console_version_command() -> None:

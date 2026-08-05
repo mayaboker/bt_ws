@@ -13,6 +13,7 @@ TYPE_TRACK_RESIZE = "resize"
 TYPE_TRACK_ADJUSTMENT = "adjustment"
 TYPE_TRACKER_DATA = "tracker-data"
 TYPE_TRACKER_DEBUG = "tracker-debug"
+TYPE_RED_DETECTION = "red-detection"
 
 
 @dataclass(frozen=True)
@@ -61,11 +62,24 @@ class TrackerDebugMessage:
     type: str = field(default=TYPE_TRACKER_DEBUG, init=False)
 
 
+@dataclass(frozen=True)
+class RedDetectionMessage:
+    frame_id: int
+    timestamp_ns: int | None
+    found: bool
+    x: int
+    y: int
+    width: int
+    height: int
+    type: str = field(default=TYPE_RED_DETECTION, init=False)
+
+
 TrackRequest: TypeAlias = (
     TrackStartRequest | TrackStopRequest | TrackResizeRequest | TrackAdjustmentRequest
 )
 TrackerMessage: TypeAlias = TrackerDataMessage | TrackerDebugMessage
-TransportMessage: TypeAlias = TrackRequest | TrackerMessage
+TelemetryMessage: TypeAlias = TrackerMessage | RedDetectionMessage
+TransportMessage: TypeAlias = TrackRequest | TelemetryMessage
 
 
 def encode_message(message: TransportMessage) -> bytes:
@@ -92,7 +106,7 @@ def decode_request(payload: bytes) -> TrackRequest:
     raise ValueError(f"unsupported request message type: {message_type!r}")
 
 
-def decode_tracker_message(payload: bytes) -> TrackerMessage:
+def decode_telemetry_message(payload: bytes) -> TelemetryMessage:
     data = msgpack.unpackb(payload, raw=False, strict_map_key=False)
     if not isinstance(data, dict):
         raise ValueError("messagepack payload must decode to a map")
@@ -114,4 +128,22 @@ def decode_tracker_message(payload: bytes) -> TrackerMessage:
             active_feature_count=int(data["active_feature_count"]),
             features_json=str(data["features_json"]),
         )
-    raise ValueError(f"unsupported tracker message type: {message_type!r}")
+    if message_type == TYPE_RED_DETECTION:
+        timestamp_ns = data["timestamp_ns"]
+        return RedDetectionMessage(
+            frame_id=int(data["frame_id"]),
+            timestamp_ns=None if timestamp_ns is None else int(timestamp_ns),
+            found=bool(data["found"]),
+            x=int(data["x"]),
+            y=int(data["y"]),
+            width=int(data["width"]),
+            height=int(data["height"]),
+        )
+    raise ValueError(f"unsupported telemetry message type: {message_type!r}")
+
+
+def decode_tracker_message(payload: bytes) -> TrackerMessage:
+    message = decode_telemetry_message(payload)
+    if isinstance(message, RedDetectionMessage):
+        raise ValueError(f"unsupported tracker message type: {message.type!r}")
+    return message

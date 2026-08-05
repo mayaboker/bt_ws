@@ -3,6 +3,7 @@ import pytest
 
 from bt_gst.bridge.zmq_models import (
     MESSAGE_TYPE_FIELD,
+    RedDetectionMessage,
     TrackAdjustmentRequest,
     TrackerDataMessage,
     TrackerDebugMessage,
@@ -10,6 +11,7 @@ from bt_gst.bridge.zmq_models import (
     TrackStartRequest,
     TrackStopRequest,
     decode_request,
+    decode_telemetry_message,
     decode_tracker_message,
     encode_message,
 )
@@ -49,6 +51,30 @@ def test_track_request_round_trip(message) -> None:
 )
 def test_tracker_message_round_trip(message) -> None:
     assert decode_tracker_message(encode_message(message)) == message
+
+
+@pytest.mark.parametrize("timestamp_ns", [123456789, None])
+def test_red_detection_message_round_trip(timestamp_ns: int | None) -> None:
+    message = RedDetectionMessage(
+        frame_id=9,
+        timestamp_ns=timestamp_ns,
+        found=True,
+        x=10,
+        y=20,
+        width=30,
+        height=40,
+    )
+
+    assert decode_telemetry_message(encode_message(message)) == message
+
+
+def test_red_detection_message_has_stable_type() -> None:
+    payload = msgpack.unpackb(
+        encode_message(RedDetectionMessage(1, None, False, 0, 0, 0, 0)),
+        raw=False,
+    )
+
+    assert payload["type"] == "red-detection"
 
 
 def test_encoded_message_contains_stable_type_field() -> None:

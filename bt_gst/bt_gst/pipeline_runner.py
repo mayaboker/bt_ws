@@ -1,14 +1,42 @@
+from dataclasses import dataclass
+
 from loguru import logger
 
+from bt_gst.bridge.zmq_io import (
+    NullTelemetryPublisher,
+    TelemetryPublisher,
+    ZmqTelemetryPublisher,
+)
+from bt_gst.bridge.zmq_models import RedDetectionMessage
 from bt_gst.config import AppConfig
 from bt_gst.pipeline_builder import PipelineBuildError, build_pipeline_description
-from bt_gst.red_detection import DetectionOverlayState, read_red_detection
+from bt_gst.red_detection import DetectionOverlayState, RedDetection, read_red_detection
 
 pipeline_runner_logger = logger.bind(component="bt_gst.pipeline_runner")
 
 
 class PipelineRunError(RuntimeError):
     """Raised when a GStreamer pipeline cannot be run."""
+
+
+@dataclass
+class DetectionTelemetryState:
+    publisher: TelemetryPublisher
+    next_frame_id: int = 1
+
+    def publish(self, detection: RedDetection) -> None:
+        self.publisher.publish_red_detection(
+            RedDetectionMessage(
+                frame_id=self.next_frame_id,
+                timestamp_ns=detection.pts_ns,
+                found=detection.found,
+                x=detection.x,
+                y=detection.y,
+                width=detection.width,
+                height=detection.height,
+            )
+        )
+        self.next_frame_id += 1
 
 
 def run_pipeline(config: AppConfig) -> int:
@@ -36,68 +64,92 @@ def run_pipeline(config: AppConfig) -> int:
     except Exception as exc:
         raise PipelineRunError(f"GStreamer pipeline could not be parsed: {exc}") from exc
 
-    if config.detector.enabled:
-        detection_sink = pipeline.get_by_name("detection_sink")
-        if detection_sink is None:
-            pipeline.set_state(Gst.State.NULL)
-            raise PipelineRunError(
-                "GStreamer element 'detection_sink' was not found"
-            )
-        detection_sink.connect("new-sample", _on_detection_sample, Gst)
-
-    if config.detector.overlay_enabled:
-        detection_overlay = pipeline.get_by_name("detection_overlay")
-        if detection_overlay is None:
-            pipeline.set_state(Gst.State.NULL)
-            raise PipelineRunError(
-                "GStreamer element 'detection_overlay' was not found"
-            )
-        overlay_sink_pad = detection_overlay.get_static_pad("sink")
-        if overlay_sink_pad is None:
-            pipeline.set_state(Gst.State.NULL)
-            raise PipelineRunError(
-                "GStreamer element 'detection_overlay' has no sink pad"
-            )
-        overlay_state = DetectionOverlayState()
-        overlay_sink_pad.add_probe(
-            Gst.PadProbeType.BUFFER,
-            _on_detection_overlay_buffer,
-            (overlay_state, Gst),
-        )
-        detection_overlay.connect("draw", _on_detection_overlay_draw, overlay_state)
-
-    bus = pipeline.get_bus()
-    pipeline.set_state(Gst.State.PLAYING)
-    pipeline_runner_logger.debug("GStreamer pipeline entered PLAYING")
     try:
-        while True:
-            message = bus.timed_pop_filtered(
-                Gst.CLOCK_TIME_NONE,
-                Gst.MessageType.ERROR | Gst.MessageType.EOS,
-            )
-            if message is None:
-                continue
-            if message.type == Gst.MessageType.ERROR:
-                error, debug = message.parse_error()
-                pipeline_runner_logger.error(
-                    "GStreamer error error={} debug={}", error, debug
+        telemetry_publisher = _build_telemetry_publisher(config)
+    except PipelineRunError:
+        pipeline.set_state(Gst.State.NULL)
+        raise
+    try:
+        if config.detector.enabled:
+            detection_sink = pipeline.get_by_name("detection_sink")
+            if detection_sink is None:
+                raise PipelineRunError(
+                    "GStreamer element 'detection_sink' was not found"
                 )
-                print(f"GStreamer error: {error.message}")
-                if debug:
-                    print(debug)
-                return 1
-            if message.type == Gst.MessageType.EOS:
-                pipeline_runner_logger.info("GStreamer pipeline reached EOS")
-                return 0
-    except KeyboardInterrupt:
-        pipeline_runner_logger.info("GStreamer pipeline interrupted")
-        return 0
+            detection_sink.connect(
+                "new-sample",
+                _on_detection_sample,
+                (Gst, DetectionTelemetryState(telemetry_publisher)),
+            )
+
+        if config.detector.overlay_enabled:
+            detection_overlay = pipeline.get_by_name("detection_overlay")
+            if detection_overlay is None:
+                raise PipelineRunError(
+                    "GStreamer element 'detection_overlay' was not found"
+                )
+            overlay_sink_pad = detection_overlay.get_static_pad("sink")
+            if overlay_sink_pad is None:
+                raise PipelineRunError(
+                    "GStreamer element 'detection_overlay' has no sink pad"
+                )
+            overlay_state = DetectionOverlayState()
+            overlay_sink_pad.add_probe(
+                Gst.PadProbeType.BUFFER,
+                _on_detection_overlay_buffer,
+                (overlay_state, Gst),
+            )
+            detection_overlay.connect("draw", _on_detection_overlay_draw, overlay_state)
+
+        bus = pipeline.get_bus()
+        pipeline.set_state(Gst.State.PLAYING)
+        pipeline_runner_logger.debug("GStreamer pipeline entered PLAYING")
+        try:
+            while True:
+                message = bus.timed_pop_filtered(
+                    Gst.CLOCK_TIME_NONE,
+                    Gst.MessageType.ERROR | Gst.MessageType.EOS,
+                )
+                if message is None:
+                    continue
+                if message.type == Gst.MessageType.ERROR:
+                    error, debug = message.parse_error()
+                    pipeline_runner_logger.error(
+                        "GStreamer error error={} debug={}", error, debug
+                    )
+                    print(f"GStreamer error: {error.message}")
+                    if debug:
+                        print(debug)
+                    return 1
+                if message.type == Gst.MessageType.EOS:
+                    pipeline_runner_logger.info("GStreamer pipeline reached EOS")
+                    return 0
+        except KeyboardInterrupt:
+            pipeline_runner_logger.info("GStreamer pipeline interrupted")
+            return 0
     finally:
         pipeline.set_state(Gst.State.NULL)
+        telemetry_publisher.close()
         pipeline_runner_logger.debug("GStreamer pipeline entered NULL")
 
 
-def _on_detection_sample(sink: object, gst: object) -> object:
+def _build_telemetry_publisher(config: AppConfig) -> TelemetryPublisher:
+    if not config.zmq.enabled:
+        return NullTelemetryPublisher()
+    try:
+        return ZmqTelemetryPublisher(
+            telemetry_endpoint=config.zmq.telemetry_endpoint,
+            bind=config.zmq.bind,
+        )
+    except Exception as exc:
+        raise PipelineRunError(f"ZMQ telemetry publisher could not start: {exc}") from exc
+
+
+def _on_detection_sample(
+    sink: object,
+    callback_data: tuple[object, DetectionTelemetryState],
+) -> object:
+    gst, telemetry_state = callback_data
     sample = sink.emit("pull-sample")
     if sample is None:
         return gst.FlowReturn.ERROR
@@ -109,7 +161,7 @@ def _on_detection_sample(sink: object, gst: object) -> object:
         pipeline_runner_logger.warning("red detection buffer has no metadata")
         return gst.FlowReturn.OK
 
-
+    telemetry_state.publish(detection)
     pipeline_runner_logger.debug(
         "red detection found={} x={} y={} width={} height={} pts_ns={}",
         detection.found,

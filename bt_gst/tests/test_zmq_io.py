@@ -3,13 +3,15 @@ import time
 
 import pytest
 
-from bt_gst.bridge.zmq_io import ZmqTrackerIoAdapter
+from bt_gst.bridge.zmq_io import ZmqTelemetryPublisher, ZmqTrackerIoAdapter
 from bt_gst.bridge.zmq_models import (
+    RedDetectionMessage,
     TrackerDataMessage,
     TrackerDebugMessage,
     TrackResizeRequest,
     TrackStartRequest,
     decode_tracker_message,
+    decode_telemetry_message,
     encode_message,
 )
 
@@ -125,6 +127,29 @@ def test_zmq_adapter_publishes_tracker_debug() -> None:
     finally:
         subscriber.close(linger=0)
         adapter.close()
+        context.term()
+
+
+def test_zmq_telemetry_publisher_publishes_red_detection() -> None:
+    context = zmq.Context()
+    telemetry_endpoint = tcp_endpoint()
+    publisher = ZmqTelemetryPublisher(
+        telemetry_endpoint=telemetry_endpoint,
+        context=context,
+    )
+    subscriber = context.socket(zmq.SUB)
+    subscriber.setsockopt(zmq.LINGER, 0)
+    subscriber.setsockopt(zmq.SUBSCRIBE, b"")
+    subscriber.connect(telemetry_endpoint)
+    time.sleep(0.1)
+    message = RedDetectionMessage(1, 123, True, 10, 20, 30, 40)
+
+    try:
+        publisher.publish_red_detection(message)
+        assert decode_telemetry_message(wait_for_message(subscriber)) == message
+    finally:
+        subscriber.close(linger=0)
+        publisher.close()
         context.term()
 
 
