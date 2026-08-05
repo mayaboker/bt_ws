@@ -12,6 +12,8 @@ from bt_gst.config import (
     CameraSourceConfig,
     CameraSourceConfigOverrides,
     ConfigError,
+    DetectorConfig,
+    DetectorConfigOverrides,
     FileSourceConfig,
     FileSourceConfigOverrides,
     SimulationSourceConfig,
@@ -24,17 +26,12 @@ from bt_gst.config import (
 )
 from bt_gst import app as app_module
 from bt_gst import pipeline_runner
-from bt_gst.gst_environment import (
-    GST_PLUGIN_PATH as ACTIVE_GST_PLUGIN_PATH,
-    PYTHON_PLUGIN_PATH,
-    configure_gst_plugin_path as configure_active_gst_plugin_path,
-    register_local_python_elements,
-    remove_local_python_plugin_paths_from_gst_scan,
-)
+from bt_gst.pipeline_runner import _on_detection_sample
 from bt_gst.pipeline_builder import (
     build_pipeline_description,
     build_source_pipeline_description,
 )
+from bt_gst.red_detection import GST_CLOCK_TIME_NONE, RedDetection, read_red_detection
 from bt_gst.tracker_app_backup import (
     GST_PLUGIN_PATH,
     SYNTHETIC_VIDEO_FPS,
@@ -269,6 +266,39 @@ def test_load_config_reads_simulation_source_rate_yaml(tmp_path: Path) -> None:
     )
 
 
+def test_load_config_reads_detector_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n"
+        "  type: simulation\n"
+        "  topic: /camera\n"
+        "detector:\n"
+        "  enabled: true\n"
+        "  low_h: 2\n"
+        "  high_h: 20\n",
+        encoding="utf-8",
+    )
+
+    assert load_config(config_path) == AppConfig(
+        source=SimulationSourceConfig(topic="/camera"),
+        detector=DetectorConfig(enabled=True, low_h=2, high_h=20),
+    )
+
+
+def test_load_config_overrides_keeps_detector_fields_optional(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "detector:\n"
+        "  enabled: true\n"
+        "  low_h: 2\n",
+        encoding="utf-8",
+    )
+
+    assert load_config_overrides(config_path) == AppConfigOverrides(
+        detector=DetectorConfigOverrides(enabled=True, low_h=2)
+    )
+
+
 def test_merge_config_uses_cli_overrides() -> None:
     assert merge_config(
         AppConfig(
@@ -487,6 +517,31 @@ def test_validate_config_rejects_invalid_stream_values() -> None:
         validate_config(AppConfig(source=SimulationSourceConfig(topic="/camera", rate=0)))
 
 
+@pytest.mark.parametrize(
+    ("detector", "message"),
+    [
+        (DetectorConfig(low_h=-1), "detector.low_h must be between 0 and 179"),
+        (DetectorConfig(high_h=180), "detector.high_h must be between 0 and 179"),
+        (DetectorConfig(low_s=256), "detector.low_s must be between 0 and 255"),
+        (
+            DetectorConfig(low_v=200, high_v=100),
+            "detector.low_v must not exceed detector.high_v",
+        ),
+    ],
+)
+def test_validate_config_rejects_invalid_detector_values(
+    detector: DetectorConfig,
+    message: str,
+) -> None:
+    with pytest.raises(ConfigError, match=message):
+        validate_config(
+            AppConfig(
+                source=SimulationSourceConfig(topic="/camera"),
+                detector=detector,
+            )
+        )
+
+
 def test_build_pipeline_description_for_file_source() -> None:
     pipeline = build_pipeline_description(
         AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")))
@@ -551,7 +606,7 @@ def test_build_pipeline_description_for_simulation_source() -> None:
     )
 
     assert pipeline.startswith(
-        "gzimagesrc topic=/camera fps=12 ! videoconvert ! tee name=video_tee"
+        "gzimgsrc topic=/camera ! videoconvert ! tee name=video_tee"
     )
     assert "x264enc bitrate=1500 tune=zerolatency speed-preset=ultrafast" in pipeline
     assert "video/x-raw,format=I420,width=640,height=480,framerate=12/1" in pipeline
@@ -563,7 +618,122 @@ def test_build_pipeline_description_for_simulation_source() -> None:
 def test_build_pipeline_description_quotes_simulation_topic() -> None:
     assert build_source_pipeline_description(
         SimulationSourceConfig(topic="/world/default/camera image", rate=30)
-    ) == "gzimagesrc topic='/world/default/camera image' fps=30"
+    ) == "gzimgsrc topic='/world/default/camera image'"
+
+
+def test_build_pipeline_description_inserts_detector_before_tee() -> None:
+    pipeline = build_pipeline_description(
+        AppConfig(
+            source=SimulationSourceConfig(topic="/camera"),
+            detector=DetectorConfig(
+                enabled=True,
+                low_h=2,
+                low_s=101,
+                low_v=102,
+                high_h=20,
+                high_s=250,
+                high_v=251,
+            ),
+        )
+    )
+
+    detector = (
+        "video/x-raw,format=RGB ! controlledreddetect detection-enabled=true "
+        "low-h=2 low-s=101 low-v=102 high-h=20 high-s=250 high-v=251"
+    )
+    assert detector in pipeline
+    assert pipeline.index(detector) < pipeline.index("tee name=video_tee")
+    assert "rtph264pay" in pipeline
+    assert "fpsdisplaysink" in pipeline
+    assert (
+        "video_tee. ! queue leaky=downstream max-size-buffers=1 ! "
+        "appsink name=detection_sink emit-signals=true sync=false "
+        "max-buffers=1 drop=true"
+    ) in pipeline
+
+
+def test_build_pipeline_description_omits_detection_sink_when_disabled() -> None:
+    pipeline = build_pipeline_description(
+        AppConfig(source=SimulationSourceConfig(topic="/camera"))
+    )
+
+    assert "controlledreddetect" not in pipeline
+    assert "detection_sink" not in pipeline
+
+
+@pytest.mark.parametrize(
+    ("pts", "expected_pts"),
+    [(123456, 123456), (GST_CLOCK_TIME_NONE, None)],
+)
+def test_read_red_detection(pts: int, expected_pts: int | None) -> None:
+    values = {
+        "found": True,
+        "x": 10,
+        "y": 20,
+        "width": 30,
+        "height": 40,
+    }
+
+    class Structure:
+        def get_value(self, name):
+            return values[name]
+
+    class Meta:
+        def get_structure(self):
+            return Structure()
+
+    class Buffer:
+        def __init__(self):
+            self.pts = pts
+
+        def get_custom_meta(self, name):
+            assert name == "GstRedDetectionMeta"
+            return Meta()
+
+    assert read_red_detection(Buffer()) == RedDetection(
+        found=True,
+        x=10,
+        y=20,
+        width=30,
+        height=40,
+        pts_ns=expected_pts,
+    )
+
+
+def test_read_red_detection_returns_none_without_metadata() -> None:
+    class Buffer:
+        def get_custom_meta(self, _name):
+            return None
+
+    assert read_red_detection(Buffer()) is None
+
+
+def test_detection_sample_callback_reads_buffer(monkeypatch) -> None:
+    detection = RedDetection(True, 1, 2, 3, 4, 5)
+    buffer = object()
+
+    class Sample:
+        def get_buffer(self):
+            return buffer
+
+    class Sink:
+        def emit(self, name):
+            assert name == "pull-sample"
+            return Sample()
+
+    class FlowReturn:
+        OK = "ok"
+        ERROR = "error"
+
+    Gst = type("Gst", (), {"FlowReturn": FlowReturn})
+
+    monkeypatch.setattr(
+        pipeline_runner,
+        "read_red_detection",
+        lambda candidate: detection if candidate is buffer else None,
+    )
+
+    assert _on_detection_sample(Sink(), Gst) == "ok"
 
 
 def test_build_video_pipeline_description_uses_explicit_gtksink_pipeline() -> None:
@@ -1017,37 +1187,7 @@ def test_configure_gst_plugin_path_preserves_existing_entries(monkeypatch) -> No
     )
 
 
-def test_active_configure_gst_plugin_path_sets_plugin_folder(monkeypatch) -> None:
-    monkeypatch.delenv("GST_PLUGIN_PATH", raising=False)
-
-    configure_active_gst_plugin_path()
-
-    assert os.environ["GST_PLUGIN_PATH"] == str(ACTIVE_GST_PLUGIN_PATH)
-
-
-def test_active_configure_gst_plugin_path_preserves_existing_entries(monkeypatch) -> None:
-    existing_path = os.pathsep.join(["/tmp/gst-a", "/tmp/gst-b"])
-    monkeypatch.setenv("GST_PLUGIN_PATH", existing_path)
-
-    configure_active_gst_plugin_path()
-
-    assert os.environ["GST_PLUGIN_PATH"] == os.pathsep.join(
-        [str(ACTIVE_GST_PLUGIN_PATH), existing_path]
-    )
-
-
-def test_remove_local_python_plugin_paths_from_gst_scan(monkeypatch) -> None:
-    existing_path = os.pathsep.join(
-        ["/tmp/gst-a", str(ACTIVE_GST_PLUGIN_PATH), str(PYTHON_PLUGIN_PATH)]
-    )
-    monkeypatch.setenv("GST_PLUGIN_PATH", existing_path)
-
-    remove_local_python_plugin_paths_from_gst_scan()
-
-    assert os.environ["GST_PLUGIN_PATH"] == "/tmp/gst-a"
-
-
-def test_run_pipeline_registers_local_python_elements_before_parse(monkeypatch) -> None:
+def test_run_pipeline_initializes_gstreamer_before_parse(monkeypatch) -> None:
     calls = []
 
     class FakeMessageType:
@@ -1095,47 +1235,13 @@ def test_run_pipeline_registers_local_python_elements_before_parse(monkeypatch) 
     class FakeRepository:
         Gst = FakeGst
 
-    def fake_register_local_python_elements(_gst):
-        calls.append(("register_local_python_elements", None))
-
-    def fake_remove_local_python_plugin_paths_from_gst_scan():
-        calls.append(("remove_local_python_plugin_paths_from_gst_scan", None))
-
     monkeypatch.setitem(sys.modules, "gi", FakeGi)
     monkeypatch.setitem(sys.modules, "gi.repository", FakeRepository)
-    monkeypatch.setattr(
-        pipeline_runner,
-        "remove_local_python_plugin_paths_from_gst_scan",
-        fake_remove_local_python_plugin_paths_from_gst_scan,
-    )
-    monkeypatch.setattr(
-        pipeline_runner,
-        "register_local_python_elements",
-        fake_register_local_python_elements,
-    )
 
     assert pipeline_runner.run_pipeline(
         AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")))
     ) == 0
-    assert calls.index(
-        ("remove_local_python_plugin_paths_from_gst_scan", None)
-    ) < calls.index(("gst_init", None))
-    assert calls.index(("register_local_python_elements", None)) < calls.index(
-        ("parse_launch", None)
-    )
-
-
-def test_register_local_python_elements_registers_gzimagesrc() -> None:
-    gi = pytest.importorskip("gi")
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
-
-    Gst.init(None)
-    register_local_python_elements(Gst)
-
-    factory = Gst.ElementFactory.find("gzimagesrc")
-    assert factory is not None
-    assert factory.get_metadata("long-name") == "Gazebo Image Source"
+    assert calls.index(("gst_init", None)) < calls.index(("parse_launch", None))
 
 
 def test_console_version_command() -> None:
@@ -1197,7 +1303,7 @@ def test_console_show_command_prints_simulation_pipeline() -> None:
     )
 
     assert result.returncode == 0
-    assert result.stdout.startswith("gzimagesrc topic=/camera fps=30")
+    assert result.stdout.startswith("gzimgsrc topic=/camera")
     assert "rtph264pay pt=96 mtu=1200" in result.stdout
 
 
@@ -1217,7 +1323,8 @@ def test_console_show_command_prints_simulation_config_pipeline() -> None:
     )
 
     assert result.returncode == 0
-    assert result.stdout.startswith("gzimagesrc topic=/camera fps=30")
+    assert result.stdout.startswith("gzimgsrc topic=/camera")
+    assert "controlledreddetect detection-enabled=true" in result.stdout
     assert "udpsink host=127.0.0.1 port=5600 sync=false async=false" in result.stdout
 
 
@@ -1253,6 +1360,8 @@ def test_run_command_dispatches_simulation_config_to_pipeline_runner(monkeypatch
     assert calls == [
         AppConfig(
             source=SimulationSourceConfig(topic="/camera", rate=30),
+            detector=DetectorConfig(enabled=True),
+            video_local=False,
             port=5600,
             mtu=800,
         )

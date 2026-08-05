@@ -1,6 +1,6 @@
 source:
   type: simulation
-  topic: /camera
+  topic: /X3/front_camera/image
   rate: 30
 detector:
   enabled: true
@@ -10,8 +10,8 @@ detector:
   high_h: 10
   high_s: 255
   high_v: 255
-video_local: false
+video_local: true
 codec: h264
 host: 127.0.0.1
-port: 5600
-mtu: 800
+port: 5000
+mtu: 1200

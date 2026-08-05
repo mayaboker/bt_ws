@@ -23,10 +23,10 @@ the main pipe component build from
 | -------------- | ----------------- | ----------------------- |
 | source         | camera, sim, file |                         |
 | video_local    | bool              | create the debug branch |
+| detector       | mapping           | optional red detector and HSV thresholds |
 | encode setting | TBD               |                         |
 | host           | string            | udp sink host           |
 | port           | int               | udp sink port           |
 | mtu            | int               | rtp mtu                 |
-
 
 

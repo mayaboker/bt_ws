@@ -1,11 +1,8 @@
 from loguru import logger
 
 from bt_gst.config import AppConfig
-from bt_gst.gst_environment import (
-    register_local_python_elements,
-    remove_local_python_plugin_paths_from_gst_scan,
-)
 from bt_gst.pipeline_builder import PipelineBuildError, build_pipeline_description
+from bt_gst.red_detection import read_red_detection
 
 pipeline_runner_logger = logger.bind(component="bt_gst.pipeline_runner")
 
@@ -22,8 +19,6 @@ def run_pipeline(config: AppConfig) -> int:
     pipeline_runner_logger.info(
         "starting GStreamer pipeline pipeline={}", pipeline_description
     )
-    remove_local_python_plugin_paths_from_gst_scan()
-
     try:
         import gi
 
@@ -37,14 +32,18 @@ def run_pipeline(config: AppConfig) -> int:
 
     Gst.init(None)
     try:
-        register_local_python_elements(Gst)
-    except Exception as exc:
-        raise PipelineRunError(f"GStreamer Python plugins could not be registered: {exc}") from exc
-
-    try:
         pipeline = Gst.parse_launch(pipeline_description)
     except Exception as exc:
         raise PipelineRunError(f"GStreamer pipeline could not be parsed: {exc}") from exc
+
+    if config.detector.enabled:
+        detection_sink = pipeline.get_by_name("detection_sink")
+        if detection_sink is None:
+            pipeline.set_state(Gst.State.NULL)
+            raise PipelineRunError(
+                "GStreamer element 'detection_sink' was not found"
+            )
+        detection_sink.connect("new-sample", _on_detection_sample, Gst)
 
     bus = pipeline.get_bus()
     pipeline.set_state(Gst.State.PLAYING)
@@ -75,3 +74,28 @@ def run_pipeline(config: AppConfig) -> int:
     finally:
         pipeline.set_state(Gst.State.NULL)
         pipeline_runner_logger.debug("GStreamer pipeline entered NULL")
+
+
+def _on_detection_sample(sink: object, gst: object) -> object:
+    sample = sink.emit("pull-sample")
+    if sample is None:
+        return gst.FlowReturn.ERROR
+    buffer = sample.get_buffer()
+    if buffer is None:
+        return gst.FlowReturn.OK
+    detection = read_red_detection(buffer)
+    if detection is None:
+        pipeline_runner_logger.warning("red detection buffer has no metadata")
+        return gst.FlowReturn.OK
+
+
+    pipeline_runner_logger.debug(
+        "red detection found={} x={} y={} width={} height={} pts_ns={}",
+        detection.found,
+        detection.x,
+        detection.y,
+        detection.width,
+        detection.height,
+        detection.pts_ns,
+    )
+    return gst.FlowReturn.OK

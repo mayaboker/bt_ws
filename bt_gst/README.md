@@ -46,17 +46,30 @@ To inspect the bundled pass-through plugin manually:
 GST_PLUGIN_PATH="$PWD/plugins" gst-inspect-1.0 btpassthrough
 ```
 
-## gst gazebo image src plugin
+## Gazebo image source and detector plugins
 
 ```bash
-GST_PLUGIN_PATH="$PWD/plugins" gst-inspect-1.0 customsrc
+GST_PLUGIN_PATH=/path/to/gst_gzimgsrc/build:$PWD/plugins/gst_detector/build \
+  gst-inspect-1.0 gzimgsrc
+GST_PLUGIN_PATH=/path/to/gst_gzimgsrc/build:$PWD/plugins/gst_detector/build \
+  gst-inspect-1.0 controlledreddetect
 ```
 
-```bash
-GST_PLUGIN_PATH="$PWD/plugins" gst-launch-1.0 customsrc ! videoconvert ! autovideosink
+Enable the detector and configure its HSV thresholds in YAML:
+
+```yaml
+detector:
+  enabled: true
+  low_h: 0
+  low_s: 100
+  low_v: 100
+  high_h: 10
+  high_s: 255
+  high_v: 255
 ```
 
-
+The detector runs before the video tee, so its output feeds both the RTP/UDP
+stream and the optional local preview.
 
 # run video
 
@@ -65,5 +78,6 @@ gst-launch-1.0 -v videotestsrc is-live=true pattern=smpte   ! video/x-raw,width=
 ```
 
 ```
-GST_PLUGIN_PATH="$PWD/plugins" gst-launch-1.0 -v   gzimagesrc topic=/camera fps=30   ! videoconvert   ! videoscale   ! video/x-raw,format=I420,width=640,height=480,framerate=30/1   ! x264enc bitrate=1500 tune=zerolatency speed-preset=ultrafast       key-int-max=30 bframes=0 byte-stream=true aud=true       intra-refresh=false sliced-threads=false threads=1   ! video/x-h264,stream-format=byte-stream,alignment=au,profile=constrained-baseline   ! h264parse config-interval=1   ! rtph264pay pt=96 mtu=800 config-interval=1 aggregate-mode=zero-latency   ! udpsink host=127.0.0.1 port=5600 sync=false async=false 
+GST_PLUGIN_PATH=/path/to/gst_gzimgsrc/build gst-launch-1.0 -v \
+  gzimgsrc topic=/camera ! videoconvert ! glimagesink
 ```

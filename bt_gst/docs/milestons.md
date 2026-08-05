@@ -19,7 +19,7 @@
 
 
 # milestone #4
-- [x] add simulation source using `gzimagesrc`
+- [x] add simulation source using native `gzimgsrc`
 - [x] add simulation source rate config
 - [x] configure GStreamer plugin path in active runtime
 - [x] keep Gazebo Python modules as optional runtime dependencies

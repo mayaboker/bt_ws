@@ -77,8 +77,31 @@ SUPPORTED_CODECS = frozenset({DEFAULT_CODEC})
 
 
 @dataclass(frozen=True)
+class DetectorConfig:
+    enabled: bool = False
+    low_h: int = 0
+    low_s: int = 100
+    low_v: int = 100
+    high_h: int = 10
+    high_s: int = 255
+    high_v: int = 255
+
+
+@dataclass(frozen=True)
+class DetectorConfigOverrides:
+    enabled: bool | None = None
+    low_h: int | None = None
+    low_s: int | None = None
+    low_v: int | None = None
+    high_h: int | None = None
+    high_s: int | None = None
+    high_v: int | None = None
+
+
+@dataclass(frozen=True)
 class AppConfig:
     source: SourceConfig | None = None
+    detector: DetectorConfig = DetectorConfig()
     video_local: bool = DEFAULT_VIDEO_LOCAL
     codec: str = DEFAULT_CODEC
     host: str = DEFAULT_HOST
@@ -89,6 +112,7 @@ class AppConfig:
 @dataclass(frozen=True)
 class AppConfigOverrides:
     source: SourceOverride | None = None
+    detector: DetectorConfigOverrides | None = None
     video_local: bool | None = None
     codec: str | None = None
     host: str | None = None
@@ -137,8 +161,24 @@ def app_config_overrides_from_mapping(raw_config: dict[str, Any]) -> AppConfigOv
     else:
         source = source_config_from_mapping(raw_source)
 
+    raw_detector = raw_config.get("detector")
+    detector = None
+    if raw_detector is not None:
+        if not isinstance(raw_detector, dict):
+            raise ConfigError("detector must be a mapping")
+        detector = DetectorConfigOverrides(
+            enabled=_optional_bool(raw_detector, "enabled"),
+            low_h=_optional_int(raw_detector, "low_h"),
+            low_s=_optional_int(raw_detector, "low_s"),
+            low_v=_optional_int(raw_detector, "low_v"),
+            high_h=_optional_int(raw_detector, "high_h"),
+            high_s=_optional_int(raw_detector, "high_s"),
+            high_v=_optional_int(raw_detector, "high_v"),
+        )
+
     return AppConfigOverrides(
         source=source,
+        detector=detector,
         video_local=_optional_bool(raw_config, "video_local"),
         codec=_optional_string(raw_config, "codec"),
         host=_optional_string(raw_config, "host"),
@@ -188,6 +228,7 @@ def resolve_config(
     for override in overrides:
         config = AppConfig(
             source=_resolve_source_config(config.source, override.source),
+            detector=_resolve_detector_config(config.detector, override.detector),
             video_local=(
                 override.video_local
                 if override.video_local is not None
@@ -201,13 +242,41 @@ def resolve_config(
     return config
 
 
+def _resolve_detector_config(
+    current: DetectorConfig,
+    override: DetectorConfigOverrides | None,
+) -> DetectorConfig:
+    if override is None:
+        return current
+    return DetectorConfig(
+        enabled=override.enabled if override.enabled is not None else current.enabled,
+        low_h=override.low_h if override.low_h is not None else current.low_h,
+        low_s=override.low_s if override.low_s is not None else current.low_s,
+        low_v=override.low_v if override.low_v is not None else current.low_v,
+        high_h=override.high_h if override.high_h is not None else current.high_h,
+        high_s=override.high_s if override.high_s is not None else current.high_s,
+        high_v=override.high_v if override.high_v is not None else current.high_v,
+    )
+
+
 def merge_config(
     base: AppConfig | None,
     overrides: AppConfigOverrides | AppConfig,
 ) -> AppConfig:
     config_logger.trace("merging config base={!r} overrides={!r}", base, overrides)
     if isinstance(overrides, AppConfig):
-        overrides = AppConfigOverrides(source=overrides.source)
+        overrides = AppConfigOverrides(
+            source=overrides.source,
+            detector=DetectorConfigOverrides(
+                enabled=overrides.detector.enabled,
+                low_h=overrides.detector.low_h,
+                low_s=overrides.detector.low_s,
+                low_v=overrides.detector.low_v,
+                high_h=overrides.detector.high_h,
+                high_s=overrides.detector.high_s,
+                high_v=overrides.detector.high_v,
+            ),
+        )
     return resolve_config(base or AppConfig(), overrides)
 
 
@@ -284,7 +353,30 @@ def validate_config(config: AppConfig) -> AppConfig:
         raise ConfigError("mtu must be an int")
     if config.mtu <= 0:
         raise ConfigError("mtu must be greater than 0")
+    _validate_detector_config(config.detector)
     return config
+
+
+def _validate_detector_config(detector: DetectorConfig) -> None:
+    if not isinstance(detector.enabled, bool):
+        raise ConfigError("detector.enabled must be a bool")
+    limits = {
+        "low_h": 179,
+        "high_h": 179,
+        "low_s": 255,
+        "high_s": 255,
+        "low_v": 255,
+        "high_v": 255,
+    }
+    for field, maximum in limits.items():
+        value = getattr(detector, field)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ConfigError(f"detector.{field} must be an int")
+        if not 0 <= value <= maximum:
+            raise ConfigError(f"detector.{field} must be between 0 and {maximum}")
+    for low, high in (("low_h", "high_h"), ("low_s", "high_s"), ("low_v", "high_v")):
+        if getattr(detector, low) > getattr(detector, high):
+            raise ConfigError(f"detector.{low} must not exceed detector.{high}")
 
 
 def _required_string(raw_source: dict[str, Any], field: str, source_type: str) -> str:

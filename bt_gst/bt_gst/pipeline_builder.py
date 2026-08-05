@@ -7,6 +7,7 @@ from bt_gst.config import (
     AppConfig,
     CameraSourceConfig,
     ConfigError,
+    DetectorConfig,
     FileSourceConfig,
     SimulationSourceConfig,
     SourceConfig,
@@ -26,13 +27,17 @@ def build_pipeline_description(config: AppConfig) -> str:
     pipeline_builder_logger.trace("building pipeline source={!r}", source)
     parts = [
         build_source_pipeline_description(source),
-        "! videoconvert ! tee name=video_tee",
+        build_processing_pipeline_description(config.detector),
+        "! tee name=video_tee",
         "video_tee. !",
         build_stream_branch_description(config),
     ]
     debug_branch = build_debug_branch_description(config)
     if debug_branch:
         parts.append(debug_branch)
+    detection_branch = build_detection_branch_description(config)
+    if detection_branch:
+        parts.append(detection_branch)
     return " ".join(parts)
 
 
@@ -45,8 +50,19 @@ def build_source_pipeline_description(source: SourceConfig) -> str:
     if isinstance(source, CameraSourceConfig):
         return f"v4l2src device={shlex.quote(source.device)}"
     if isinstance(source, SimulationSourceConfig):
-        return f"gzimagesrc topic={shlex.quote(source.topic)} fps={source.rate}"
+        return f"gzimgsrc topic={shlex.quote(source.topic)}"
     raise ConfigError("source config is required")
+
+
+def build_processing_pipeline_description(detector: DetectorConfig) -> str:
+    if not detector.enabled:
+        return "! videoconvert"
+    return (
+        "! videoconvert ! video/x-raw,format=RGB ! controlledreddetect "
+        f"detection-enabled=true low-h={detector.low_h} low-s={detector.low_s} "
+        f"low-v={detector.low_v} high-h={detector.high_h} "
+        f"high-s={detector.high_s} high-v={detector.high_v}"
+    )
 
 
 def build_stream_branch_description(config: AppConfig) -> str:
@@ -61,7 +77,7 @@ def build_stream_branch_description(config: AppConfig) -> str:
             f"framerate={framerate}/1"
         )
     return (
-        "queue ! videoconvert ! videoscale ! "
+        "queue ! videoconvert ! videoscale ! videorate !"
         f"{raw_caps} ! "
         "x264enc bitrate=1500 tune=zerolatency speed-preset=ultrafast "
         "key-int-max=30 bframes=0 byte-stream=true aud=true "
@@ -80,6 +96,16 @@ def build_debug_branch_description(config: AppConfig) -> str:
     if not config.video_local:
         return ""
     return "video_tee. ! queue ! videoconvert ! fpsdisplaysink video-sink=glimagesink sync=true"
+
+
+def build_detection_branch_description(config: AppConfig) -> str:
+    if not config.detector.enabled:
+        return ""
+    return (
+        "video_tee. ! queue leaky=downstream max-size-buffers=1 ! "
+        "appsink name=detection_sink emit-signals=true sync=false "
+        "max-buffers=1 drop=true"
+    )
 
 
 def _quote_path(path: Path) -> str:
