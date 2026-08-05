@@ -3,14 +3,19 @@ from dataclasses import dataclass
 from loguru import logger
 
 from bt_gst.bridge.zmq_io import (
-    NullTelemetryPublisher,
-    TelemetryPublisher,
-    ZmqTelemetryPublisher,
+    NullTrackerIoAdapter,
+    TrackerIoAdapter,
+    ZmqTrackerIoAdapter,
 )
 from bt_gst.bridge.zmq_models import RedDetectionMessage
 from bt_gst.config import AppConfig
 from bt_gst.pipeline_builder import PipelineBuildError, build_pipeline_description
-from bt_gst.red_detection import DetectionOverlayState, RedDetection, read_red_detection
+from bt_gst.red_detection import (
+    DetectionOverlayState,
+    RedDetection,
+    TrackerCursorState,
+    read_red_detection,
+)
 
 pipeline_runner_logger = logger.bind(component="bt_gst.pipeline_runner")
 
@@ -21,7 +26,7 @@ class PipelineRunError(RuntimeError):
 
 @dataclass
 class DetectionTelemetryState:
-    publisher: TelemetryPublisher
+    publisher: TrackerIoAdapter
     next_frame_id: int = 1
 
     def publish(self, detection: RedDetection) -> None:
@@ -65,11 +70,16 @@ def run_pipeline(config: AppConfig) -> int:
         raise PipelineRunError(f"GStreamer pipeline could not be parsed: {exc}") from exc
 
     try:
-        telemetry_publisher = _build_telemetry_publisher(config)
+        tracker_io = _build_telemetry_publisher(config)
     except PipelineRunError:
         pipeline.set_state(Gst.State.NULL)
         raise
     try:
+        cursor_state = (
+            TrackerCursorState(frame_width=640, frame_height=480)
+            if config.zmq.enabled
+            else None
+        )
         if config.detector.enabled:
             detection_sink = pipeline.get_by_name("detection_sink")
             if detection_sink is None:
@@ -79,7 +89,7 @@ def run_pipeline(config: AppConfig) -> int:
             detection_sink.connect(
                 "new-sample",
                 _on_detection_sample,
-                (Gst, DetectionTelemetryState(telemetry_publisher)),
+                (Gst, DetectionTelemetryState(tracker_io)),
             )
 
         if config.detector.overlay_enabled:
@@ -100,14 +110,19 @@ def run_pipeline(config: AppConfig) -> int:
                 (overlay_state, Gst),
             )
             detection_overlay.connect("draw", _on_detection_overlay_draw, overlay_state)
+            if cursor_state is not None:
+                detection_overlay.connect("draw", _on_tracker_cursor_draw, cursor_state)
 
         bus = pipeline.get_bus()
         pipeline.set_state(Gst.State.PLAYING)
         pipeline_runner_logger.debug("GStreamer pipeline entered PLAYING")
         try:
             while True:
+                if cursor_state is not None:
+                    for request in tracker_io.poll_requests():
+                        cursor_state.apply(request)
                 message = bus.timed_pop_filtered(
-                    Gst.CLOCK_TIME_NONE,
+                    50 * getattr(Gst, "MSECOND", 1_000_000),
                     Gst.MessageType.ERROR | Gst.MessageType.EOS,
                 )
                 if message is None:
@@ -129,20 +144,21 @@ def run_pipeline(config: AppConfig) -> int:
             return 0
     finally:
         pipeline.set_state(Gst.State.NULL)
-        telemetry_publisher.close()
+        tracker_io.close()
         pipeline_runner_logger.debug("GStreamer pipeline entered NULL")
 
 
-def _build_telemetry_publisher(config: AppConfig) -> TelemetryPublisher:
+def _build_telemetry_publisher(config: AppConfig) -> TrackerIoAdapter:
     if not config.zmq.enabled:
-        return NullTelemetryPublisher()
+        return NullTrackerIoAdapter()
     try:
-        return ZmqTelemetryPublisher(
+        return ZmqTrackerIoAdapter(
+            request_endpoint=config.zmq.request_endpoint,
             telemetry_endpoint=config.zmq.telemetry_endpoint,
             bind=config.zmq.bind,
         )
     except Exception as exc:
-        raise PipelineRunError(f"ZMQ telemetry publisher could not start: {exc}") from exc
+        raise PipelineRunError(f"ZMQ tracker bridge could not start: {exc}") from exc
 
 
 def _on_detection_sample(
@@ -205,5 +221,28 @@ def _on_detection_overlay_draw(
         detection.y + half_line,
         max(0.0, detection.width - line_width),
         max(0.0, detection.height - line_width),
+    )
+    context.stroke()
+
+
+def _on_tracker_cursor_draw(
+    _overlay: object,
+    context: object,
+    _timestamp: int,
+    _duration: int,
+    state: TrackerCursorState,
+) -> None:
+    roi = state.snapshot()
+    if roi is None:
+        return
+    line_width = 3.0
+    half_line = line_width / 2.0
+    context.set_source_rgba(0.0, 1.0, 1.0, 1.0)
+    context.set_line_width(line_width)
+    context.rectangle(
+        roi.x + half_line,
+        roi.y + half_line,
+        max(0.0, roi.width - line_width),
+        max(0.0, roi.height - line_width),
     )
     context.stroke()

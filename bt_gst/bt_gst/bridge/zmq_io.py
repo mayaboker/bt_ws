@@ -19,6 +19,9 @@ DEFAULT_TELEMETRY_ENDPOINT = "tcp://127.0.0.1:5556"
 
 
 class TrackerIoAdapter(Protocol):
+    def poll_requests(self) -> list[TrackRequest]:
+        """Return all pending valid requests in receive order."""
+
     def poll_latest_request(self) -> TrackRequest | None:
         """Return the newest pending request, dropping older pending requests."""
 
@@ -36,6 +39,9 @@ class TrackerIoAdapter(Protocol):
 
 
 class NullTrackerIoAdapter:
+    def poll_requests(self) -> list[TrackRequest]:
+        return []
+
     def poll_latest_request(self) -> TrackRequest | None:
         return None
 
@@ -88,15 +94,19 @@ class ZmqTrackerIoAdapter:
             raise
 
     def poll_latest_request(self) -> TrackRequest | None:
-        latest_request = None
+        requests = self.poll_requests()
+        return requests[-1] if requests else None
+
+    def poll_requests(self) -> list[TrackRequest]:
+        requests = []
         while True:
             try:
                 payload = self._request_socket.recv(flags=self._zmq.NOBLOCK)
             except self._zmq.Again:
-                return latest_request
+                return requests
 
             try:
-                latest_request = decode_request(payload)
+                requests.append(decode_request(payload))
             except (KeyError, TypeError, ValueError, self._zmq.ZMQError) as exc:
                 logger.warning("ignored invalid tracker request reason={}", exc)
 

@@ -27,6 +27,7 @@ from bt_app.msp_adapter import MSPAdapter
 from bt_app.msp import MspTransportDependencyError
 from bt_app.mavlink_wrapper import MavlinkService
 from bt_app.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
+from bt_app.control.tracker_request import TrackerRequestPublisher
 from bt_app.control.land_detector import LandDetector
 from bt_app.common import (
     AutoModeType,
@@ -93,6 +94,12 @@ class App:
         try:
             self.__params = self.__load_parameters()
             self.visual_observer = self.__load_visual_observer()
+            self.tracker_request_publisher = self.__load_tracker_request_publisher()
+            self._tracker_session_active = False
+            self._tracker_start_pending = False
+            self._tracker_requires_disabled = False
+            self._tracker_next_adjust_at = 0.0
+            self._tracker_enabled_at = float("inf")
             self.ctx.alt_setpoint = self.__params.get(ParameterKey.TAKEOFF_ALT)
             self.manual_land_detector = self.__load_manual_land_detector()
             parameter_event = getattr(self.__params, "on_parameter_changed", None)
@@ -100,7 +107,7 @@ class App:
                 parameter_event.subscribe(self._on_application_parameter_changed)
             self._manual_land_detection_started_notified = False
             self._manual_land_confirmed_notified = False
-            self._last_rc_channel = [RC_MIN] * NO_RC_CHANNELS
+            self._last_rc_channel = [RC_MIN] * (int(InternalJoy.TRACKER_MODE) + 1)
             self.__load_drone_interface()
             self.__load_controllers()
             self.mavlink_service = MavlinkService(
@@ -133,6 +140,21 @@ class App:
                 raise AppStartupError("Visual image height must be greater than zero")
             if self.config.visual_print_rate_hz <= 0:
                 raise AppStartupError("Visual print rate must be greater than zero")
+
+        positive_tracker_values = {
+            "tracker_adjust_step_x_px": self.config.tracker_adjust_step_x_px,
+            "tracker_adjust_step_y_px": self.config.tracker_adjust_step_y_px,
+            "tracker_adjust_rate_hz": self.config.tracker_adjust_rate_hz,
+            "tracker_bridge_health_timeout_s": self.config.tracker_bridge_health_timeout_s,
+            "tracker_result_timeout_s": self.config.tracker_result_timeout_s,
+        }
+        if not self.config.tracker_request_endpoint:
+            raise AppStartupError("Tracker request endpoint must not be empty")
+        for name, value in positive_tracker_values.items():
+            if value <= 0:
+                raise AppStartupError(f"{name} must be greater than zero")
+        if not 0 <= self.config.tracker_adjust_deadband_pwm < 500:
+            raise AppStartupError("tracker_adjust_deadband_pwm must be between 0 and 499")
 
         if self.config.drone_sink != DroneSink.SERIAL.value:
             return
@@ -256,6 +278,11 @@ class App:
         )
         observer.start()
         return observer
+
+    def __load_tracker_request_publisher(self):
+        publisher = TrackerRequestPublisher(self.config.tracker_request_endpoint)
+        publisher.start()
+        return publisher
 
     def __load_controllers(self):
         """
@@ -394,16 +421,40 @@ class App:
         """
         handle interrupt that register as joy action
         """
-        prev_channels = self._last_rc_channel
-        self._last_rc_channel = list(event.channels)
+        prev_channels = list(self._last_rc_channel)
+        channels = list(event.channels)
+        required = int(InternalJoy.TRACKER_MODE) + 1
+        if len(prev_channels) < required:
+            prev_channels.extend([RC_MIN] * (required - len(prev_channels)))
+        if len(channels) < required:
+            channels.extend([RC_MIN] * (required - len(channels)))
+        self._last_rc_channel = channels
         self.ctx.request_rc = self._last_rc_channel
         # if name == JoyInterrupt.TAKEOFF_REQUEST:
         self.ctx.joy_takeoff_request = self._last_rc_channel[InternalJoy.AUTO_TAKE_OFF] == RC_MAX
         self.ctx.joy_manual_request = self._last_rc_channel[InternalJoy.MANUAL] == RC_MIN
-        self.ctx.auto_mode_type = AutoModeType(self._last_rc_channel[InternalJoy.TRACKER_MODE])
-        if prev_channels[InternalJoy.ENABLER] == RC_MIN and self._last_rc_channel[InternalJoy.ENABLER] == RC_MAX:
-            self.ctx.auto_mode_enable = not self.ctx.auto_mode_enable
-            log.info(f"auto mode enable: {self.ctx.auto_mode_enable}")
+        previous_mode = self.ctx.auto_mode_type
+        try:
+            requested_mode = AutoModeType(
+                self._last_rc_channel[InternalJoy.TRACKER_MODE]
+            )
+        except ValueError:
+            requested_mode = previous_mode
+            log.warning(
+                "Ignoring invalid tracker mode RC value {}",
+                self._last_rc_channel[InternalJoy.TRACKER_MODE],
+            )
+        self.ctx.auto_mode_type = requested_mode
+        now = time.monotonic()
+        self._handle_tracker_mode(previous_mode, requested_mode, now)
+
+        enabler_rising = (
+            prev_channels[InternalJoy.ENABLER] == RC_MIN
+            and self._last_rc_channel[InternalJoy.ENABLER] == RC_MAX
+        )
+        if enabler_rising:
+            self._handle_tracker_enabler(now)
+        self._send_tracker_adjustment(now)
         
         self.ctx.arm_switch = self._last_rc_channel[InternalJoy.ARM] == RC_MAX
         throttle_for_arm = self._last_rc_channel[InternalJoy.THROTTLE] < 1050
@@ -424,8 +475,8 @@ class App:
     def _enter_joystick_failsafe(self) -> None:
         """Clear stale joystick intent and request application failsafe."""
         safe_channels = DEFAULT_RC_CHANNELS.copy()
-        self._last_rc_channel = safe_channels
-        self.ctx.request_rc = safe_channels.copy()
+        self._last_rc_channel = safe_channels.copy()
+        self.ctx.request_rc = safe_channels
         self.ctx.joy_fail_safe = True
         self.ctx.joy_takeoff_request = False
         self.ctx.joy_manual_request = False
@@ -433,6 +484,110 @@ class App:
         self.ctx.armed_allowed = False
         self.ctx.arm_switch = False
         self.ctx.auto_mode_enable = False
+        self._tracker_enabled_at = float("inf")
+        self._tracker_session_active = False
+        self._tracker_start_pending = False
+        self._tracker_requires_disabled = True
+        publisher = getattr(self, "tracker_request_publisher", None)
+        if publisher is not None:
+            publisher.stop_tracking()
+
+    def _handle_tracker_mode(
+        self,
+        previous: AutoModeType,
+        requested: AutoModeType,
+        now: float,
+    ) -> None:
+        if requested == AutoModeType.DISABLED:
+            self._tracker_requires_disabled = False
+            if previous != AutoModeType.DISABLED or self._tracker_session_active:
+                self.tracker_request_publisher.stop_tracking()
+            self._tracker_session_active = False
+            self._tracker_start_pending = False
+            self.ctx.auto_mode_enable = False
+            self._tracker_enabled_at = float("inf")
+            return
+
+        if self.ctx.state == RobotState.FAILSAFE or self._tracker_requires_disabled:
+            return
+
+        if previous == AutoModeType.DISABLED and not self._tracker_session_active:
+            self.tracker_request_publisher.start_tracking(
+                self.config.tracker_initial_x,
+                self.config.tracker_initial_y,
+            )
+            self._tracker_session_active = True
+            self._tracker_start_pending = not self._tracker_bridge_healthy(now)
+
+        if self._tracker_start_pending and self._tracker_bridge_healthy(now):
+            self.tracker_request_publisher.start_tracking(
+                self.config.tracker_initial_x,
+                self.config.tracker_initial_y,
+            )
+            self._tracker_start_pending = False
+
+        if previous == AutoModeType.TRACKING and requested == AutoModeType.CURSOR:
+            self.ctx.auto_mode_enable = False
+            self._tracker_enabled_at = float("inf")
+
+    def _handle_tracker_enabler(self, now: float) -> None:
+        if self.ctx.auto_mode_enable:
+            self.ctx.auto_mode_enable = False
+            self._tracker_enabled_at = float("inf")
+            log.info("tracker result control disabled")
+            return
+        if (
+            self.ctx.auto_mode_type != AutoModeType.TRACKING
+            or self.ctx.state != RobotState.ALT_HOLD
+            or not self._tracker_session_active
+        ):
+            log.warning("Tracker enable ignored: TRACKING selector and ALT_HOLD required")
+            return
+        if not self._tracker_bridge_healthy(now):
+            log.warning("Tracker enable ignored: no recent bt_gst telemetry")
+            self.mavlink_service.send_text_to_gcs(
+                "Tracker unavailable: no recent telemetry",
+                MavSeverity.WARNING,
+            )
+            return
+        self.ctx.auto_mode_enable = True
+        self._tracker_enabled_at = now
+        log.info("tracker result control enabled; waiting for a fresh result")
+
+    def _tracker_bridge_healthy(self, now: float) -> bool:
+        return self.visual_observer is not None and self.visual_observer.is_healthy(
+            self.config.tracker_bridge_health_timeout_s,
+            now=now,
+        )
+
+    def _send_tracker_adjustment(self, now: float) -> None:
+        if (
+            self.ctx.auto_mode_type != AutoModeType.CURSOR
+            or not self._tracker_session_active
+            or self.ctx.state == RobotState.FAILSAFE
+            or now < self._tracker_next_adjust_at
+        ):
+            return
+        deadband = self.config.tracker_adjust_deadband_pwm
+        roll = self._last_rc_channel[InternalJoy.ROLL]
+        pitch = self._last_rc_channel[InternalJoy.PITCH]
+        delta_x = (
+            -self.config.tracker_adjust_step_x_px
+            if roll < RC_MID - deadband
+            else self.config.tracker_adjust_step_x_px
+            if roll > RC_MID + deadband
+            else 0
+        )
+        delta_y = (
+            -self.config.tracker_adjust_step_y_px
+            if pitch < RC_MID - deadband
+            else self.config.tracker_adjust_step_y_px
+            if pitch > RC_MID + deadband
+            else 0
+        )
+        if delta_x or delta_y:
+            self.tracker_request_publisher.adjust(delta_x, delta_y)
+            self._tracker_next_adjust_at = now + 1.0 / self.config.tracker_adjust_rate_hz
 
     def _joystick_fs_enter(self, event: NoCommunicationEvent):
         log.warning(
@@ -548,34 +703,27 @@ class App:
         return rc
 
     def auto_mode_handler(self):
-        if self.ctx.auto_mode_enable:
-            log.warning("not implement yat fall to alt hold")
-            self.ctx.auto_mode_enable = False
-
-        if not self.ctx.auto_mode_enable:
-            """
-            ALT Hold handler
-            """
-            controller = self.controllers[RobotState.ALT_HOLD]
-            # read last joystick state
-            # controller.update_setpoint_from_throttle(
-            #     self.ctx.request_rc[AETR1234.THROTTLE]
-            # )
-            controller.update_yaw_from_joystick(
-                self.ctx.request_rc[AETR1234.YAW]
+        now = time.monotonic()
+        observation = None
+        if self.ctx.auto_mode_enable and self.visual_observer is not None:
+            observation = self.visual_observer.fresh_observation(
+                received_after=self._tracker_enabled_at,
+                max_age_s=self.config.tracker_result_timeout_s,
+                now=now,
             )
+        if observation is not None and observation.detection.found:
+            return observation.command.to_list()
+        return self._tracking_alt_hold_fallback()
 
-
-            # disabled pitch / roll
-            controller.update_pitch_roll(RC_MID, RC_MID)
-
-            setpoint = controller.setpoint
-            rc = controller.update(
-                setpoint,
-                self.ctx.drone_alt,
-                self.ctx.drone_alt_received_at_s,
-            )
-            return rc
+    def _tracking_alt_hold_fallback(self):
+        controller = self.controllers[RobotState.ALT_HOLD]
+        controller.update_yaw_from_joystick(RC_MID)
+        controller.update_pitch_roll(RC_MID, RC_MID)
+        return controller.update(
+            controller.setpoint,
+            self.ctx.drone_alt,
+            self.ctx.drone_alt_received_at_s,
+        )
 
 
     def alt_hold_handler(self):
@@ -790,6 +938,7 @@ class App:
                 "joystick listener",
                 getattr(self, "controllers", {}).get(RobotState.MANUAL),
             ),
+            ("tracker request publisher", getattr(self, "tracker_request_publisher", None)),
             ("MAVLink service", getattr(self, "mavlink_service", None)),
             ("RC state recorder", getattr(self, "rc_recorder", None)),
             ("parameter service", getattr(self, "_App__params", None)),

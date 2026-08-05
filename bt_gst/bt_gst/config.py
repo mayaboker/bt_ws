@@ -104,6 +104,7 @@ class DetectorConfigOverrides:
 @dataclass(frozen=True)
 class ZmqConfig:
     enabled: bool = False
+    request_endpoint: str = "tcp://127.0.0.1:5555"
     telemetry_endpoint: str = DEFAULT_ZMQ_TELEMETRY_ENDPOINT
     bind: bool = True
 
@@ -111,6 +112,7 @@ class ZmqConfig:
 @dataclass(frozen=True)
 class ZmqConfigOverrides:
     enabled: bool | None = None
+    request_endpoint: str | None = None
     telemetry_endpoint: str | None = None
     bind: bool | None = None
 
@@ -203,6 +205,7 @@ def app_config_overrides_from_mapping(raw_config: dict[str, Any]) -> AppConfigOv
             raise ConfigError("zmq must be a mapping")
         zmq = ZmqConfigOverrides(
             enabled=_optional_bool(raw_zmq, "enabled"),
+            request_endpoint=_optional_string(raw_zmq, "request_endpoint"),
             telemetry_endpoint=_optional_string(raw_zmq, "telemetry_endpoint"),
             bind=_optional_bool(raw_zmq, "bind"),
         )
@@ -305,6 +308,11 @@ def _resolve_zmq_config(
         return current
     return ZmqConfig(
         enabled=override.enabled if override.enabled is not None else current.enabled,
+        request_endpoint=(
+            override.request_endpoint
+            if override.request_endpoint is not None
+            else current.request_endpoint
+        ),
         telemetry_endpoint=(
             override.telemetry_endpoint
             if override.telemetry_endpoint is not None
@@ -334,6 +342,7 @@ def merge_config(
             ),
             zmq=ZmqConfigOverrides(
                 enabled=overrides.zmq.enabled,
+                request_endpoint=overrides.zmq.request_endpoint,
                 telemetry_endpoint=overrides.zmq.telemetry_endpoint,
                 bind=overrides.zmq.bind,
             ),
@@ -452,6 +461,8 @@ def _validate_zmq_config(zmq: ZmqConfig, detector: DetectorConfig) -> None:
         raise ConfigError("zmq.bind must be a bool")
     if not isinstance(zmq.telemetry_endpoint, str) or not zmq.telemetry_endpoint:
         raise ConfigError("zmq.telemetry_endpoint must be a non-empty string")
+    if not isinstance(zmq.request_endpoint, str) or not zmq.request_endpoint:
+        raise ConfigError("zmq.request_endpoint must be a non-empty string")
     if zmq.enabled and not detector.enabled:
         raise ConfigError("zmq.enabled requires detector.enabled")
 

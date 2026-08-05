@@ -455,6 +455,9 @@ class VisualTrackerObserver:
         self._clock = clock
         self._last_printed_at = float("-inf")
         self._last_found: bool | None = None
+        self._observation_lock = threading.Lock()
+        self._latest_observation: VisualObservation | None = None
+        self._latest_received_at = float("-inf")
         self.comm = VisualTargetComm(endpoint=endpoint, context=context)
         self.comm.on_result = self.resolve
         self.params.on_parameter_changed.subscribe(self.on_parameter_changed)
@@ -498,6 +501,7 @@ class VisualTrackerObserver:
         self.controller.update_config(field_name, value)
 
     def resolve(self, detection: VisualDetectionMessage) -> VisualObservation:
+        received_at = self._clock()
         error_x, error_y = normalized_target_error(
             detection,
             image_width=self.image_width,
@@ -509,12 +513,38 @@ class VisualTrackerObserver:
             target_visible=detection.found,
         )
         observation = VisualObservation(detection, error_x, error_y, command)
-        if self._should_print(detection.found):
+        with self._observation_lock:
+            self._latest_observation = observation
+            self._latest_received_at = received_at
+        if self._should_print(detection.found, now=received_at):
             self._print_observation(observation)
         return observation
 
-    def _should_print(self, found: bool) -> bool:
-        now = self._clock()
+    def latest_received_at(self) -> float:
+        with self._observation_lock:
+            return self._latest_received_at
+
+    def is_healthy(self, timeout_s: float, *, now: float | None = None) -> bool:
+        current = self._clock() if now is None else now
+        return current - self.latest_received_at() <= timeout_s
+
+    def fresh_observation(
+        self,
+        *,
+        received_after: float,
+        max_age_s: float,
+        now: float | None = None,
+    ) -> VisualObservation | None:
+        current = self._clock() if now is None else now
+        with self._observation_lock:
+            if self._latest_received_at <= received_after:
+                return None
+            if current - self._latest_received_at > max_age_s:
+                return None
+            return self._latest_observation
+
+    def _should_print(self, found: bool, *, now: float | None = None) -> bool:
+        now = self._clock() if now is None else now
         state_changed = self._last_found is None or found != self._last_found
         due = now - self._last_printed_at >= self.print_period_s
         self._last_found = found
@@ -527,23 +557,23 @@ class VisualTrackerObserver:
     def _print_observation(observation: VisualObservation) -> None:
         detection = observation.detection
         command = observation.command
-        log.info(
-            "visual frame={} pts_ns={} found={} bbox=({}, {}, {}, {}) "
-            "error=({:+.3f}, {:+.3f}) rc=(roll={} pitch={} throttle={} yaw={})",
-            detection.frame_id,
-            detection.timestamp_ns,
-            detection.found,
-            detection.x,
-            detection.y,
-            detection.width,
-            detection.height,
-            observation.error_x,
-            observation.error_y,
-            command.roll,
-            command.pitch,
-            command.throttle,
-            command.yaw,
-        )
+        # log.info(
+        #     "visual frame={} pts_ns={} found={} bbox=({}, {}, {}, {}) "
+        #     "error=({:+.3f}, {:+.3f}) rc=(roll={} pitch={} throttle={} yaw={})",
+        #     detection.frame_id,
+        #     detection.timestamp_ns,
+        #     detection.found,
+        #     detection.x,
+        #     detection.y,
+        #     detection.width,
+        #     detection.height,
+        #     observation.error_x,
+        #     observation.error_y,
+        #     command.roll,
+        #     command.pitch,
+        #     command.throttle,
+        #     command.yaw,
+        # )
 
 
 def normalized_target_error(

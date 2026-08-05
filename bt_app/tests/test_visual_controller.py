@@ -122,6 +122,39 @@ def test_observer_prints_at_rate_and_on_state_changes(monkeypatch) -> None:
     assert first.command.to_list()
 
 
+def test_observer_requires_post_enable_fresh_result() -> None:
+    now = [10.0]
+    observer = VisualTrackerObserver(FakeParameters(), clock=lambda: now[0])
+    detection = VisualDetectionMessage(1, 0, True, 240, 180, 160, 120)
+
+    observer.resolve(detection)
+    assert observer.is_healthy(1.0, now=10.5)
+    assert (
+        observer.fresh_observation(
+            received_after=10.0,
+            max_age_s=0.25,
+            now=10.1,
+        )
+        is None
+    )
+
+    now[0] = 10.1
+    fresh = observer.resolve(detection)
+    assert observer.fresh_observation(
+        received_after=10.0,
+        max_age_s=0.25,
+        now=10.2,
+    ) == fresh
+    assert (
+        observer.fresh_observation(
+            received_after=10.0,
+            max_age_s=0.25,
+            now=10.36,
+        )
+        is None
+    )
+
+
 def test_visual_target_comm_receives_single_frame_detection() -> None:
     endpoint = tcp_endpoint()
     context = zmq.Context()

@@ -15,7 +15,7 @@ sequenceDiagram
 
     Note over Gst,Request: bt_gst SUB binds
     Note over Gst,Telemetry: bt_gst PUB binds
-    Note over App,Request: Optional/future bt_app PUB connects
+    Note over App,Request: bt_app PUB connects
     Note over App,Telemetry: bt_app SUB connects
 
     App-->>Request: start / stop / resize / adjustment
@@ -24,10 +24,10 @@ sequenceDiagram
     Telemetry-->>App: newest available telemetry
 ```
 
-The current `bt_app` integration implements the telemetry subscriber and uses
-`red-detection` messages. The request channel and other telemetry types are
-part of the `bt_gst` bridge protocol but are not currently connected to the
-`bt_app` application lifecycle.
+`bt_app` owns a lifecycle-managed request publisher and continuously receives
+`red-detection` messages. Tracker commands are accepted while the joystick is
+in its pre-tracking session; tracker results are not granted flight-control
+authority until the enabler is toggled in TRACKING from ALT_HOLD.
 
 ## Transport contract
 
@@ -74,8 +74,9 @@ the video pipeline.
 {"type": "adjustment", "delta_x": -5, "delta_y": 3}
 ```
 
-When several requests are waiting, `bt_gst` drains the socket and applies the
-newest valid request.
+When several requests are waiting, `bt_gst` drains the socket and applies all
+valid requests in receive order. This preserves sequences such as `start`
+followed by `adjustment` or `resize`.
 
 ## Telemetry from `bt_gst` to `bt_app`
 

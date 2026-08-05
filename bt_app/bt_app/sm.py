@@ -96,6 +96,15 @@ class Robot_StateMachine:
             before=lambda x: self.on_before_state_changed.emit(RobotState.ALT_HOLD, RobotState.FAILSAFE),
             conditions=[self.enter_failsafe]
         )
+        self.machine.add_transition(
+            "resolve",
+            RobotState.TRACKING,
+            RobotState.FAILSAFE,
+            before=lambda x: self.on_before_state_changed.emit(
+                RobotState.TRACKING, RobotState.FAILSAFE
+            ),
+            conditions=[self.enter_failsafe],
+        )
         # endregion to FAILSAFE
 
         # region from FAILSAFE
@@ -342,14 +351,15 @@ class Robot_StateMachine:
     
     def enter_tracking_mode_from_alt_hold(self, event):
         ok = all([
-            self.ctx.auto_mode_type in [AutoModeType.TRACKING, AutoModeType.CURSOR],
+            self.ctx.auto_mode_type == AutoModeType.TRACKING,
+            self.ctx.auto_mode_enable,
             self.ctx.armed
         ])
         return ok
     
     def enter_alt_hold_mode_from_auto(self, event):
         ok = all([
-            self.ctx.auto_mode_type in [AutoModeType.DISABLED],
+            not self.ctx.auto_mode_enable,
             self.ctx.armed,
             not self.ctx.joy_manual_request
         ])

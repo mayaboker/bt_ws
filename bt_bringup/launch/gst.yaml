@@ -13,6 +13,7 @@ detector:
   high_v: 255
 zmq:
   enabled: true
+  request_endpoint: tcp://127.0.0.1:5555
   telemetry_endpoint: tcp://127.0.0.1:5556
   bind: true
 video_local: true

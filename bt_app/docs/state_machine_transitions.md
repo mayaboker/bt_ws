@@ -52,10 +52,11 @@ stateDiagram-v2
 | `TAKEOFF` | `MANUAL` | `enter_manual_from_takeoff` | `armed and joy_manual_request` |
 | `ALT_HOLD` | `FAILSAFE` | `enter_failsafe` | `armed and joy_fail_safe` |
 | `ALT_HOLD` | `MANUAL` | `enter_manual_mode_from_hover` | `joy_manual_request and armed` |
-| `ALT_HOLD` | `TRACKING` | `enter_tracking_mode_from_alt_hold` | `auto_mode_type in [TRACKING, CURSOR] and armed` |
+| `ALT_HOLD` | `TRACKING` | `enter_tracking_mode_from_alt_hold` | `auto_mode_type == TRACKING and auto_mode_enable and armed` |
+| `TRACKING` | `FAILSAFE` | `enter_failsafe` | `armed and joy_fail_safe` |
 | `FAILSAFE` | `ALT_HOLD` | `exit_failsafe` | `armed and not joy_fail_safe` |
 | `FAILSAFE` | `IDLE` | `exit_failsafe_to_idle` | `not joy_fail_safe and not joy_manual_request and not joy_takeoff_request` |
-| `TRACKING` | `ALT_HOLD` | `enter_alt_hold_mode_from_auto` | `auto_mode_type == DISABLED and armed and not joy_manual_request` |
+| `TRACKING` | `ALT_HOLD` | `enter_alt_hold_mode_from_auto` | `not auto_mode_enable and armed and not joy_manual_request` |
 
 ## Context Fields
 
@@ -82,4 +83,4 @@ stateDiagram-v2
 | `battery_voltage` | Latest battery voltage used for telemetry. | `App.__update_state` reads `drone_adapter.dispatcher.last_battery["voltage_v"]` and applies the current `+20.0` hack. |
 | `auto_mode_type` | Requested automatic mode. | `App.__handle_joy_interrupt` sets it from `AUX2` using `AutoModeType(value)`. |
 | `alt_setpoint` | Last altitude setpoint reported to GCS. | `App._takeoff_handler` and `App.hover_handler` update it when controller setpoint changes. |
-| `auto_mode_enable` | Enable flag for auto mode behavior. | `App.__handle_joy_interrupt` sets it from `AUX3 == RC_MAX`; `App.auto_mode_handler` currently clears it because auto behavior is not implemented. |
+| `auto_mode_enable` | Toggle gating tracker results into flight control. | `App.__handle_joy_rc` toggles it on an enabler rising edge only for a healthy TRACKING session from ALT_HOLD; CURSOR, DISABLED, or FAILSAFE clears it. |

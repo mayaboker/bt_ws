@@ -35,7 +35,7 @@ def wait_for_message(receiver: object, timeout: float = 1.0) -> bytes:
     raise AssertionError("timed out waiting for ZMQ message")
 
 
-def test_zmq_adapter_receives_latest_request_only() -> None:
+def test_zmq_adapter_receives_requests_in_order() -> None:
     context = zmq.Context()
     request_endpoint = tcp_endpoint()
     telemetry_endpoint = tcp_endpoint()
@@ -51,15 +51,17 @@ def test_zmq_adapter_receives_latest_request_only() -> None:
     assert adapter.poll_latest_request() is None
 
     try:
-        for _ in range(10):
+        for _ in range(2):
             publisher.send(encode_message(TrackStartRequest(x=1, y=2)))
             publisher.send(encode_message(TrackResizeRequest(width=30, height=40)))
             time.sleep(0.02)
 
-        assert adapter.poll_latest_request() == TrackResizeRequest(
-            width=30,
-            height=40,
-        )
+        requests = adapter.poll_requests()
+        assert requests[:2] == [
+            TrackStartRequest(x=1, y=2),
+            TrackResizeRequest(width=30, height=40),
+        ]
+        assert len(requests) == 4
     finally:
         publisher.close(linger=0)
         adapter.close()

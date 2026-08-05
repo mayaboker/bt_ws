@@ -43,8 +43,9 @@ with logical AND unless stated otherwise.
 | `TAKEOFF` | `MANUAL` | `enter_manual_from_takeoff` | `armed` and `joy_manual_request` and not `joy_takeoff_request` |
 | `ALT_HOLD` | `FAILSAFE` | `enter_failsafe` | `armed` and `joy_fail_safe` |
 | `ALT_HOLD` | `MANUAL` | `enter_manual_mode_from_hover` | `joy_manual_request` and `armed` |
-| `ALT_HOLD` | `TRACKING` | `enter_tracking_mode_from_alt_hold` | `auto_mode_type` is `TRACKING` or `CURSOR`, and `armed` |
-| `TRACKING` | `ALT_HOLD` | `enter_alt_hold_mode_from_auto` | `auto_mode_type` is `DISABLED`, `armed`, and not `joy_manual_request` |
+| `ALT_HOLD` | `TRACKING` | `enter_tracking_mode_from_alt_hold` | `auto_mode_type` is `TRACKING`, `auto_mode_enable`, and `armed` |
+| `TRACKING` | `ALT_HOLD` | `enter_alt_hold_mode_from_auto` | not `auto_mode_enable`, `armed`, and not `joy_manual_request` |
+| `TRACKING` | `FAILSAFE` | `enter_failsafe` | `armed` and `joy_fail_safe` |
 | `FAILSAFE` | `ALT_HOLD` | `exit_failsafe` | `armed` and not `joy_fail_safe` |
 | `FAILSAFE` | `IDLE` | `exit_failsafe_to_idle` | not `joy_fail_safe`, not `joy_manual_request`, and not `joy_takeoff_request` |
 
@@ -77,7 +78,8 @@ stateDiagram-v2
     ALT_HOLD --> MANUAL: armed and manual requested
     ALT_HOLD --> TRACKING: armed and auto mode enabled
 
-    TRACKING --> ALT_HOLD: armed, auto disabled\nmanual not requested
+    TRACKING --> ALT_HOLD: armed, enabler cleared\nmanual not requested
+    TRACKING --> FAILSAFE: armed and joystick failsafe
 
     FAILSAFE --> ALT_HOLD: armed and failsafe cleared
     FAILSAFE --> IDLE: failsafe cleared\nno manual or takeoff request
@@ -102,7 +104,7 @@ The guards read these `Context` values:
 | `is_low_throttle()` | Returns whether requested joystick throttle is below 1050. |
 | `drone_alt` / `alt_setpoint` | Current and requested altitude used to admit takeoff. |
 | `takeoff_reach` | The takeoff controller has remained at its target long enough to enter `ALT_HOLD`. |
-| `auto_mode_type` | `DISABLED`, `CURSOR`, or `TRACKING`; controls entry to and exit from `TRACKING`. |
+| `auto_mode_type` | `DISABLED`, `CURSOR`, or `TRACKING`; CURSOR is a state-independent pre-tracking phase, while TRACKING plus the enabler admits the flight state. |
 
 ## Application Callbacks
 
