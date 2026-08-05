@@ -1,5 +1,10 @@
 
 
+## `bt_gst` ZMQ interface
+
+The MessagePack/ZMQ interface between `bt_app` and `bt_gst` is documented in
+[`bt_gst/docs/design/bt_app_zmq_interface.md`](../bt_gst/docs/design/bt_app_zmq_interface.md).
+
 ## Run in simulation
 
 ```bash title="sim"

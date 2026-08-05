@@ -100,7 +100,7 @@ class App:
                 parameter_event.subscribe(self._on_application_parameter_changed)
             self._manual_land_detection_started_notified = False
             self._manual_land_confirmed_notified = False
-            self._last_rc_channel = None
+            self._last_rc_channel = [RC_MIN] * NO_RC_CHANNELS
             self.__load_drone_interface()
             self.__load_controllers()
             self.mavlink_service = MavlinkService(
@@ -394,13 +394,16 @@ class App:
         """
         handle interrupt that register as joy action
         """
+        prev_channels = self._last_rc_channel
         self._last_rc_channel = list(event.channels)
         self.ctx.request_rc = self._last_rc_channel
         # if name == JoyInterrupt.TAKEOFF_REQUEST:
         self.ctx.joy_takeoff_request = self._last_rc_channel[InternalJoy.AUTO_TAKE_OFF] == RC_MAX
         self.ctx.joy_manual_request = self._last_rc_channel[InternalJoy.MANUAL] == RC_MIN
-        # self.ctx.auto_mode_type = AutoModeType(self._last_rc_channel[AETR1234.AUX2])
-        self.ctx.auto_mode_enable = self._last_rc_channel[InternalJoy.ENABLER] == RC_MAX
+        self.ctx.auto_mode_type = AutoModeType(self._last_rc_channel[InternalJoy.TRACKER_MODE])
+        if prev_channels[InternalJoy.ENABLER] == RC_MIN and self._last_rc_channel[InternalJoy.ENABLER] == RC_MAX:
+            self.ctx.auto_mode_enable = not self.ctx.auto_mode_enable
+            log.info(f"auto mode enable: {self.ctx.auto_mode_enable}")
         
         self.ctx.arm_switch = self._last_rc_channel[InternalJoy.ARM] == RC_MAX
         throttle_for_arm = self._last_rc_channel[InternalJoy.THROTTLE] < 1050
