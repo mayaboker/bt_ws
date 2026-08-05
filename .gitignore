@@ -125,3 +125,6 @@ bt_cc_builder/images/ubuntu-26.04-preinstalled-server-arm64+raspi-prepared-20260
 bt_cc_builder/README.md
 robot-os.img
 ubuntu-24.04-preinstalled-server-arm64-radxa-zero3.img.xz
+
+# Generated MkDocs output (source lives in bt_docs/).
+bt_docs_site/

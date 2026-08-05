@@ -75,7 +75,10 @@ stream and the optional local preview. When `overlay_enabled` is true, a
 in both outputs.
 
 Detection and tracker ZMQ channels and message schemas are documented in
-[`docs/design/zmq_bridge.md`](docs/design/zmq_bridge.md).
+[`docs/design/zmq_bridge.md`](docs/design/zmq_bridge.md). The application-level
+contract between `bt_app` and `bt_gst`, including examples and operational
+rules, is documented in
+[`docs/design/bt_app_zmq_interface.md`](docs/design/bt_app_zmq_interface.md).
 
 # run video
 

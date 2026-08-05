@@ -1,5 +1,9 @@
 # ZMQ bridge
 
+For the application-level contract between `bt_app` and `bt_gst`, including
+configuration, message examples, and operational rules, see
+[`bt_app_zmq_interface.md`](bt_app_zmq_interface.md).
+
 `bt_gst` uses two ZeroMQ PUB/SUB channels. Messages are single-frame
 MessagePack maps. The `type` field is the logical topic; it is not a separate
 multipart ZMQ subscription frame.

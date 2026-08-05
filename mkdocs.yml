@@ -1,0 +1,99 @@
+site_name: BT Drone Documentation
+site_description: Build, simulation, flight-control, vision, and field-test notes for the BT drone platform.
+site_author: BT Robotics
+repo_url: https://github.com/mayaboker/bt_ws
+repo_name: mayaboker/bt_ws
+docs_dir: bt_docs
+site_dir: bt_docs_site
+
+theme:
+  name: material
+  icon:
+    logo: material/quadcopter
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: cyan
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: cyan
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - content.code.copy
+    - content.code.annotate
+    - navigation.footer
+    - navigation.indexes
+    - navigation.instant
+    - navigation.sections
+    - navigation.tabs
+    - navigation.top
+    - search.highlight
+    - search.share
+    - search.suggest
+    - toc.follow
+
+nav:
+  - Home: index.md
+  - Application: application/index.md
+  - Deployment: deploy/index.md
+  - Flight Controller:
+      - Overview: fc/index.md
+      - iFlight ATF435: fc/iflight435.md
+      - iFlight manual: iflight435.pdf
+  - Joystick:
+      - Overview: joystick/index.md
+      - RadioMaster Boxer: joystick/boxer.md
+  - Radxa:
+      - Overview: radxa/index.md
+      - Wiring and pinout: radxa/radxa.md
+      - Radxa manual: radxa.pdf
+  - Simulation: simulation/index.md
+  - Field Tests:
+      - Overview: test_field/index.md
+      - Test 1:
+          - Video link: test_field/test1/qopenhd.md
+          - Recording: test_field/test1/record.md
+  - Trackers: trackers/index.md
+  - Video: video/index.md
+
+plugins:
+  - search
+  - tags
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - tables
+  - toc:
+      permalink: true
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/mayaboker/bt_ws
+      name: BT workspace on GitHub
+
+copyright: BT Robotics documentation
