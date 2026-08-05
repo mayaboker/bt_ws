@@ -84,7 +84,8 @@ def build_stream_branch_description(config: AppConfig) -> str:
             f"framerate={framerate}/1"
         )
     return (
-        "queue ! videoconvert ! videoscale ! videorate !"
+        "queue leaky=downstream max-size-buffers=2 ! "
+        "videoconvert ! videoscale ! videorate !"
         f"{raw_caps} ! "
         "x264enc bitrate=1500 tune=zerolatency speed-preset=ultrafast "
         "key-int-max=30 bframes=0 byte-stream=true aud=true "

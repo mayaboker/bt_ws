@@ -79,7 +79,7 @@ class App:
         self._shutdown_signal: int | None = None
         # hold application state
         self.ctx = Context()
-        
+
         # state machine
         self.robot_sm = Robot_StateMachine(self.ctx, self.config)
         self.robot_sm.on_before_state_changed += self._handle_before_state_changed
@@ -92,6 +92,7 @@ class App:
         self.__validate_startup_config()
         try:
             self.__params = self.__load_parameters()
+            self.visual_observer = self.__load_visual_observer()
             self.ctx.alt_setpoint = self.__params.get(ParameterKey.TAKEOFF_ALT)
             self.manual_land_detector = self.__load_manual_land_detector()
             parameter_event = getattr(self.__params, "on_parameter_changed", None)
@@ -123,6 +124,16 @@ class App:
         log.debug("Application log level : DEBUG")
 
     def __validate_startup_config(self):
+        if self.config.visual_observer_enabled:
+            if not self.config.visual_zmq_endpoint:
+                raise AppStartupError("Visual ZMQ endpoint must not be empty")
+            if self.config.visual_image_width <= 0:
+                raise AppStartupError("Visual image width must be greater than zero")
+            if self.config.visual_image_height <= 0:
+                raise AppStartupError("Visual image height must be greater than zero")
+            if self.config.visual_print_rate_hz <= 0:
+                raise AppStartupError("Visual print rate must be greater than zero")
+
         if self.config.drone_sink != DroneSink.SERIAL.value:
             return
 
@@ -231,6 +242,21 @@ class App:
         recorder.start()
         return recorder
 
+    def __load_visual_observer(self):
+        if not self.config.visual_observer_enabled:
+            return None
+        from bt_app.control.visual_controller import VisualTrackerObserver
+
+        observer = VisualTrackerObserver(
+            self.__params,
+            endpoint=self.config.visual_zmq_endpoint,
+            image_width=self.config.visual_image_width,
+            image_height=self.config.visual_image_height,
+            print_rate_hz=self.config.visual_print_rate_hz,
+        )
+        observer.start()
+        return observer
+
     def __load_controllers(self):
         """
         load controllers
@@ -287,6 +313,8 @@ class App:
 
         # search controller
         self.controllers[RobotState.ALT_HOLD] = HoverYawController(self.__params)
+
+        # visual controller
 
     # def register_joy_interrupt(self, joy_adapter):
     #     joy_adapter.register_interrupt(AETR1234.AUX4, JoyInterrupt.TAKEOFF_REQUEST)
@@ -754,6 +782,7 @@ class App:
         """Stop all application services, keeping MSP shutdown first."""
         resources = (
             ("MSP adapter", getattr(self, "drone_adapter", None)),
+            ("visual observer", getattr(self, "visual_observer", None)),
             (
                 "joystick listener",
                 getattr(self, "controllers", {}).get(RobotState.MANUAL),

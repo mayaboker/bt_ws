@@ -12,7 +12,8 @@ flowchart LR
     detector[Red detector\nGstRedDetectionMeta]
     bridge[bt_gst ZMQ bridge\nMessagePack encoding]
     telemetry[Telemetry channel\ntcp://127.0.0.1:5556\nPUB binds]
-    consumer[Telemetry consumer\nSUB connects and subscribes to all]
+    consumer[Generic telemetry consumer\nSUB connects and subscribes to all]
+    visual[bt-app visual observer\nfilters red-detection\nprints normalized error + proposed RC]
 
     controller -->|start / stop / resize / adjustment| request
     request --> tracker
@@ -20,7 +21,13 @@ flowchart LR
     detector -->|red-detection every frame| bridge
     bridge --> telemetry
     telemetry --> consumer
+    telemetry --> visual
 ```
+
+The `bt-app` visual observer is diagnostic only. It converts the bounding-box
+center into horizontal and vertical errors in `[-1, 1]`, runs the visual
+controller, and logs the proposed RC channels. It never sends those channels
+to the flight controller.
 
 ## Channels
 

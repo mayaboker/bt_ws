@@ -11,7 +11,6 @@ from bt_app.control.rc_channel_override import (
 
 # __all__ = ["PID", "BetaflightRcMapper", "clamp", "HoverYawController", "TakeoffController"]
 from bt_app.control.failsafe_controller import FailSafeController
-
 __all__ = [
     "PID",
     "FailSafeController",
@@ -20,5 +19,5 @@ __all__ = [
     "HoverYawController",
     "MavlinkListenerError",
     "MavlinkListenerService",
-    "MavlinkListenerShutdownError",
+    "MavlinkListenerShutdownError"
 ]

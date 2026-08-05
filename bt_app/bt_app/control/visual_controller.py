@@ -1,20 +1,18 @@
 import math
+import msgpack
 import threading
 import time
 from dataclasses import dataclass
 from typing import Any
 import zmq
 from loguru import logger as log
-from bt_app.common import ZMQ_TRACKER_RESULT_ENDPOINT, ZMQ_TRACKER_RESULT_TOPIC
-from bt_app.msgs import TrackerResult, TrackerState, RCChannels, unpack_tracker_result
-from bt_app.msp.command_dispatcher import MspCommandDispatcher
+from bt_app.msgs import RCChannels
 from bt_app.parameters import Parameters
-from bt_app.bt_app.context_old import Context
-from bt_app.common import State
-from bt_app import FREQ_HZ
 from bt_app.control import PID
 from bt_app.control.rc_mapper import BetaflightRcMapper, clamp
 from bt_app.parameters.generated import ParameterKey
+
+DEFAULT_VISUAL_ZMQ_ENDPOINT = "tcp://127.0.0.1:5556"
 
 VISUAL_TRACKER_PARAMETERS = {
     ParameterKey.VIS_HOV_THR: "hover_throttle",
@@ -48,33 +46,58 @@ def apply_deadband(x, deadband):
         return x + deadband
 #endregion
 
+@dataclass(frozen=True)
+class VisualDetectionMessage:
+    frame_id: int
+    timestamp_ns: int | None
+    found: bool
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+def decode_visual_detection(payload: bytes) -> VisualDetectionMessage | None:
+    data = msgpack.unpackb(payload, raw=False, strict_map_key=False)
+    if not isinstance(data, dict):
+        raise ValueError("visual telemetry payload must decode to a map")
+    if data.get("type") != "red-detection":
+        return None
+    timestamp_ns = data["timestamp_ns"]
+    return VisualDetectionMessage(
+        frame_id=int(data["frame_id"]),
+        timestamp_ns=None if timestamp_ns is None else int(timestamp_ns),
+        found=bool(data["found"]),
+        x=int(data["x"]),
+        y=int(data["y"]),
+        width=int(data["width"]),
+        height=int(data["height"]),
+    )
+
+
 class VisualTargetComm:
     def __init__(
         self,
         *,
-        endpoint=ZMQ_TRACKER_RESULT_ENDPOINT,
-        topic=ZMQ_TRACKER_RESULT_TOPIC,
+        endpoint: str = DEFAULT_VISUAL_ZMQ_ENDPOINT,
         context=None,
         on_result=None,
-        poll_timeout_ms=50,
+        poll_timeout_ms: int = 50,
     ):
         self.endpoint = endpoint
-        self.topic = topic
         self.context = context or zmq.Context.instance()
         self.on_result = on_result
         self.poll_timeout_ms = poll_timeout_ms
 
         self._stop_event = threading.Event()
-        self._lock = threading.Lock()
         self._thread = None
         self._socket = None
-        self.on_result = None
 
 
     def start(self):
         if self._thread is not None and self._thread.is_alive():
             return
-
+        print("Starting visual target comm thread...------------------------------------------------")
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._receive_loop,
@@ -96,7 +119,7 @@ class VisualTargetComm:
         socket = self.context.socket(zmq.SUB)
         socket.setsockopt(zmq.LINGER, 0)
         socket.setsockopt(zmq.RCVHWM, 1)
-        socket.setsockopt(zmq.SUBSCRIBE, self.topic)
+        socket.setsockopt(zmq.SUBSCRIBE, b"")
         socket.connect(self.endpoint)
         self._socket = socket
 
@@ -107,27 +130,30 @@ class VisualTargetComm:
             while not self._stop_event.is_set():
                 if not poller.poll(self.poll_timeout_ms):
                     continue
-
                 result = None
                 while True:
                     try:
-                        _topic, payload = socket.recv_multipart(flags=zmq.NOBLOCK)
+                        payload = socket.recv(flags=zmq.NOBLOCK)
                     except zmq.Again:
                         break
                     except zmq.ZMQError:
                         return
-                    result = self._decode_result(payload)
-                    print(result)
-                    if self.on_result is not None:
-                        self.on_result(result)
+                    try:
+                        candidate = decode_visual_detection(payload)
+                    except (
+                        KeyError,
+                        TypeError,
+                        ValueError,
+                        msgpack.exceptions.UnpackException,
+                    ) as exc:
+                        log.warning("Ignored invalid visual telemetry: {}", exc)
+                        continue
+                    if candidate is not None:
+                        result = candidate
+                if result is not None and self.on_result is not None:
+                    self.on_result(result)
         finally:
             self._close_socket()
-
-
-
-    @staticmethod
-    def _decode_result(payload):
-        return unpack_tracker_result(payload)
 
     def _close_socket(self):
         socket = self._socket
@@ -158,7 +184,7 @@ class ControllerConfig:
     # -------------------------
     # Camera-error controller
     # -------------------------
-    deadband_deg: float = 0.5
+    deadband_normalized: float = 0.02
 
     # X error -> yaw
     kp_yaw: float = 3.0               # deg/s yaw per deg image error
@@ -221,16 +247,16 @@ class VisualTargetController:
         self.prev_ey = None
         self.last_time = None
 
-    def update(self, error_x_deg, error_y_deg, target_visible=True):
+    def update(self, error_x, error_y, target_visible=True):
         """
         Inputs:
-            error_x_deg:
-                Camera horizontal angle error.
-                Positive = target is right of image center.
+            error_x:
+                Normalized horizontal image error in [-1, 1].
+                Positive means the target is right of image center.
 
-            error_y_deg:
-                Camera vertical angle error.
-                Positive = target is above image center.
+            error_y:
+                Normalized vertical image error in [-1, 1].
+                Positive means the target is above image center.
 
             target_visible:
                 If False, controller returns neutral roll/pitch/yaw and hover throttle.
@@ -252,8 +278,8 @@ class VisualTargetController:
             )
 
         # Apply deadband to reduce jitter near image center
-        ex = apply_deadband(error_x_deg, cfg.deadband_deg)
-        ey = apply_deadband(error_y_deg, cfg.deadband_deg)
+        ex = apply_deadband(error_x, cfg.deadband_normalized)
+        ey = apply_deadband(error_y, cfg.deadband_normalized)
 
         # Derivatives, optional
         if self.prev_ex is None or self.prev_ey is None or self.last_time is None:
@@ -310,7 +336,7 @@ class VisualTargetController:
             -cfg.max_pitch_deg,
             cfg.max_pitch_deg,
         )
-        log.info(f"pitch_command={pitch_deg:.2f} ")
+        log.trace("visual pitch command={:.2f}", pitch_deg)
         # For this forward-camera controller, roll is not used.
         # Horizontal centering is done with yaw.
         roll_deg = 0.0
@@ -400,30 +426,55 @@ class VisualTargetController:
             aux4=1000,
         )
 
-class VisualTrackerManager():
-    def __init__(self, context: Context, params: Parameters):
-        self.ctx = context
+@dataclass(frozen=True)
+class VisualObservation:
+    detection: VisualDetectionMessage
+    error_x: float
+    error_y: float
+    command: RCChannels
+
+
+class VisualTrackerObserver:
+    def __init__(
+        self,
+        params: Parameters,
+        *,
+        endpoint: str = DEFAULT_VISUAL_ZMQ_ENDPOINT,
+        image_width: int = 640,
+        image_height: int = 480,
+        print_rate_hz: float = 2.0,
+        context=None,
+        clock=time.monotonic,
+    ):
         self.params = params
         self.cfg = self.build_config(params)
         self.controller = VisualTargetController(self.cfg)
-        self.enable = False
-        self.comm = VisualTargetComm()
+        self.image_width = image_width
+        self.image_height = image_height
+        self.print_period_s = 1.0 / print_rate_hz
+        self._clock = clock
+        self._last_printed_at = float("-inf")
+        self._last_found: bool | None = None
+        self.comm = VisualTargetComm(endpoint=endpoint, context=context)
         self.comm.on_result = self.resolve
-        self.ctx.on_state_changed += self.on_state_changed
         self.params.on_parameter_changed.subscribe(self.on_parameter_changed)
-        
-    def on_state_changed(self, state):
-        self.enable = state == State.VISUAL_TRACK
 
     def start(self):
         self.comm.start()
+        log.info(
+            "Visual observer subscribed endpoint={} image={}x{} print_rate_hz={:.2f}",
+            self.comm.endpoint,
+            self.image_width,
+            self.image_height,
+            1.0 / self.print_period_s,
+        )
 
     def stop(self, timeout=2.0):
         self.comm.stop(timeout=timeout)
 
     def state(self):
-        """Returns True if the controller is active and has a recent target."""
-        return True
+        """Return whether the observer thread is running."""
+        return self.comm._thread is not None and self.comm._thread.is_alive()
     
     def build_config(self, params: Parameters) -> ControllerConfig:
         return ControllerConfig(
@@ -446,15 +497,65 @@ class VisualTrackerManager():
 
         self.controller.update_config(field_name, value)
 
-    def resolve(self, result: TrackerResult):
-        if self.enable is False:
-            return
-        
-        target_visible = result.state == TrackerState.TRACKING and result.score > 0
-        cmd_result = self.controller.update(
-            error_x_deg=math.degrees(result.error_x),
-            error_y_deg=math.degrees(result.error_y),
-            target_visible=target_visible,
+    def resolve(self, detection: VisualDetectionMessage) -> VisualObservation:
+        error_x, error_y = normalized_target_error(
+            detection,
+            image_width=self.image_width,
+            image_height=self.image_height,
+        )
+        command = self.controller.update(
+            error_x=error_x,
+            error_y=error_y,
+            target_visible=detection.found,
+        )
+        observation = VisualObservation(detection, error_x, error_y, command)
+        if self._should_print(detection.found):
+            self._print_observation(observation)
+        return observation
+
+    def _should_print(self, found: bool) -> bool:
+        now = self._clock()
+        state_changed = self._last_found is None or found != self._last_found
+        due = now - self._last_printed_at >= self.print_period_s
+        self._last_found = found
+        if not state_changed and not due:
+            return False
+        self._last_printed_at = now
+        return True
+
+    @staticmethod
+    def _print_observation(observation: VisualObservation) -> None:
+        detection = observation.detection
+        command = observation.command
+        log.info(
+            "visual frame={} pts_ns={} found={} bbox=({}, {}, {}, {}) "
+            "error=({:+.3f}, {:+.3f}) rc=(roll={} pitch={} throttle={} yaw={})",
+            detection.frame_id,
+            detection.timestamp_ns,
+            detection.found,
+            detection.x,
+            detection.y,
+            detection.width,
+            detection.height,
+            observation.error_x,
+            observation.error_y,
+            command.roll,
+            command.pitch,
+            command.throttle,
+            command.yaw,
         )
 
-        self.ctx.msp.set_rc(cmd_result.to_list(), rate_hz=FREQ_HZ)
+
+def normalized_target_error(
+    detection: VisualDetectionMessage,
+    *,
+    image_width: int,
+    image_height: int,
+) -> tuple[float, float]:
+    if not detection.found:
+        return 0.0, 0.0
+    center_x = detection.x + detection.width / 2.0
+    center_y = detection.y + detection.height / 2.0
+    error_x = (center_x - image_width / 2.0) / (image_width / 2.0)
+    error_y = (image_height / 2.0 - center_y) / (image_height / 2.0)
+    return clamp(error_x, -1.0, 1.0), clamp(error_y, -1.0, 1.0)

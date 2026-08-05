@@ -26,6 +26,11 @@ class VehicleConfig():
     rc_record_queue_size: int = field(default=1000)
     config_name: str = field(default="parameters.yaml")
     log_level: str = field(default="INFO")
+    visual_observer_enabled: bool = field(default=False)
+    visual_zmq_endpoint: str = field(default="tcp://127.0.0.1:5556")
+    visual_image_width: int = field(default=640)
+    visual_image_height: int = field(default=480)
+    visual_print_rate_hz: float = field(default=2.0)
 
     # region singleton
     _instance = None
