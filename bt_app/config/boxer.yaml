@@ -1,0 +1,25 @@
+device_path: /dev/input/js0
+joystick_name: OpenTX Radiomaster Boxer Joystick
+mapping_path: boxer_mapping.yaml
+poll_rate_hz: 50.0
+server_host: 127.0.0.1
+server_port: 9000
+keep_alive_rate_hz: 1.0
+keep_alive_timeout_sec: 1.0
+high_latency_threshold_ms: 50.0
+notification_publisher:
+- module: console
+  config: {}
+log_level: INFO
+backend:
+  type: mavlink
+  config:
+    connection: udpout:127.0.0.1:14560
+    source_system: 255
+    source_component: 0
+    target_system: 1
+    target_component: 1
+    server_heartbeat_source_system: 254
+    server_heartbeat_source_component: 0
+    heartbeat_rate_hz: 1.0
+    channel_count: 18

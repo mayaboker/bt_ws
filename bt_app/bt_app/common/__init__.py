@@ -35,11 +35,11 @@ class InternalJoy(IntEnum):
     PITCH = auto()
     THROTTLE = auto()
     YAW = auto()
-    ARM = auto() # SE
-    MANUAL = auto()
-    AUTO_TAKE_OFF = auto()
-    ENABLER = auto() # sf
-    
+    ARM = auto() # SE(4)
+    MANUAL = auto() # SA(5)
+    AUTO_TAKE_OFF = auto() # SD(6)
+    ENABLER = auto() # SF(7)
+    TRACKER_MODE = auto() # SB(8)
 
 class AETR1234(IntEnum):
     """
