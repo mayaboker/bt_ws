@@ -24,6 +24,23 @@ from send_rc import (
     rc_channels,
 )
 
+SCENARIO_BANNER = """\
+==============================================================================
+bt-app MANUAL Climb / ALT_HOLD SITL Scenario
+==============================================================================
+Simulates this joystick flight sequence:
+  1. Wait for bt-app MAVLink telemetry and arm in MANUAL.
+  2. Increase MANUAL throttle slowly until the target altitude is reached.
+  3. Center the throttle and switch from MANUAL to ALT_HOLD.
+  4. Hold altitude for the configured duration.
+  5. Switch back to MANUAL and descend with fixed throttle.
+  6. Confirm touchdown, disarm, and verify IDLE.
+
+Safety behavior:
+  Before takeoff, failures send a ground-safe disarm command.
+  While airborne, failures stop RC traffic so bt-app failsafe can recover.
+=============================================================================="""
+
 
 class ManualClimbScenario(MavlinkRcScenario):
     def __init__(
@@ -42,6 +59,7 @@ class ManualClimbScenario(MavlinkRcScenario):
         self.ascent_ramp_pwm_s = ascent_ramp_pwm_s
 
     def run(self) -> None:
+        self._print_banner()
         self._open()
         try:
             self._phase("Waiting for bt-app telemetry")
@@ -105,6 +123,10 @@ class ManualClimbScenario(MavlinkRcScenario):
         finally:
             self._cleanup()
 
+    @staticmethod
+    def _print_banner() -> None:
+        print(SCENARIO_BANNER, flush=True)
+
     def _climb_to_target(self) -> None:
         deadline = time.monotonic() + self.landing_timeout_s
         started_at = time.monotonic()
@@ -166,7 +188,10 @@ class ManualClimbScenario(MavlinkRcScenario):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=SCENARIO_BANNER,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--destination-host", default="127.0.0.1")
     parser.add_argument("--destination-port", type=int, default=14560)
     parser.add_argument("--listen-host", default="0.0.0.0")
