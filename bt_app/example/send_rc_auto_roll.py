@@ -32,6 +32,23 @@ from send_rc import (
 )
 from send_rc_auto_yaw import AutoYawScenario
 
+SCENARIO_BANNER = """\
+==============================================================================
+bt-app Automatic Takeoff / ALT_HOLD Roll SITL Scenario
+==============================================================================
+Simulates this joystick flight sequence:
+  1. Arm in MANUAL and request automatic takeoff.
+  2. Wait for ALT_HOLD and stable vertical speed.
+  3. Command roll left, roll right for twice as long, then left recovery.
+  4. Monitor roll angle and altitude-drift safety limits throughout.
+  5. Center roll, verify attitude recovery, and descend in MANUAL.
+  6. Confirm touchdown, disarm, and verify IDLE.
+
+Safety behavior:
+  The maneuver aborts if ALT_HOLD, attitude, or altitude limits are violated.
+  Airborne failures stop RC traffic so bt-app failsafe can recover.
+=============================================================================="""
+
 
 def alt_hold_roll_channels(roll: int) -> tuple[int, ...]:
     channels = list(ALT_HOLD_ARMED)
@@ -64,6 +81,7 @@ class AutoRollScenario(AutoYawScenario):
         self._maneuver_start_altitude_m: float | None = None
 
     def run(self) -> None:
+        self._print_banner()
         self._open()
         try:
             self._phase("Waiting for bt-app telemetry")
@@ -124,6 +142,10 @@ class AutoRollScenario(AutoYawScenario):
             self._phase("Scenario completed successfully")
         finally:
             self._cleanup()
+
+    @staticmethod
+    def _print_banner() -> None:
+        print(SCENARIO_BANNER, flush=True)
 
     def _run_roll_pattern(self) -> None:
         self._command_roll_phase(
@@ -283,7 +305,10 @@ class AutoRollScenario(AutoYawScenario):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=SCENARIO_BANNER,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--destination-host", default="127.0.0.1")
     parser.add_argument("--destination-port", type=int, default=14560)
     parser.add_argument("--listen-host", default="0.0.0.0")
