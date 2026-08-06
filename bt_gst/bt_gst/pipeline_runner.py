@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import threading
 
 from loguru import logger
 
@@ -7,7 +8,11 @@ from bt_gst.bridge.zmq_io import (
     TrackerIoAdapter,
     ZmqTrackerIoAdapter,
 )
-from bt_gst.bridge.zmq_models import RedDetectionMessage
+from bt_gst.bridge.zmq_models import (
+    RedDetectionMessage,
+    TrackStartRequest,
+    TrackStopRequest,
+)
 from bt_gst.config import AppConfig
 from bt_gst.pipeline_builder import PipelineBuildError, build_pipeline_description
 from bt_gst.red_detection import (
@@ -25,11 +30,70 @@ class PipelineRunError(RuntimeError):
 
 
 @dataclass
+class DetectorLockState:
+    acquire_frames: int = 10
+    lose_frames: int = 5
+    _active: bool = False
+    _locked: bool = False
+    _found_frames: int = 0
+    _missing_frames: int = 0
+    _mutex: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def apply_request(self, request: object) -> None:
+        with self._mutex:
+            if isinstance(request, TrackStartRequest):
+                self._active = True
+                self._locked = False
+                self._found_frames = 0
+                self._missing_frames = 0
+            elif isinstance(request, TrackStopRequest):
+                self._active = False
+                self._locked = False
+                self._found_frames = 0
+                self._missing_frames = 0
+
+    def update(self, found: bool) -> tuple[bool, int, int]:
+        with self._mutex:
+            if not self._active:
+                return False, 0, 0
+            if found:
+                self._missing_frames = 0
+                self._found_frames = min(
+                    self.acquire_frames,
+                    self._found_frames + 1,
+                )
+                if self._found_frames >= self.acquire_frames:
+                    self._locked = True
+            else:
+                self._found_frames = 0
+                self._missing_frames = min(
+                    self.lose_frames,
+                    self._missing_frames + 1,
+                )
+                if self._missing_frames >= self.lose_frames:
+                    self._locked = False
+            return self._locked, self._found_frames, self._missing_frames
+
+
+@dataclass
 class DetectionTelemetryState:
     publisher: TrackerIoAdapter
+    lock_state: DetectorLockState = field(default_factory=DetectorLockState)
     next_frame_id: int = 1
+    last_locked: bool = False
 
     def publish(self, detection: RedDetection) -> None:
+        locked, found_frames, missing_frames = self.lock_state.update(detection.found)
+        if locked != self.last_locked:
+            pipeline_runner_logger.info(
+                "red detector lock changed locked={} frame={} found_frames={} "
+                "missing_frames={}",
+                locked,
+                self.next_frame_id,
+                found_frames,
+                missing_frames,
+            )
+            self.last_locked = locked
         self.publisher.publish_red_detection(
             RedDetectionMessage(
                 frame_id=self.next_frame_id,
@@ -39,6 +103,9 @@ class DetectionTelemetryState:
                 y=detection.y,
                 width=detection.width,
                 height=detection.height,
+                locked=locked,
+                lock_found_frames=found_frames,
+                lock_missing_frames=missing_frames,
             )
         )
         self.next_frame_id += 1
@@ -80,6 +147,7 @@ def run_pipeline(config: AppConfig) -> int:
             if config.zmq.enabled
             else None
         )
+        detection_telemetry_state = DetectionTelemetryState(tracker_io)
         if config.detector.enabled:
             detection_sink = pipeline.get_by_name("detection_sink")
             if detection_sink is None:
@@ -89,7 +157,7 @@ def run_pipeline(config: AppConfig) -> int:
             detection_sink.connect(
                 "new-sample",
                 _on_detection_sample,
-                (Gst, DetectionTelemetryState(tracker_io)),
+                (Gst, detection_telemetry_state),
             )
 
         if config.detector.overlay_enabled:
@@ -121,6 +189,7 @@ def run_pipeline(config: AppConfig) -> int:
                 if cursor_state is not None:
                     for request in tracker_io.poll_requests():
                         cursor_state.apply(request)
+                        detection_telemetry_state.lock_state.apply_request(request)
                 message = bus.timed_pop_filtered(
                     50 * getattr(Gst, "MSECOND", 1_000_000),
                     Gst.MessageType.ERROR | Gst.MessageType.EOS,

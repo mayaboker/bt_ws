@@ -29,6 +29,7 @@ from bt_gst.config import (
 from bt_gst import app as app_module
 from bt_gst import pipeline_runner
 from bt_gst.pipeline_runner import (
+    DetectorLockState,
     DetectionTelemetryState,
     _on_detection_overlay_buffer,
     _on_detection_overlay_draw,
@@ -108,6 +109,31 @@ from bt_gst.bridge.zmq_models import (
     TrackerDebugMessage,
 )
 from test_plugin_metadata import load_plugin_module
+
+
+def test_detector_lock_requires_ten_found_frames_and_loses_after_five_misses() -> None:
+    state = DetectorLockState()
+    state.apply_request(TrackStartRequest(x=320, y=240))
+
+    for expected_count in range(1, 10):
+        assert state.update(True) == (False, expected_count, 0)
+    assert state.update(True) == (True, 10, 0)
+
+    for expected_count in range(1, 5):
+        assert state.update(False) == (True, 0, expected_count)
+    assert state.update(False) == (False, 0, 5)
+
+
+def test_detector_lock_resets_on_stop_and_new_start() -> None:
+    state = DetectorLockState(acquire_frames=2, lose_frames=2)
+    state.apply_request(TrackStartRequest(x=0, y=0))
+    state.update(True)
+    assert state.update(True)[0]
+
+    state.apply_request(TrackStopRequest())
+    assert state.update(True) == (False, 0, 0)
+    state.apply_request(TrackStartRequest(x=0, y=0))
+    assert state.update(True) == (False, 1, 0)
 
 
 def test_parse_version_command() -> None:

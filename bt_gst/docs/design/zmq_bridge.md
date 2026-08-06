@@ -50,7 +50,7 @@ to the flight controller.
 | `adjustment` | request | `delta_x`, `delta_y` |
 | `tracker-data` | telemetry | `frame_id`, `timestamp`, `dx`, `dy`, `score`, `status` |
 | `tracker-debug` | telemetry | `frame_number`, `status`, `active_feature_count`, `features_json` |
-| `red-detection` | telemetry | `frame_id`, `timestamp_ns`, `found`, `x`, `y`, `width`, `height` |
+| `red-detection` | telemetry | `frame_id`, `timestamp_ns`, `found`, box fields, `locked`, lock counters |
 
 Example detection:
 
@@ -63,7 +63,10 @@ Example detection:
   "x": 210,
   "y": 130,
   "width": 80,
-  "height": 60
+  "height": 60,
+  "locked": true,
+  "lock_found_frames": 10,
+  "lock_missing_frames": 0
 }
 ```
 
@@ -78,9 +81,16 @@ A not-found frame is also published so consumers can clear stale boxes:
   "x": 0,
   "y": 0,
   "width": 0,
-  "height": 0
+  "height": 0,
+  "locked": true,
+  "lock_found_frames": 0,
+  "lock_missing_frames": 1
 }
 ```
+
+Lock acquisition starts with a `start` request. Ten consecutive found frames
+acquire lock; five consecutive missing frames release it. During missing frames
+one through four, `found` is false while `locked` remains true.
 
 ## Receiving telemetry
 

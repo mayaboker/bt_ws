@@ -34,6 +34,7 @@ class FakeParameters:
             ParameterKey.VIS_MAX_PITCH: 60.0,
             ParameterKey.VIS_MAX_THR: 0.85,
             ParameterKey.VIS_KP_YAW: 1.0,
+            ParameterKey.VIS_MAX_YAW: 15.0,
             ParameterKey.VIS_KP_PITCH: 1.0,
             ParameterKey.VIS_KP_THR: 0.06,
             ParameterKey.BF_YAW_RATE: 67.0,
@@ -74,6 +75,36 @@ def test_decode_visual_detection() -> None:
         width=160,
         height=120,
     )
+
+
+def test_decode_visual_detection_reads_lock_state() -> None:
+    detection = decode_visual_detection(
+        detection_payload(
+            locked=True,
+            lock_found_frames=10,
+            lock_missing_frames=2,
+        )
+    )
+
+    assert detection is not None
+    assert detection.locked
+    assert detection.lock_found_frames == 10
+    assert detection.lock_missing_frames == 2
+
+
+def test_visual_command_is_fixed_forward_pitch_with_bounded_yaw() -> None:
+    observer = VisualTrackerObserver(FakeParameters())
+
+    observation = observer.resolve(
+        VisualDetectionMessage(1, 0, True, 560, 0, 80, 80, locked=True)
+    )
+
+    # Negative semantic pitch is mapped to this vehicle's forward RC direction.
+    assert observation.command.pitch > 1500
+    assert observation.command.roll == 1500
+    assert observation.error_x > 0
+    assert observation.command.yaw > 1500
+    assert abs(observation.command.yaw - 1500) <= round(500 * 15.0 / 67.0)
 
 
 def test_decode_visual_detection_ignores_other_telemetry() -> None:

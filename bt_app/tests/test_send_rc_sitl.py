@@ -25,11 +25,21 @@ from send_rc_sitl import (  # noqa: E402
     NEUTRAL_DISARMED,
     RC_MAX,
     RC_MIN,
+    SCENARIO_BANNER,
     STATE_ALT_HOLD,
     ScenarioError,
     Telemetry,
 )
 from pymavlink import mavutil  # noqa: E402
+
+
+def test_help_and_runtime_use_the_same_scenario_banner(capsys):
+    help_text = send_rc_sitl.build_parser().format_help()
+
+    MavlinkRcScenario._print_banner()
+
+    assert SCENARIO_BANNER in help_text
+    assert capsys.readouterr().out.rstrip() == SCENARIO_BANNER
 
 
 def wire_message(encoder, message):
@@ -58,7 +68,7 @@ def test_arm_stage_requests_manual_before_takeoff():
 
 
 def test_manual_descent_stays_armed_and_releases_takeoff():
-    assert MANUAL_DESCENT_ARMED[2] == 1550
+    assert MANUAL_DESCENT_ARMED[2] == 1600
     assert MANUAL_DESCENT_ARMED[ARM] == RC_MAX
     assert MANUAL_DESCENT_ARMED[MANUAL] == RC_MIN
     assert MANUAL_DESCENT_ARMED[AUTO_TAKEOFF] == RC_MIN

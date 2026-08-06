@@ -179,6 +179,12 @@ parameters:
     limits:
       min: 0.0
       max: 100.0
+  VIS_MAX_YAW:
+    type: float
+    default: 15.0
+    limits:
+      min: 0.0
+      max: 1000.0
   VIS_KP_PITCH:
     type: float
     default: 1

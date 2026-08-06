@@ -70,8 +70,21 @@ class FakePublisher:
 
 
 class HealthyObserver:
+    def __init__(self):
+        self.observation = VisualObservation(
+            VisualDetectionMessage(
+                1, 1, True, 10, 20, 30, 30, locked=True, lock_found_frames=10
+            ),
+            0.1,
+            -0.1,
+            RCChannels(1500, 1458, 1500, 1550, 1900, 1900, 1000, 1000),
+        )
+
     def is_healthy(self, _timeout, *, now):
         return True
+
+    def fresh_observation(self, **_kwargs):
+        return self.observation
 
 
 def make_pretracking_app() -> App:
@@ -89,6 +102,7 @@ def make_pretracking_app() -> App:
         tracker_adjust_rate_hz=5.0,
         tracker_adjust_deadband_pwm=100,
         tracker_bridge_health_timeout_s=1.0,
+        tracker_result_timeout_s=0.25,
     )
     app.visual_observer = HealthyObserver()
     app.tracker_request_publisher = FakePublisher()
@@ -97,6 +111,7 @@ def make_pretracking_app() -> App:
     app._tracker_requires_disabled = False
     app._tracker_next_adjust_at = 0.0
     app._tracker_enabled_at = float("inf")
+    app._tracker_last_lateral_command = None
     app._last_rc_channel = [1500] * (int(InternalJoy.TRACKER_MODE) + 1)
     return app
 
@@ -179,6 +194,9 @@ class FallbackHoverController:
     def update_yaw_from_joystick(self, value):
         self.yaw = value
 
+    def update_yaw_from_direct_rc(self, value):
+        self.yaw = value
+
     def update_pitch_roll(self, pitch, roll):
         self.pitch_roll = (pitch, roll)
 
@@ -186,7 +204,7 @@ class FallbackHoverController:
         return [1500, 1500, 1500, 1500, 2000, 2000, 1000, 1000]
 
 
-def test_auto_mode_uses_fresh_visual_command_or_neutral_fallback() -> None:
+def test_auto_mode_combines_visual_lateral_command_with_hover_throttle() -> None:
     app = object.__new__(App)
     app.ctx = SimpleNamespace(
         auto_mode_enable=True,
@@ -195,9 +213,10 @@ def test_auto_mode_uses_fresh_visual_command_or_neutral_fallback() -> None:
     )
     app.config = SimpleNamespace(tracker_result_timeout_s=0.25)
     app._tracker_enabled_at = 1.0
+    app._tracker_last_lateral_command = None
     command = RCChannels(1510, 1520, 1530, 1540, 1900, 1900, 1000, 1000)
     observation = VisualObservation(
-        VisualDetectionMessage(1, 1, True, 10, 20, 30, 30),
+        VisualDetectionMessage(1, 1, True, 10, 20, 30, 30, locked=True),
         0.1,
         -0.1,
         command,
@@ -206,18 +225,23 @@ def test_auto_mode_uses_fresh_visual_command_or_neutral_fallback() -> None:
     app.controllers = {RobotState.ALT_HOLD: hover}
     app.visual_observer = ObservationSource(observation)
 
-    assert app.auto_mode_handler() == command.to_list()
+    expected_hover_command = [1500, 1500, 1500, 1500, 2000, 2000, 1000, 1000]
+    assert app.auto_mode_handler() == expected_hover_command
+    assert hover.yaw == command.yaw
+    assert hover.pitch_roll == (command.pitch, 1500)
+
+    app.visual_observer.observation = VisualObservation(
+        VisualDetectionMessage(2, 2, False, 0, 0, 0, 0, locked=True),
+        0.0,
+        0.0,
+        RCChannels(1500, 1500, 1500, 1500, 1900, 1900, 1000, 1000),
+    )
+    assert app.auto_mode_handler() == expected_hover_command
+    assert hover.yaw == command.yaw
+    assert hover.pitch_roll == (command.pitch, 1500)
 
     app.visual_observer.observation = None
-    assert app.auto_mode_handler() == [
-        1500,
-        1500,
-        1500,
-        1500,
-        2000,
-        2000,
-        1000,
-        1000,
-    ]
+    assert app.auto_mode_handler() == expected_hover_command
+    assert not app.ctx.auto_mode_enable
     assert hover.yaw == 1500
     assert hover.pitch_roll == (1500, 1500)

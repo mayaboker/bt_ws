@@ -37,6 +37,7 @@ class ParameterKey:
     VIS_MAX_PITCH: Final[Literal['VIS_MAX_PITCH']] = 'VIS_MAX_PITCH'
     VIS_MAX_THR: Final[Literal['VIS_MAX_THR']] = 'VIS_MAX_THR'
     VIS_KP_YAW: Final[Literal['VIS_KP_YAW']] = 'VIS_KP_YAW'
+    VIS_MAX_YAW: Final[Literal['VIS_MAX_YAW']] = 'VIS_MAX_YAW'
     VIS_KP_PITCH: Final[Literal['VIS_KP_PITCH']] = 'VIS_KP_PITCH'
     VIS_KP_THR: Final[Literal['VIS_KP_THR']] = 'VIS_KP_THR'
     BF_YAW_RATE: Final[Literal['BF_YAW_RATE']] = 'BF_YAW_RATE'
@@ -73,6 +74,7 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'VIS_MAX_PITCH',
     'VIS_MAX_THR',
     'VIS_KP_YAW',
+    'VIS_MAX_YAW',
     'VIS_KP_PITCH',
     'VIS_KP_THR',
     'BF_YAW_RATE',

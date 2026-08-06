@@ -139,6 +139,10 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.VIS_KP_YAW))
 
     @property
+    def vis_max_yaw(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.VIS_MAX_YAW))
+
+    @property
     def vis_kp_pitch(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.VIS_KP_PITCH))
 

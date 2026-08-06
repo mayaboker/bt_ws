@@ -17,6 +17,15 @@ SPEC.loader.exec_module(auto_yaw)
 from send_rc import ARM, MANUAL, RC_MAX, RC_MID, RC_MIN, THROTTLE, YAW  # noqa: E402
 
 
+def test_help_and_runtime_use_the_same_scenario_banner(capsys):
+    help_text = auto_yaw.build_parser().format_help()
+
+    auto_yaw.AutoYawScenario._print_banner()
+
+    assert auto_yaw.SCENARIO_BANNER in help_text
+    assert capsys.readouterr().out.rstrip() == auto_yaw.SCENARIO_BANNER
+
+
 def make_scenario(**overrides):
     values = {
         "destination": ("127.0.0.1", 14560),
@@ -38,8 +47,8 @@ def test_default_turns_are_full_cw_and_ccw_rotations():
     assert scenario.turn_angle_deg == 360.0
     assert scenario.yaw_rate_dps == 10.0
     assert scenario.turn_duration_s == 36.0
-    assert scenario.cw_channels[YAW] == 1650
-    assert scenario.ccw_channels[YAW] == 1350
+    assert scenario.cw_channels[YAW] == 1900
+    assert scenario.ccw_channels[YAW] == 1100
 
 
 def test_yaw_commands_preserve_alt_hold_channel_pattern():

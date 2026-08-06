@@ -28,6 +28,15 @@ from bt_app.sm import Robot_StateMachine  # noqa: E402
 from bt_app.vehicle_config import VehicleConfig  # noqa: E402
 
 
+def test_help_and_runtime_use_the_same_scenario_banner(capsys):
+    help_text = manual_sitl.build_parser().format_help()
+
+    manual_sitl.ManualClimbScenario._print_banner()
+
+    assert manual_sitl.SCENARIO_BANNER in help_text
+    assert capsys.readouterr().out.rstrip() == manual_sitl.SCENARIO_BANNER
+
+
 def make_scenario(**overrides):
     values = {
         "destination": ("127.0.0.1", 14560),

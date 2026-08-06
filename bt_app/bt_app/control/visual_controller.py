@@ -8,7 +8,6 @@ import zmq
 from loguru import logger as log
 from bt_app.msgs import RCChannels
 from bt_app.parameters import Parameters
-from bt_app.control import PID
 from bt_app.control.rc_mapper import BetaflightRcMapper, clamp
 from bt_app.parameters.generated import ParameterKey
 
@@ -20,6 +19,7 @@ VISUAL_TRACKER_PARAMETERS = {
     ParameterKey.VIS_MAX_PITCH: "max_pitch_deg",
     ParameterKey.VIS_MAX_THR: "max_throttle",
     ParameterKey.VIS_KP_YAW: "kp_yaw",
+    ParameterKey.VIS_MAX_YAW: "max_yaw_rate_dps",
     ParameterKey.VIS_KP_PITCH: "kp_pitch_y",
     ParameterKey.VIS_KP_THR: "kp_throttle_y",
     ParameterKey.BF_YAW_RATE: "betaflight_yaw_rate_full_stick_dps",
@@ -55,6 +55,9 @@ class VisualDetectionMessage:
     y: int
     width: int
     height: int
+    locked: bool = False
+    lock_found_frames: int = 0
+    lock_missing_frames: int = 0
 
 
 def decode_visual_detection(payload: bytes) -> VisualDetectionMessage | None:
@@ -72,6 +75,9 @@ def decode_visual_detection(payload: bytes) -> VisualDetectionMessage | None:
         y=int(data["y"]),
         width=int(data["width"]),
         height=int(data["height"]),
+        locked=bool(data.get("locked", False)),
+        lock_found_frames=int(data.get("lock_found_frames", 0)),
+        lock_missing_frames=int(data.get("lock_missing_frames", 0)),
     )
 
 
@@ -189,7 +195,7 @@ class ControllerConfig:
     # X error -> yaw
     kp_yaw: float = 3.0               # deg/s yaw per deg image error
     kd_yaw: float = 0.0
-    max_yaw_rate_dps: float = 90.0
+    max_yaw_rate_dps: float = 15.0
 
     # Y error -> small pitch correction
     kp_pitch_y: float = 100          # deg pitch per deg image error
@@ -205,7 +211,9 @@ class ControllerConfig:
     # Sign corrections
     # Change these if the drone moves the wrong way.
     # -------------------------
-    yaw_sign: float = -1.0
+    # Positive image X means the target is to the camera's right. This vehicle
+    # uses RC yaw > 1500 to turn right, matching PRE_TRACKING acquisition.
+    yaw_sign: float = 1.0
     pitch_y_sign: float = 1.0
     throttle_y_sign: float = 1.0
 
@@ -216,6 +224,9 @@ class ControllerConfig:
     betaflight_yaw_rate_full_stick_dps: float = 67.0
 
     rc_roll_sign: float = 1.0
+    # The Gazebo/Betaflight vehicle maps RC pitch above 1500 to the physical
+    # forward direction, while the controller uses negative pitch as its
+    # forward semantic convention.
     rc_pitch_sign: float = -1.0
     rc_yaw_sign: float = 1.0
 
@@ -226,10 +237,6 @@ class VisualTargetController:
         self.prev_ex = None
         self.prev_ey = None
         self.last_time = None
-        self.yaw_pid = PID(kp=cfg.kp_yaw, 
-                           ki=0, 
-                           kd=cfg.kd_yaw, 
-                           output_limits=(-cfg.max_yaw_rate_dps, cfg.max_yaw_rate_dps))
         self.rc_mapper = BetaflightRcMapper(
             yaw_rate_full_stick_dps=cfg.betaflight_yaw_rate_full_stick_dps,
             yaw_sign=cfg.rc_yaw_sign,
@@ -284,15 +291,12 @@ class VisualTargetController:
         # Derivatives, optional
         if self.prev_ex is None or self.prev_ey is None or self.last_time is None:
             dt = 0.0
-            ex_dot = 0.0
             ey_dot = 0.0
         else:
             dt = now - self.last_time
             if dt > 0.0:
-                ex_dot = (ex - self.prev_ex) / dt
                 ey_dot = (ey - self.prev_ey) / dt
             else:
-                ex_dot = 0.0
                 ey_dot = 0.0
 
         self.prev_ex = ex
@@ -302,34 +306,18 @@ class VisualTargetController:
         # --------------------------------------------------
         # 1. Horizontal image error controls yaw
         # --------------------------------------------------
-        # yaw_rate_dps = cfg.yaw_sign * (
-        #     cfg.kp_yaw * ex + cfg.kd_yaw * ex_dot
-        # )
-
-        # yaw_rate_dps = clamp(
-        #     yaw_rate_dps,
-        #     -cfg.max_yaw_rate_dps,
-        #     cfg.max_yaw_rate_dps,
-        # )
-        yaw_rate_dps = self.yaw_pid.update(0, ex)
-        yaw_rate_dps *= cfg.yaw_sign
+        yaw_rate_dps = clamp(
+            cfg.yaw_sign * cfg.kp_yaw * ex,
+            -cfg.max_yaw_rate_dps,
+            cfg.max_yaw_rate_dps,
+        )
 
         # --------------------------------------------------
         # 2. Vertical image error gives small pitch correction
         # --------------------------------------------------
-        pitch_visual_deg = cfg.pitch_y_sign * (
-            cfg.kp_pitch_y * ey + cfg.kd_pitch_y * ey_dot
-        )
-
-        pitch_visual_deg = clamp(
-            pitch_visual_deg,
-            -cfg.max_visual_pitch_deg,
-            cfg.max_visual_pitch_deg,
-        )
-
-        # Main pitch command:
-        # negative pitch = nose down = move forward
-        pitch_deg = cfg.forward_pitch_deg + pitch_visual_deg
+        # This POC intentionally monitors vertical image error without using it
+        # for flight control. ALT_HOLD owns the vertical axis.
+        pitch_deg = cfg.forward_pitch_deg
 
         pitch_deg = clamp(
             pitch_deg,
@@ -486,6 +474,7 @@ class VisualTrackerObserver:
             max_pitch_deg=params.get(ParameterKey.VIS_MAX_PITCH),
             max_throttle=params.get(ParameterKey.VIS_MAX_THR),
             kp_yaw=params.get(ParameterKey.VIS_KP_YAW),
+            max_yaw_rate_dps=params.get(ParameterKey.VIS_MAX_YAW),
             kp_pitch_y=params.get(ParameterKey.VIS_KP_PITCH),
             kp_throttle_y=params.get(ParameterKey.VIS_KP_THR),
             betaflight_yaw_rate_full_stick_dps=params.get(
@@ -557,23 +546,24 @@ class VisualTrackerObserver:
     def _print_observation(observation: VisualObservation) -> None:
         detection = observation.detection
         command = observation.command
-        # log.info(
-        #     "visual frame={} pts_ns={} found={} bbox=({}, {}, {}, {}) "
-        #     "error=({:+.3f}, {:+.3f}) rc=(roll={} pitch={} throttle={} yaw={})",
-        #     detection.frame_id,
-        #     detection.timestamp_ns,
-        #     detection.found,
-        #     detection.x,
-        #     detection.y,
-        #     detection.width,
-        #     detection.height,
-        #     observation.error_x,
-        #     observation.error_y,
-        #     command.roll,
-        #     command.pitch,
-        #     command.throttle,
-        #     command.yaw,
-        # )
+        log.info(
+            "visual frame={} found={} locked={} lock_frames=({},{}) "
+            "bbox=({}, {}, {}, {}) error=({:+.3f}, {:+.3f}) "
+            "requested_rc=(pitch={} yaw={})",
+            detection.frame_id,
+            detection.found,
+            detection.locked,
+            detection.lock_found_frames,
+            detection.lock_missing_frames,
+            detection.x,
+            detection.y,
+            detection.width,
+            detection.height,
+            observation.error_x,
+            observation.error_y,
+            command.pitch,
+            command.yaw,
+        )
 
 
 def normalized_target_error(

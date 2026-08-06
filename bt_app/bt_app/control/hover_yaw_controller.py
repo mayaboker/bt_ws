@@ -139,6 +139,13 @@ class HoverYawController:
         command = linear * (1.0 - expo) + (linear**3) * expo
         self.yaw_rate = command * float(self.max_yaw_rate_dps)
         return self.yaw_rate
+
+    def update_yaw_from_direct_rc(self, yaw_rc: int) -> float:
+        """Accept a controller-generated RC yaw command without joystick shaping."""
+        bounded = max(RC_MIN, min(RC_MAX, int(yaw_rc)))
+        normalized = (bounded - RC_MID) / float(RC_MAX - RC_MID)
+        self.yaw_rate = normalized * float(self.yaw_stick_range)
+        return self.yaw_rate
     
     def update_pitch_roll(self, pitch, roll):
         self._pitch = pitch

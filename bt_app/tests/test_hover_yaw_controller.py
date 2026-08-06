@@ -182,6 +182,16 @@ def test_right_yaw_stick_increases_yaw_rc(monkeypatch):
     assert channels[RCChannel.YAW] > RC_MID
 
 
+def test_direct_yaw_rc_bypasses_joystick_deadband_and_rate_limit(monkeypatch):
+    controller = controller_with_times(monkeypatch, [0.0])
+    direct_rc = 1550
+
+    controller.update_yaw_from_direct_rc(direct_rc)
+    channels = controller.update(setpoint=2.0, current=2.0)
+
+    assert channels[RCChannel.YAW] == direct_rc
+
+
 def test_left_yaw_stick_decreases_yaw_rc(monkeypatch):
     controller = controller_with_times(monkeypatch, [0.0])
 

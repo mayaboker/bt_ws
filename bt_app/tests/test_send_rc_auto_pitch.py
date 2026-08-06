@@ -15,6 +15,15 @@ sys.modules[SPEC.name] = auto_pitch
 SPEC.loader.exec_module(auto_pitch)
 
 
+def test_help_and_runtime_use_the_same_scenario_banner(capsys):
+    help_text = auto_pitch.build_parser().format_help()
+
+    auto_pitch.AutoPitchScenario._print_banner()
+
+    assert auto_pitch.SCENARIO_BANNER in help_text
+    assert capsys.readouterr().out.rstrip() == auto_pitch.SCENARIO_BANNER
+
+
 def make_scenario(**overrides):
     values = {
         "destination": ("127.0.0.1", 14560),

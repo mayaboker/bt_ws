@@ -101,6 +101,7 @@ class App:
             self._tracker_requires_disabled = False
             self._tracker_next_adjust_at = 0.0
             self._tracker_enabled_at = float("inf")
+            self._tracker_last_lateral_command: tuple[int, int] | None = None
             self.ctx.alt_setpoint = self.__params.get(ParameterKey.TAKEOFF_ALT)
             self.manual_land_detector = self.__load_manual_land_detector()
             parameter_event = getattr(self.__params, "on_parameter_changed", None)
@@ -486,6 +487,7 @@ class App:
         self.ctx.arm_switch = False
         self.ctx.auto_mode_enable = False
         self._tracker_enabled_at = float("inf")
+        self._tracker_last_lateral_command = None
         self._tracker_session_active = False
         self._tracker_start_pending = False
         self._tracker_requires_disabled = True
@@ -507,6 +509,7 @@ class App:
             self._tracker_start_pending = False
             self.ctx.auto_mode_enable = False
             self._tracker_enabled_at = float("inf")
+            self._tracker_last_lateral_command = None
             return
 
         if self.ctx.state == RobotState.FAILSAFE or self._tracker_requires_disabled:
@@ -530,11 +533,13 @@ class App:
         if previous == AutoModeType.TRACKING and requested == AutoModeType.CURSOR:
             self.ctx.auto_mode_enable = False
             self._tracker_enabled_at = float("inf")
+            self._tracker_last_lateral_command = None
 
     def _handle_tracker_enabler(self, now: float) -> None:
         if self.ctx.auto_mode_enable:
             self.ctx.auto_mode_enable = False
             self._tracker_enabled_at = float("inf")
+            self._tracker_last_lateral_command = None
             log.info("tracker result control disabled")
             return
         if (
@@ -551,9 +556,36 @@ class App:
                 MavSeverity.WARNING,
             )
             return
+        observation = self.visual_observer.fresh_observation(
+            received_after=float("-inf"),
+            max_age_s=self.config.tracker_result_timeout_s,
+            now=now,
+        )
+        if (
+            observation is None
+            or not observation.detection.found
+            or not observation.detection.locked
+        ):
+            log.warning("Tracker enable ignored: fresh detector lock required")
+            self.mavlink_service.send_text_to_gcs(
+                "Tracker unavailable: target is not locked",
+                MavSeverity.WARNING,
+            )
+            return
         self.ctx.auto_mode_enable = True
         self._tracker_enabled_at = now
-        log.info("tracker result control enabled; waiting for a fresh result")
+        self._tracker_last_lateral_command = (
+            observation.command.pitch,
+            observation.command.yaw,
+        )
+        log.info(
+            "tracker result control enabled frame={} bbox=({}, {}, {}, {})",
+            observation.detection.frame_id,
+            observation.detection.x,
+            observation.detection.y,
+            observation.detection.width,
+            observation.detection.height,
+        )
 
     def _tracker_bridge_healthy(self, now: float) -> bool:
         return self.visual_observer is not None and self.visual_observer.is_healthy(
@@ -720,13 +752,33 @@ class App:
         observation = None
         if self.ctx.auto_mode_enable and self.visual_observer is not None:
             observation = self.visual_observer.fresh_observation(
-                received_after=self._tracker_enabled_at,
+                received_after=float("-inf"),
                 max_age_s=self.config.tracker_result_timeout_s,
                 now=now,
             )
-        if observation is not None and observation.detection.found:
-            return observation.command.to_list()
-        return self._tracking_alt_hold_fallback()
+        if observation is None or not observation.detection.locked:
+            if self.ctx.auto_mode_enable:
+                reason = "stale telemetry" if observation is None else "detector lock lost"
+                log.warning("leaving TRACKING: {}", reason)
+            self.ctx.auto_mode_enable = False
+            self._tracker_enabled_at = float("inf")
+            self._tracker_last_lateral_command = None
+            return self._tracking_alt_hold_fallback()
+
+        if observation.detection.found:
+            self._tracker_last_lateral_command = (
+                observation.command.pitch,
+                observation.command.yaw,
+            )
+        pitch, yaw = self._tracker_last_lateral_command or (RC_MID, RC_MID)
+        controller = self.controllers[RobotState.ALT_HOLD]
+        controller.update_yaw_from_direct_rc(yaw)
+        controller.update_pitch_roll(pitch, RC_MID)
+        return controller.update(
+            controller.setpoint,
+            self.ctx.drone_alt,
+            self.ctx.drone_alt_received_at_s,
+        )
 
     def _tracking_alt_hold_fallback(self):
         controller = self.controllers[RobotState.ALT_HOLD]

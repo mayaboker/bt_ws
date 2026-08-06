@@ -15,6 +15,15 @@ sys.modules[SPEC.name] = auto_roll
 SPEC.loader.exec_module(auto_roll)
 
 
+def test_help_and_runtime_use_the_same_scenario_banner(capsys):
+    help_text = auto_roll.build_parser().format_help()
+
+    auto_roll.AutoRollScenario._print_banner()
+
+    assert auto_roll.SCENARIO_BANNER in help_text
+    assert capsys.readouterr().out.rstrip() == auto_roll.SCENARIO_BANNER
+
+
 def make_scenario(**overrides):
     values = {
         "destination": ("127.0.0.1", 14560),

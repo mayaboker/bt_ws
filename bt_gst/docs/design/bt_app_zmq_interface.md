@@ -91,7 +91,10 @@ followed by `adjustment` or `resize`.
   "x": 210,
   "y": 130,
   "width": 80,
-  "height": 60
+  "height": 60,
+  "locked": true,
+  "lock_found_frames": 10,
+  "lock_missing_frames": 0
 }
 ```
 
@@ -102,6 +105,9 @@ followed by `adjustment` or `resize`.
 | `found` | boolean | Whether the detector found a target in this frame |
 | `x`, `y` | integer | Top-left bounding-box position in pixels |
 | `width`, `height` | integer | Bounding-box size in pixels |
+| `locked` | boolean | Detector session has acquired the target |
+| `lock_found_frames` | integer | Consecutive found frames, capped at 10 |
+| `lock_missing_frames` | integer | Consecutive missing frames, capped at 5 |
 
 When `found` is false, the box fields are zero. `bt_app` uses this message to
 calculate normalized target error:
@@ -114,8 +120,13 @@ error_y = (image_height / 2 - box_center_y) / (image_height / 2)
 Both errors are clamped to `[-1, 1]`. Positive X means the target is to the
 right; positive Y means the target is above the image center.
 
-The current visual observer prints the detection, normalized error, and
-hypothetical controller output. It does not dispatch RC commands.
+The lock becomes true after 10 consecutive found frames and false after five
+consecutive missing frames. A `start` request resets and activates acquisition;
+a `stop` request clears it. Consumers decoding an older message without lock
+fields treat it as unlocked.
+
+In TRACKING, `bt_app` uses horizontal error for bounded yaw, commands a fixed
+forward pitch, and leaves throttle under the ALT_HOLD controller.
 
 ### Tracker data
 

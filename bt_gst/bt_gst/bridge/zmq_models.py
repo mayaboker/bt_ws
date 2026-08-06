@@ -71,6 +71,9 @@ class RedDetectionMessage:
     y: int
     width: int
     height: int
+    locked: bool = False
+    lock_found_frames: int = 0
+    lock_missing_frames: int = 0
     type: str = field(default=TYPE_RED_DETECTION, init=False)
 
 
@@ -138,6 +141,9 @@ def decode_telemetry_message(payload: bytes) -> TelemetryMessage:
             y=int(data["y"]),
             width=int(data["width"]),
             height=int(data["height"]),
+            locked=bool(data.get("locked", False)),
+            lock_found_frames=int(data.get("lock_found_frames", 0)),
+            lock_missing_frames=int(data.get("lock_missing_frames", 0)),
         )
     raise ValueError(f"unsupported telemetry message type: {message_type!r}")
 
