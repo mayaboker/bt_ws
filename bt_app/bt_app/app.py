@@ -78,6 +78,7 @@ class App:
         self.config = config
         self._stop_event = threading.Event()
         self._shutdown_signal: int | None = None
+        self._last_logged_armable: bool | None = None
         # hold application state
         self.ctx = Context()
 
@@ -625,6 +626,21 @@ class App:
 
     #endregion
 
+    def _log_armability_transition(self) -> None:
+        """Log arm readiness once whenever the readiness state changes."""
+        armable = bool(self.ctx.armable)
+        if armable == getattr(self, "_last_logged_armable", None):
+            return
+
+        if armable:
+            log.success("Vehicle is ready to arm")
+        else:
+            flags = self.ctx.arming_disable_flags
+            reason = ", ".join(map(str, flags)) if flags else "reason unavailable"
+            log.warning("Vehicle is not ready to arm: {}", reason)
+
+        self._last_logged_armable = armable
+
     def __update_state(self):
         """
         update the context / blackboard from drone and other sensors
@@ -638,10 +654,7 @@ class App:
             # self.ctx.armed = vehicle_state.get("box_mode_flags") == 3
             self.ctx.armable = vehicle_state.get("armable", False)
             self.ctx.arming_disable_flags = vehicle_state.get("arming_disable_flags", [])
-
-            if not self.ctx.armable and self.ctx.arming_disable_flags:
-                log.warning("vehicle not armed")
-                log.warning(self.ctx.arming_disable_flags)
+            self._log_armability_transition()
 
             log.debug(vehicle_state)
 
