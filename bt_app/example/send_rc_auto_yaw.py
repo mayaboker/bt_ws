@@ -27,9 +27,25 @@ from send_rc import (
     APP_COMPONENT_ID,
     APP_SYSTEM_ID,
     ScenarioError,
-    rc_channels,
 )
 from send_rc_manual_reentry import DescentTelemetry, ManualReentryScenario
+
+SCENARIO_BANNER = """\
+==============================================================================
+bt-app Automatic Takeoff / ALT_HOLD Yaw SITL Scenario
+==============================================================================
+Simulates this joystick flight sequence:
+  1. Arm in MANUAL and request automatic takeoff.
+  2. Wait for ALT_HOLD and stable vertical speed.
+  3. Command an aggressive measured clockwise yaw rotation.
+  4. Center yaw, then command the same counter-clockwise rotation.
+  5. Center yaw and switch to MANUAL for feedback-controlled descent.
+  6. Confirm touchdown, disarm, and verify IDLE.
+
+Safety behavior:
+  The maneuver must remain in ALT_HOLD and receive attitude telemetry.
+  Airborne failures stop RC traffic so bt-app failsafe can recover.
+=============================================================================="""
 
 
 def alt_hold_yaw_channels(yaw: int) -> tuple[int, ...]:
@@ -85,7 +101,7 @@ class AutoYawScenario(ManualReentryScenario):
         turn_angle_deg: float = 360.0,
         yaw_rate_dps: float = 10.0,
         direction_pause_s: float = 1.0,
-        cw_yaw_rc: int = 1650,
+        cw_yaw_rc: int = 1900,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -99,6 +115,7 @@ class AutoYawScenario(ManualReentryScenario):
         self.ccw_channels = alt_hold_yaw_channels(ccw_yaw_rc)
 
     def run(self) -> None:
+        self._print_banner()
         self._open()
         try:
             self._phase("Waiting for bt-app telemetry")
@@ -165,12 +182,17 @@ class AutoYawScenario(ManualReentryScenario):
         finally:
             self._cleanup()
 
+    @staticmethod
+    def _print_banner() -> None:
+        print(SCENARIO_BANNER, flush=True)
+
     def _command_turn(self, label: str, channels: Sequence[int]) -> None:
         commanded_yaw_rc = channels[YAW]
         self._phase(
             f"Commanding {self.turn_angle_deg:.0f} degree {label} yaw for "
             f"approximately {self.turn_duration_s:.1f} seconds: "
-            f"yaw_rc={commanded_yaw_rc}, expected_rate={self.yaw_rate_dps:.1f} deg/s"
+            f"yaw_rc={commanded_yaw_rc}, "
+            f"planning_rate={self.yaw_rate_dps:.1f} deg/s"
         )
         deadline = time.monotonic() + max(10.0, self.turn_duration_s * 3.0)
         next_send = 0.0
@@ -240,7 +262,10 @@ class AutoYawScenario(ManualReentryScenario):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=SCENARIO_BANNER,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--destination-host", default="127.0.0.1")
     parser.add_argument("--destination-port", type=int, default=14560)
     parser.add_argument("--listen-host", default="0.0.0.0")
@@ -251,7 +276,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--turn-angle", type=float, default=360.0)
     parser.add_argument("--yaw-rate", type=float, default=10.0)
     parser.add_argument("--direction-pause", type=float, default=1.0)
-    parser.add_argument("--cw-yaw-rc", type=int, default=1650)
+    parser.add_argument(
+        "--cw-yaw-rc",
+        type=int,
+        default=1900,
+        help=(
+            "clockwise yaw PWM; 1900 overcomes the ALT_HOLD yaw deadband/expo "
+            "while measured attitude still terminates the turn"
+        ),
+    )
     parser.add_argument("--descent-rate", type=float, default=1.0)
     parser.add_argument("--descent-velocity-kp", type=float, default=50.0)
     parser.add_argument("--descent-min-throttle", type=int, default=1500)
