@@ -513,6 +513,26 @@ class VisualTrackerObserver:
         with self._observation_lock:
             return self._latest_received_at
 
+    def latest_detection_map(self) -> dict[str, Any] | None:
+        """Return a snapshot matching the red-detection transport schema."""
+        with self._observation_lock:
+            if self._latest_observation is None:
+                return None
+            detection = self._latest_observation.detection
+            return {
+                "type": "red-detection",
+                "frame_id": detection.frame_id,
+                "timestamp_ns": detection.timestamp_ns,
+                "found": detection.found,
+                "x": detection.x,
+                "y": detection.y,
+                "width": detection.width,
+                "height": detection.height,
+                "locked": detection.locked,
+                "lock_found_frames": detection.lock_found_frames,
+                "lock_missing_frames": detection.lock_missing_frames,
+            }
+
     def is_healthy(self, timeout_s: float, *, now: float | None = None) -> bool:
         current = self._clock() if now is None else now
         return current - self.latest_received_at() <= timeout_s

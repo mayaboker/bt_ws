@@ -16,12 +16,17 @@ from bt_app.mavlink_wrapper import (
     MavlinkService,
     NamedValueFloatCommand,
     ReceivePendingCommand,
+    SendRedDetectionV2ExtensionCommand,
     SendChannelStatusV2ExtensionCommand,
     SendRcChannelsCommand,
     SysStatusCommand,
     V2_EXTENSION_CHANNEL_STATUS_MESSAGE_TYPE,
     V2_EXTENSION_CHANNEL_STATUS_PAYLOAD_FORMAT,
     make_base_mode,
+)
+from bt_app.visual_mavlink import (
+    V2_EXTENSION_RED_DETECTION_MESSAGE_TYPE,
+    decode_red_detection,
 )
 from bt_app.vehicle_config import VehicleConfig
 
@@ -54,10 +59,20 @@ class FakeSocket:
 class FakeMavlinkService:
     instances = []
 
-    def __init__(self, *, context, parameter_service=None, qopenhd_addr=None):
+    def __init__(
+        self,
+        *,
+        context,
+        parameter_service=None,
+        qopenhd_addr=None,
+        visual_detection_supplier=None,
+        visual_mavlink_rate_hz=20.0,
+    ):
         self.context = context
         self.parameter_service = parameter_service
         self.qopenhd_addr = qopenhd_addr
+        self.visual_detection_supplier = visual_detection_supplier
+        self.visual_mavlink_rate_hz = visual_mavlink_rate_hz
         self.started = False
         self.stopped = False
         FakeMavlinkService.instances.append(self)
@@ -428,6 +443,42 @@ def test_channel_status_v2_extension_uses_safe_defaults_without_sent_rc():
         bytes(msg.payload[: struct.calcsize(V2_EXTENSION_CHANNEL_STATUS_PAYLOAD_FORMAT)]),
     )
     assert unpacked[4:] == (1500, 1500, 1000, 1500, 1000, 1000, 1000, 1000)
+
+
+def test_red_detection_v2_extension_coalesces_latest_frame():
+    latest = {
+        "type": "red-detection",
+        "frame_id": 42,
+        "timestamp_ns": 123,
+        "found": True,
+        "x": 210,
+        "y": 130,
+        "width": 80,
+        "height": 60,
+        "locked": True,
+        "lock_found_frames": 10,
+        "lock_missing_frames": 0,
+    }
+    service = MavlinkService(
+        context=Context(),
+        visual_detection_supplier=lambda: latest,
+        visual_mavlink_rate_hz=20.0,
+    )
+    socket = FakeSocket()
+    service._socket = socket
+
+    SendRedDetectionV2ExtensionCommand(service).execute(service.context)
+    SendRedDetectionV2ExtensionCommand(service).execute(service.context)
+
+    assert len(socket.sent) == 1
+    msg = decode_mavlink(socket.sent[0][0])
+    assert msg.message_type == V2_EXTENSION_RED_DETECTION_MESSAGE_TYPE
+    assert decode_red_detection(bytes(msg.payload)) == latest
+
+    latest["frame_id"] = 43
+    latest["timestamp_ns"] = 124
+    service._send_latest_red_detection()
+    assert len(socket.sent) == 2
 
 
 def test_app_starts_mavlink_service_with_shared_context(monkeypatch):

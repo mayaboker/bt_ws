@@ -31,6 +31,7 @@ class VehicleConfig():
     visual_image_width: int = field(default=640)
     visual_image_height: int = field(default=480)
     visual_print_rate_hz: float = field(default=2.0)
+    visual_mavlink_rate_hz: float = field(default=20.0)
     tracker_request_endpoint: str = field(default="tcp://127.0.0.1:5555")
     tracker_initial_x: int = field(default=320)
     tracker_initial_y: int = field(default=240)

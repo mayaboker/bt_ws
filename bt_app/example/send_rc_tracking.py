@@ -16,9 +16,13 @@ import sys
 import time
 from typing import Any, Sequence
 
-import msgpack
 from pymavlink import mavutil
-import zmq
+
+from bt_app.visual_mavlink import (
+    V2_EXTENSION_RED_DETECTION_MESSAGE_TYPE,
+    VisualMavlinkCodecError,
+    decode_red_detection,
+)
 
 from send_rc import (
     ALT_HOLD_ARMED,
@@ -57,6 +61,9 @@ ANSI_BOLD_RED = "\033[1;31m"
 
 POC_PARAMETERS = {
     "TAKEOFF_ALT": 4.0,
+    "HOV_KP": 20.0,
+    "HOV_KD": 35.0,
+    "HOV_OUT_LIMIT": 100.0,
     "VIS_FWD_PITCH": -5.0,
     "VIS_KP_YAW": 15.0,
     "VIS_MAX_YAW": 15.0,
@@ -95,7 +102,6 @@ class TrackingScenario(ManualReentryScenario):
         self,
         *,
         parameter_destination: tuple[str, int],
-        visual_endpoint: str,
         search_yaw_rc: int,
         search_timeout_s: float,
         lock_dwell_s: float,
@@ -115,7 +121,6 @@ class TrackingScenario(ManualReentryScenario):
         super().__init__(**kwargs)
         self.telemetry = YawTelemetry()
         self.parameter_destination = parameter_destination
-        self.visual_endpoint = visual_endpoint
         self.search_yaw_rc = search_yaw_rc
         self.search_timeout_s = search_timeout_s
         self.lock_dwell_s = lock_dwell_s
@@ -130,9 +135,8 @@ class TrackingScenario(ManualReentryScenario):
         self.tracking_timeout_s = tracking_timeout_s
         self.settle_duration_s = settle_duration_s
         self.parameter_timeout_s = parameter_timeout_s
-        self._zmq_context: zmq.Context | None = None
-        self._visual_socket: zmq.Socket | None = None
         self._last_detection: dict[str, Any] | None = None
+        self._last_detection_frame_id: int | None = None
         self._last_detection_received_at = float("-inf")
         self._invalid_visual_frames = 0
         self._last_invalid_visual_warning_at = float("-inf")
@@ -141,14 +145,13 @@ class TrackingScenario(ManualReentryScenario):
 
     def run(self) -> None:
         self._open()
-        self._open_visual_subscriber()
         try:
-            self._phase("Waiting for bt-app telemetry and red-detection ZMQ data")
+            self._phase("Waiting for bt-app telemetry and MAVLink red-detection data")
             self._wait_for(
                 NEUTRAL_DISARMED,
-                lambda: self.telemetry.state is not None,
+                self._preflight_ready,
                 self.state_timeout_s,
-                "application heartbeat",
+                "application heartbeat and red-detection telemetry",
             )
             self._configure_poc_parameters()
 
@@ -201,26 +204,10 @@ class TrackingScenario(ManualReentryScenario):
                     for name, value in self._original_parameters.items()
                 )
                 self._phase(f"Parameters not restored; restore manually: {values}")
-            self._close_visual_subscriber()
             self._cleanup()
 
-    def _open_visual_subscriber(self) -> None:
-        context = zmq.Context()
-        socket = context.socket(zmq.SUB)
-        socket.setsockopt(zmq.LINGER, 0)
-        socket.setsockopt(zmq.RCVHWM, 1)
-        socket.setsockopt(zmq.SUBSCRIBE, b"")
-        socket.connect(self.visual_endpoint)
-        self._zmq_context = context
-        self._visual_socket = socket
-
-    def _close_visual_subscriber(self) -> None:
-        if self._visual_socket is not None:
-            self._visual_socket.close(linger=0)
-            self._visual_socket = None
-        if self._zmq_context is not None:
-            self._zmq_context.term()
-            self._zmq_context = None
+    def _preflight_ready(self) -> bool:
+        return self.telemetry.state is not None and self._last_detection is not None
 
     def _receive_pending(self) -> None:
         if self._socket is not None:
@@ -233,6 +220,10 @@ class TrackingScenario(ManualReentryScenario):
                     message = self._parser.parse_char(bytes([byte]))
                     if message is None:
                         continue
+                    if message.get_type() == "V2_EXTENSION" and int(
+                        message.message_type
+                    ) == V2_EXTENSION_RED_DETECTION_MESSAGE_TYPE:
+                        self._consume_visual_mavlink(message)
                     if (
                         int(message.get_srcSystem()) == APP_SYSTEM_ID
                         and int(message.get_srcComponent()) == APP_COMPONENT_ID
@@ -252,54 +243,40 @@ class TrackingScenario(ManualReentryScenario):
                                 self.telemetry.describe(),
                                 color="\033[1;36m" if state_changed else None,
                             )
-        self._receive_visual_pending()
 
-    def _receive_visual_pending(self) -> None:
-        socket = self._visual_socket
-        if socket is None:
+    def _consume_visual_mavlink(self, message: Any) -> None:
+        if (
+            int(message.get_srcSystem()) != APP_SYSTEM_ID
+            or int(message.get_srcComponent()) != APP_COMPONENT_ID
+        ):
+            self._record_invalid_visual_frame("unexpected MAVLink source")
             return
-        while True:
-            try:
-                payload = socket.recv(flags=zmq.NOBLOCK)
-            except zmq.Again:
+        try:
+            data = decode_red_detection(bytes(message.payload))
+        except VisualMavlinkCodecError as exc:
+            self._record_invalid_visual_frame(str(exc))
+            return
+
+        now = time.monotonic()
+        frame_id = int(data["frame_id"]) & 0xFFFFFFFF
+        previous = self._last_detection_frame_id
+        if previous is not None:
+            delta = (frame_id - previous) & 0xFFFFFFFF
+            if delta == 0:
                 return
-            try:
-                data = msgpack.unpackb(payload, raw=False, strict_map_key=False)
-            except (ValueError, TypeError, msgpack.exceptions.UnpackException) as exc:
-                self._record_invalid_visual_frame(str(exc))
-                continue
-            if not isinstance(data, dict):
-                self._record_invalid_visual_frame("payload is not a map")
-                continue
-            if data.get("type") != "red-detection":
-                continue
-            required = ("frame_id", "found", "x", "y", "width", "height")
-            if any(field not in data for field in required):
-                self._record_invalid_visual_frame("red-detection fields are missing")
-                continue
-            if not isinstance(data["found"], bool) or not isinstance(
-                data.get("locked", False), bool
-            ):
-                self._record_invalid_visual_frame("lock fields must be booleans")
-                continue
-            numeric_fields = (
-                "frame_id",
-                "x",
-                "y",
-                "width",
-                "height",
-                "lock_found_frames",
-                "lock_missing_frames",
-            )
-            if any(
-                field in data
-                and (isinstance(data[field], bool) or not isinstance(data[field], int))
-                for field in numeric_fields
-            ):
-                self._record_invalid_visual_frame("numeric fields must be integers")
-                continue
-            self._last_detection = data
-            self._last_detection_received_at = time.monotonic()
+            if delta >= 0x80000000:
+                if now - self._last_detection_received_at <= self.vision_timeout_s:
+                    self._record_invalid_visual_frame(
+                        f"out-of-order frame_id={frame_id} previous={previous}"
+                    )
+                    return
+                self._phase(
+                    "Visual MAVLink stream restarted after stale gap "
+                    f"frame_id={frame_id} previous={previous}"
+                )
+        self._last_detection = data
+        self._last_detection_frame_id = frame_id
+        self._last_detection_received_at = now
 
     def _record_invalid_visual_frame(self, reason: str) -> None:
         self._invalid_visual_frames += 1
@@ -752,7 +729,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--listen-host", default="0.0.0.0")
     parser.add_argument("--listen-port", type=int, default=14550)
-    parser.add_argument("--visual-endpoint", default="tcp://127.0.0.1:5556")
     parser.add_argument("--rate-hz", type=float, default=50.0)
     parser.add_argument("--state-timeout", type=float, default=20.0)
     parser.add_argument("--flight-timeout", type=float, default=120.0)
@@ -875,7 +851,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         descent_min_throttle=args.descent_min_throttle,
         descent_hover_throttle=args.descent_hover_throttle,
         descent_max_throttle=args.descent_max_throttle,
-        visual_endpoint=args.visual_endpoint,
         search_yaw_rc=args.search_yaw_rc,
         search_timeout_s=args.search_timeout,
         lock_dwell_s=args.lock_dwell,

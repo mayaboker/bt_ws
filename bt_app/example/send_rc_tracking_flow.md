@@ -7,8 +7,8 @@ shows which bt-app conditions must be true at each state transition.
 
 ```mermaid
 flowchart TD
-    A[Open MAVLink UDP socket<br/>Open red-detection ZMQ subscriber]
-    B[Send NEUTRAL_DISARMED RC<br/>Wait for bt-app telemetry]
+    A[Open MAVLink UDP socket]
+    B[Send NEUTRAL_DISARMED RC<br/>Wait for bt-app heartbeat and relayed detection]
     C[Read and set tracking parameters on UDP 14551<br/>Keep sending NEUTRAL_DISARMED RC to UDP 14560]
     D[Send ARM_IN_MANUAL RC]
     E{IDLE to ARM guards pass?}
@@ -66,6 +66,31 @@ RC_CHANNELS_OVERRIDE  script:14550 -> bt-app:14560
 PARAM_REQUEST/SET     script:14550 -> bt-app:14551
 PARAM_VALUE/telemetry bt-app:14551 -> script:14550
 ```
+
+Visual telemetry follows one ownership path:
+
+```mermaid
+flowchart LR
+    detector[bt_gst detector] -->|MessagePack over ZMQ| app[bt-app visual observer]
+    app -->|latest unsent frame, max 20 Hz| mav[V2_EXTENSION type 2]
+    mav -->|UDP 14551 to 14550| script[send_rc_tracking.py]
+```
+
+The script no longer connects to ZMQ. Before arming it requires both a bt-app
+heartbeat and one valid MAVLink red-detection packet. The custom packet uses
+`V2_EXTENSION.message_type=2` with broadcast target fields and this payload:
+
+```text
+uint8 protocol_version = 1
+uint16 messagepack_length (little endian)
+messagepack red-detection map
+zero padding to the MAVLink V2_EXTENSION payload size
+```
+
+bt-app publishes only a newly observed frame at each 20 Hz slot. The script
+uses local monotonic receipt time for freshness, rejects duplicate and
+out-of-order frame IDs, handles uint32 wraparound, and accepts a lower frame ID
+as a restarted stream only after the vision timeout has elapsed.
 
 | Phase | Important channel values | Meaning |
 |---|---|---|

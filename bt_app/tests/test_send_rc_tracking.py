@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 
 import pytest
-import msgpack
+from bt_app.visual_mavlink import encode_red_detection
 
 EXAMPLE_DIR = Path(__file__).parents[1] / "example"
 sys.path.insert(0, str(EXAMPLE_DIR))
@@ -36,7 +36,6 @@ def make_scenario(**overrides):
         "descent_min_throttle": 1500,
         "descent_hover_throttle": 1660,
         "descent_max_throttle": 1800,
-        "visual_endpoint": "inproc://visual",
         "search_yaw_rc": 1750,
         "search_timeout_s": 240.0,
         "lock_dwell_s": 0.5,
@@ -75,6 +74,9 @@ def test_tracker_channels_extend_rc_override_without_changing_flight_axes() -> N
 def test_poc_parameters_match_tracking_contract() -> None:
     assert tracking.POC_PARAMETERS == {
         "TAKEOFF_ALT": 4.0,
+        "HOV_KP": 20.0,
+        "HOV_KD": 35.0,
+        "HOV_OUT_LIMIT": 100.0,
         "VIS_FWD_PITCH": -5.0,
         "VIS_KP_YAW": 15.0,
         "VIS_MAX_YAW": 15.0,
@@ -145,6 +147,76 @@ def test_fresh_detector_lock_requires_found_locked_and_recent() -> None:
 
     scenario._last_detection["found"] = False
     assert not scenario._fresh_detector_lock()
+
+
+def visual_message(frame_id, *, system_id=None, component_id=None):
+    payload = encode_red_detection(
+        {
+            "type": "red-detection",
+            "frame_id": frame_id,
+            "timestamp_ns": frame_id,
+            "found": False,
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0,
+            "locked": False,
+            "lock_found_frames": 0,
+            "lock_missing_frames": 5,
+        }
+    )
+
+    class Message:
+        def get_srcSystem(self):
+            return tracking.APP_SYSTEM_ID if system_id is None else system_id
+
+        def get_srcComponent(self):
+            return tracking.APP_COMPONENT_ID if component_id is None else component_id
+
+    message = Message()
+    message.payload = payload
+    return message
+
+
+def test_preflight_requires_state_and_mavlink_detection() -> None:
+    scenario = make_scenario()
+    assert not scenario._preflight_ready()
+
+    scenario.telemetry.state = tracking.STATE_IDLE
+    assert not scenario._preflight_ready()
+
+    scenario._consume_visual_mavlink(visual_message(1))
+    assert scenario._preflight_ready()
+
+
+def test_visual_mavlink_sequence_wrap_and_stale_restart(monkeypatch) -> None:
+    scenario = make_scenario(vision_timeout_s=1.0)
+    clock = [10.0]
+    monkeypatch.setattr(tracking.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(scenario, "_phase", lambda *_args, **_kwargs: None)
+
+    scenario._consume_visual_mavlink(visual_message(0xFFFFFFFE))
+    scenario._consume_visual_mavlink(visual_message(1))
+    assert scenario._last_detection_frame_id == 1
+
+    scenario._consume_visual_mavlink(visual_message(0))
+    assert scenario._last_detection_frame_id == 1
+
+    clock[0] += 1.1
+    scenario._consume_visual_mavlink(visual_message(0))
+    assert scenario._last_detection_frame_id == 0
+
+
+def test_duplicate_visual_frame_does_not_refresh_freshness(monkeypatch) -> None:
+    scenario = make_scenario()
+    clock = [10.0]
+    monkeypatch.setattr(tracking.time, "monotonic", lambda: clock[0])
+
+    scenario._consume_visual_mavlink(visual_message(7))
+    clock[0] = 11.0
+    scenario._consume_visual_mavlink(visual_message(7))
+
+    assert scenario._last_detection_received_at == 10.0
 
 
 def test_search_command_preserves_pretracking_and_commands_clockwise_yaw() -> None:
@@ -284,34 +356,38 @@ def test_stale_visual_telemetry_is_search_failure() -> None:
 
 def test_invalid_visual_frame_is_ignored_before_valid_detection(monkeypatch) -> None:
     scenario = make_scenario()
-    valid = msgpack.packb(
-        {
-            "type": "red-detection",
-            "frame_id": 4,
-            "found": False,
-            "x": 0,
-            "y": 0,
-            "width": 0,
-            "height": 0,
-            "locked": False,
-        },
-        use_bin_type=True,
-    )
-
-    class FakeSocket:
-        def __init__(self):
-            self.payloads = [msgpack.packb([1, 2, 3]), valid]
-
-        def recv(self, *, flags):
-            assert flags == tracking.zmq.NOBLOCK
-            if not self.payloads:
-                raise tracking.zmq.Again()
-            return self.payloads.pop(0)
-
-    scenario._visual_socket = FakeSocket()
     monkeypatch.setattr(scenario, "_phase", lambda *_args, **_kwargs: None)
 
-    scenario._receive_visual_pending()
+    class Message:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def get_srcSystem(self):
+            return tracking.APP_SYSTEM_ID
+
+        def get_srcComponent(self):
+            return tracking.APP_COMPONENT_ID
+
+    scenario._consume_visual_mavlink(Message(b"\x01\x03\x00bad"))
+    scenario._consume_visual_mavlink(
+        Message(
+            encode_red_detection(
+                {
+                    "type": "red-detection",
+                    "frame_id": 4,
+                    "timestamp_ns": None,
+                    "found": False,
+                    "x": 0,
+                    "y": 0,
+                    "width": 0,
+                    "height": 0,
+                    "locked": False,
+                    "lock_found_frames": 0,
+                    "lock_missing_frames": 5,
+                }
+            )
+        )
+    )
 
     assert scenario._invalid_visual_frames == 1
     assert scenario._last_detection["frame_id"] == 4

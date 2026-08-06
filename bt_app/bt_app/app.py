@@ -116,6 +116,12 @@ class App:
                 context=self.ctx,
                 parameter_service=getattr(self.__params, "service", None),
                 qopenhd_addr=(self.config.gcs_ip, self.config.gcs_port),
+                visual_detection_supplier=(
+                    None
+                    if self.visual_observer is None
+                    else self.visual_observer.latest_detection_map
+                ),
+                visual_mavlink_rate_hz=self.config.visual_mavlink_rate_hz,
             )
             self.mavlink_service.start()
             self.rc_recorder = self.__load_rc_recorder()
@@ -142,6 +148,8 @@ class App:
                 raise AppStartupError("Visual image height must be greater than zero")
             if self.config.visual_print_rate_hz <= 0:
                 raise AppStartupError("Visual print rate must be greater than zero")
+            if self.config.visual_mavlink_rate_hz <= 0:
+                raise AppStartupError("Visual MAVLink rate must be greater than zero")
 
         positive_tracker_values = {
             "tracker_adjust_step_x_px": self.config.tracker_adjust_step_x_px,

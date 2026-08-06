@@ -35,6 +35,7 @@ visual_zmq_endpoint: "tcp://127.0.0.1:5556"
 visual_image_width: 640
 visual_image_height: 480
 visual_print_rate_hz: 2.0
+visual_mavlink_rate_hz: 20.0
 
 # Pre-tracking cursor and result-gating settings.
 tracker_request_endpoint: "tcp://127.0.0.1:5555"
