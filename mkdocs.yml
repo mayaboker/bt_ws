@@ -42,7 +42,10 @@ theme:
 
 nav:
   - Home: index.md
-  - Application: application/index.md
+  - Application:
+      - Overview: application/index.md
+      - Controllers:
+          - Takeoff altitude control: application/controllers/takeoff-altitude-control.md
   - Deployment: deploy/index.md
   - Flight Controller:
       - Overview: fc/index.md

@@ -566,24 +566,24 @@ class VisualTrackerObserver:
     def _print_observation(observation: VisualObservation) -> None:
         detection = observation.detection
         command = observation.command
-        log.info(
-            "visual frame={} found={} locked={} lock_frames=({},{}) "
-            "bbox=({}, {}, {}, {}) error=({:+.3f}, {:+.3f}) "
-            "requested_rc=(pitch={} yaw={})",
-            detection.frame_id,
-            detection.found,
-            detection.locked,
-            detection.lock_found_frames,
-            detection.lock_missing_frames,
-            detection.x,
-            detection.y,
-            detection.width,
-            detection.height,
-            observation.error_x,
-            observation.error_y,
-            command.pitch,
-            command.yaw,
-        )
+        # log.info(
+        #     "visual frame={} found={} locked={} lock_frames=({},{}) "
+        #     "bbox=({}, {}, {}, {}) error=({:+.3f}, {:+.3f}) "
+        #     "requested_rc=(pitch={} yaw={})",
+        #     detection.frame_id,
+        #     detection.found,
+        #     detection.locked,
+        #     detection.lock_found_frames,
+        #     detection.lock_missing_frames,
+        #     detection.x,
+        #     detection.y,
+        #     detection.width,
+        #     detection.height,
+        #     observation.error_x,
+        #     observation.error_y,
+        #     command.pitch,
+        #     command.yaw,
+        # )
 
 
 def normalized_target_error(

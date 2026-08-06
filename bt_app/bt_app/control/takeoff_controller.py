@@ -1,3 +1,16 @@
+"""Altitude controller used while the flight state machine is in TAKEOFF.
+
+The controller starts its internal altitude setpoint at the measured altitude
+and ramps it toward the requested takeoff altitude at ``TAKEOFF_RATE``.  A PI
+controller follows that ramp, while a separately calculated vertical-speed
+term damps vertical motion.  The resulting correction is added to
+``HOV_BASELINE`` and converted into an armed, angle-mode RC command.
+
+``TakeoffController`` does not change flight state itself.  It exposes
+``time_in_alt`` so the application state machine can decide when TAKEOFF has
+remained close enough to its final target to transition to ALT_HOLD.
+"""
+
 from typing import Any
 import time
 from bt_app.parameters.generated.keys import ParameterKey
@@ -12,8 +25,27 @@ from loguru import logger as log
 ALT_REACH_DELTA = 0.5
 
 class TakeoffController:
-    """
-    Takeoff to request alt
+    """Generate throttle commands for a ramped automatic takeoff.
+
+    Each call to :meth:`update` performs the following flow:
+
+    1. Estimate vertical speed from consecutive altitude samples.
+    2. Move the internal altitude setpoint toward the final target, limited by
+       ``TAKEOFF_RATE``.
+    3. Track how long the vehicle has been within ``ALT_REACH_DELTA`` of the
+       final target.
+    4. Calculate the altitude PI correction and subtract vertical-speed
+       damping configured by ``ALT_KD``.
+    5. Limit the correction, add it to ``HOV_BASELINE``, and return a complete
+       armed RC-channel command.
+
+    Args:
+        params: Parameter provider containing the takeoff and hover-baseline
+            parameters and an ``on_parameter_changed`` event.
+
+    Notes:
+        ``ALT_KD`` is applied to measured vertical speed outside :class:`PID`;
+        the PID object's derivative gain is deliberately set to zero.
     """
     def __init__(self, params):
         self.params = params
@@ -43,10 +75,17 @@ class TakeoffController:
     # region properties
     @property
     def time_in_alt(self):
+        """Return accumulated seconds within the final-altitude tolerance.
+
+        The timer resets to zero whenever the measured altitude leaves the
+        ``ALT_REACH_DELTA`` band.  The application uses this value as part of
+        its TAKEOFF-to-ALT_HOLD transition decision.
+        """
         return self.__time_in_alt
     # endregion properties
     # 
     def reset(self):
+        """Clear all state so the next update starts a new takeoff ramp."""
         self.__time_in_alt = 0
         self._last_update_s = None
         self._setpoint = None
@@ -57,6 +96,7 @@ class TakeoffController:
         
     @property
     def setpoint(self) -> float | None:
+        """Return the current ramped altitude setpoint, or ``None`` before use."""
         return self._setpoint
     
     def update(
@@ -65,6 +105,24 @@ class TakeoffController:
         current,
         altitude_sample_time_s: float | None = None,
     ):
+        """Advance the takeoff controller and return the next RC command.
+
+        Args:
+            setpoint: Final requested takeoff altitude in metres.
+            current: Latest measured altitude in metres.
+            altitude_sample_time_s: Monotonic timestamp associated with the
+                altitude sample.  When omitted, the local monotonic clock is
+                used.  Supplying the sensor timestamp gives a more accurate
+                vertical-speed estimate when samples arrive irregularly.
+
+        Returns:
+            A complete RC-channel list.  Throttle contains the limited
+            altitude correction added to ``HOV_BASELINE``; ARM and ANGLE are
+            asserted and all other channels are centred.
+
+        The first update initializes the ramped setpoint at ``current`` and
+        therefore applies no setpoint-ramp step until the following update.
+        """
         current_time = time.monotonic()
         sample_time_s = (
             current_time
@@ -100,6 +158,12 @@ class TakeoffController:
         return channels
 
     def _derive_vertical_speed(self, altitude_m: float, now_s: float) -> float:
+        """Estimate climb rate from altitude samples.
+
+        Samples with a timestamp that does not advance preserve the previous
+        estimate.  This prevents division by zero and avoids replacing a valid
+        velocity with a value derived from stale telemetry.
+        """
         altitude_m = float(altitude_m)
         if self._previous_altitude_m is None:
             self._previous_altitude_m = altitude_m
@@ -120,6 +184,7 @@ class TakeoffController:
         return self._derived_vertical_speed_m_s
 
     def make_channels(self, correction: int = 0) -> list[int]:
+        """Build the armed angle-mode RC command for a throttle correction."""
         channels = [RC_MID] * len(RCChannel)
         throttle = int(self._baseline + correction)
         channels[RCChannel.THROTTLE] = max(RC_MIN, min(RC_MAX, throttle))
@@ -128,6 +193,7 @@ class TakeoffController:
         return channels
     
     def on_parameter_changed(self, name: str, value: Any) -> None:
+        """Apply supported parameter changes without recreating the controller."""
         log.info("Parameter changed: {} = {}", name, value)
         if name == ParameterKey.ALT_KP:
             self.alt_pid.kp = value
