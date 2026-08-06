@@ -28,6 +28,23 @@ from send_rc_auto_roll import AutoRollScenario
 
 MAX_SAFE_PITCH_AMPLITUDE = 100
 
+SCENARIO_BANNER = """\
+==============================================================================
+bt-app Automatic Takeoff / ALT_HOLD Pitch SITL Scenario
+==============================================================================
+Simulates this joystick flight sequence:
+  1. Arm in MANUAL and request automatic takeoff.
+  2. Wait for ALT_HOLD and stable vertical speed.
+  3. Apply a smooth balanced forward/backward pitch pattern.
+  4. Monitor pitch angle, pitch rate, and altitude-drift safety limits.
+  5. Center pitch, verify attitude recovery, and descend in MANUAL.
+  6. Confirm touchdown, disarm, and verify IDLE.
+
+Safety behavior:
+  The maneuver aborts if ALT_HOLD, attitude, or altitude limits are violated.
+  Airborne failures stop RC traffic so bt-app failsafe can recover.
+=============================================================================="""
+
 
 def alt_hold_pitch_channels(pitch: int) -> tuple[int, ...]:
     channels = list(ALT_HOLD_ARMED)
@@ -70,6 +87,10 @@ class AutoPitchScenario(AutoRollScenario):
             RC_MID + pitch_amplitude
         )
         self.center_channels = alt_hold_pitch_channels(RC_MID)
+
+    @staticmethod
+    def _print_banner() -> None:
+        print(SCENARIO_BANNER, flush=True)
 
     def _run_roll_pattern(self) -> None:
         self._command_smooth_pitch_pattern()
@@ -318,7 +339,10 @@ class AutoPitchScenario(AutoRollScenario):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=SCENARIO_BANNER,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--destination-host", default="127.0.0.1")
     parser.add_argument("--destination-port", type=int, default=14560)
     parser.add_argument("--listen-host", default="0.0.0.0")
