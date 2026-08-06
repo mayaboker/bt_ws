@@ -27,6 +27,7 @@ ARM = 4
 MANUAL = 5
 AUTO_TAKEOFF = 6
 ENABLER = 7
+TRACKER_MODE = 8
 
 RC_MIN = 1000
 RC_MID = 1500
@@ -52,6 +53,23 @@ STATE_NAMES = {
 ANSI_BOLD_CYAN = "\033[1;36m"
 ANSI_RESET = "\033[0m"
 
+SCENARIO_BANNER = """\
+==============================================================================
+bt-app RC Override SITL Scenario
+==============================================================================
+Simulates this joystick flight sequence:
+  1. Wait for bt-app MAVLink telemetry.
+  2. Arm the drone in MANUAL with low throttle.
+  3. Request automatic takeoff and wait for ALT_HOLD.
+  4. Hold altitude for the configured duration.
+  5. Switch to MANUAL and descend with the configured throttle.
+  6. Confirm touchdown, disarm, and verify IDLE.
+
+Safety behavior:
+  Before takeoff, failures send a ground-safe disarm command.
+  While airborne, failures stop RC traffic so bt-app failsafe can recover.
+=============================================================================="""
+
 
 class ScenarioError(RuntimeError):
     """Raised when the SITL scenario cannot complete safely."""
@@ -63,13 +81,15 @@ def rc_channels(
     armed: bool = False,
     manual: bool = False,
     auto_takeoff: bool = False,
+    tracker_mode: bool = False,
 ) -> tuple[int, ...]:
     """Build the eight application joystick channels."""
 
-    channels = [RC_MID, RC_MID, throttle, RC_MID, RC_MIN, RC_MAX, RC_MIN, RC_MIN]
+    channels = [RC_MID, RC_MID, throttle, RC_MID, RC_MIN, RC_MAX, RC_MIN, RC_MIN, RC_MIN]
     channels[ARM] = RC_MAX if armed else RC_MIN
     channels[MANUAL] = RC_MIN if manual else RC_MAX
     channels[AUTO_TAKEOFF] = RC_MAX if auto_takeoff else RC_MIN
+    channels[TRACKER_MODE] = RC_MAX if tracker_mode else RC_MIN
     return tuple(channels)
 
 
@@ -79,7 +99,7 @@ AUTO_TAKEOFF_ARMED = rc_channels(armed=True, auto_takeoff=True)
 # Centered throttle requests no altitude-setpoint change in ALT_HOLD and also
 # satisfies the MANUAL -> ALT_HOLD state-machine guard (throttle > 1050).
 ALT_HOLD_ARMED = rc_channels(armed=True, throttle=RC_MID)
-MANUAL_DESCENT_ARMED = rc_channels(armed=True, manual=True, throttle=1550)
+MANUAL_DESCENT_ARMED = rc_channels(armed=True, manual=True, throttle=1600)
 MANUAL_DISARMED = rc_channels(manual=True, throttle=RC_MIN)
 
 
@@ -135,7 +155,7 @@ class MavlinkRcScenario:
         landing_timeout_s: float,
         touchdown_altitude_m: float,
         alt_hold_duration_s: float = 15.0,
-        descent_throttle: int = 1550,
+        descent_throttle: int = 1600,
     ) -> None:
         self.destination = destination
         self.listen = listen
@@ -162,6 +182,7 @@ class MavlinkRcScenario:
         self._completed = False
 
     def run(self) -> None:
+        self._print_banner()
         self._open()
         try:
             self._phase("Waiting for bt-app telemetry")
@@ -371,6 +392,10 @@ class MavlinkRcScenario:
             self._socket = None
 
     @staticmethod
+    def _print_banner() -> None:
+        print(SCENARIO_BANNER, flush=True)
+
+    @staticmethod
     def _phase(message: str, color: str | None = None) -> None:
         line = f"{time.strftime('%H:%M:%S')} - {message}"
         if color:
@@ -379,7 +404,10 @@ class MavlinkRcScenario:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=SCENARIO_BANNER,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--destination-host", default="127.0.0.1")
     parser.add_argument("--destination-port", type=int, default=14560)
     parser.add_argument("--listen-host", default="0.0.0.0")
@@ -389,7 +417,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--landing-timeout", type=float, default=60.0)
     parser.add_argument("--touchdown-altitude", type=float, default=0.15)
     parser.add_argument("--alt-hold-duration", type=float, default=15.0)
-    parser.add_argument("--descent-throttle", type=int, default=1550)
+    parser.add_argument(
+        "--descent-throttle",
+        type=int,
+        default=1600,
+        help="fixed MANUAL landing throttle; raise cautiously for a slower descent",
+    )
     return parser
 
 
@@ -403,8 +436,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("--touchdown-altitude cannot be negative")
     if args.alt_hold_duration < 0:
         raise SystemExit("--alt-hold-duration cannot be negative")
-    if not RC_MIN <= args.descent_throttle < RC_MID + 100:
-        raise SystemExit("--descent-throttle must be between 1000 and 1599")
+    if not RC_MIN <= args.descent_throttle <= 1650:
+        raise SystemExit("--descent-throttle must be between 1000 and 1650")
 
     scenario = MavlinkRcScenario(
         destination=(args.destination_host, args.destination_port),
