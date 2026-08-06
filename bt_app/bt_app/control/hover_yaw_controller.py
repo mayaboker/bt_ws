@@ -39,6 +39,7 @@ class HoverYawController:
         self.yaw_stick_range = self.params.get(ParameterKey.BF_YAW_RATE)
         self._last_setpoint_update_s = time.monotonic()
         self._throttle_outside_deadband = False
+        self._throttle_center_required = False
         self._altitude_setpoint_request_event = False
         self.rc_mapper = BetaflightRcMapper(
             yaw_rate_full_stick_dps=self.yaw_stick_range,
@@ -68,14 +69,36 @@ class HoverYawController:
         log.debug(f"setpoint {value}")
         self._setpoint = max(float(value), float(self.min_altitude))
 
-    def reset_setpoint(self, current_altitude: float) -> None:
+    def reset_setpoint(
+        self,
+        current_altitude: float,
+        *,
+        setpoint: float | None = None,
+        altitude_sample_time_s: float | None = None,
+        vertical_speed_m_s: float = 0.0,
+        require_throttle_center: bool = False,
+    ) -> None:
+        """Reset altitude-hold state for a bumpless mode handover.
+
+        ``current_altitude`` and its timestamp seed the derivative history, while
+        ``setpoint`` selects the altitude to retain.  A TAKEOFF handover can also
+        require a centered throttle before pilot altitude commands are accepted;
+        this prevents the stale low-throttle takeoff request from becoming an
+        unintended descent command.
+        """
+        now_s = time.monotonic()
         self.alt_pid.reset()
-        self.setpoint = current_altitude
+        self.setpoint = current_altitude if setpoint is None else setpoint
         self._previous_altitude_m = float(current_altitude)
-        self._previous_altitude_time_s = time.monotonic()
-        self._derived_vertical_speed_m_s = 0.0
+        self._previous_altitude_time_s = (
+            now_s
+            if altitude_sample_time_s is None
+            else float(altitude_sample_time_s)
+        )
+        self._derived_vertical_speed_m_s = float(vertical_speed_m_s)
         self._last_setpoint_update_s = time.monotonic()
         self._throttle_outside_deadband = False
+        self._throttle_center_required = bool(require_throttle_center)
         self._altitude_setpoint_request_event = False
 
     def consume_altitude_setpoint_request_event(self) -> bool:
@@ -102,6 +125,12 @@ class HoverYawController:
         deadband = int(self.throttle_deadband)
         upper_deadband = center + deadband // 2
         lower_deadband = center - deadband // 2
+
+        if self._throttle_center_required:
+            if lower_deadband <= throttle <= upper_deadband:
+                self._throttle_center_required = False
+                log.info("ALT_HOLD throttle handover complete; altitude commands enabled")
+            return self._setpoint
 
         if throttle > upper_deadband:
             denominator = max(1, RC_MAX - upper_deadband)

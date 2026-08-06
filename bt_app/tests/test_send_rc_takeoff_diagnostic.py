@@ -3,6 +3,10 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import struct
 import sys
+from types import SimpleNamespace
+
+import pytest
+from pymavlink import mavutil
 
 
 EXAMPLE_DIR = Path(__file__).parents[1] / "example"
@@ -98,6 +102,35 @@ def test_standard_rc_channels_decodes_actual_controller_output():
 
     assert telemetry.output_channels is not None
     assert telemetry.output_channels[diagnostic.THROTTLE] == 1710
+
+
+def test_parameter_decoder_reads_real32_directly():
+    message = SimpleNamespace(
+        param_type=mavutil.mavlink.MAV_PARAM_TYPE_REAL32,
+        param_value=2.5,
+    )
+
+    assert diagnostic.decode_parameter_value(message) == pytest.approx(2.5)
+
+
+def test_parameter_decoder_reinterprets_bytewise_int32():
+    wire_value = struct.unpack("<f", struct.pack("<i", 1660))[0]
+    message = SimpleNamespace(
+        param_type=mavutil.mavlink.MAV_PARAM_TYPE_INT32,
+        param_value=wire_value,
+    )
+
+    assert diagnostic.decode_parameter_value(message) == 1660
+
+
+def test_parameter_decoder_reinterprets_bytewise_uint8():
+    wire_value = struct.unpack("<f", struct.pack("<I", 1))[0]
+    message = SimpleNamespace(
+        param_type=mavutil.mavlink.MAV_PARAM_TYPE_UINT8,
+        param_value=wire_value,
+    )
+
+    assert diagnostic.decode_parameter_value(message) == 1
 
 
 def test_snapshot_records_correction_and_saturation(tmp_path):

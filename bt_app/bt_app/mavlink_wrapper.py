@@ -256,11 +256,11 @@ class MavlinkService:
             interval_s=self.rc_channels_interval_s,
             key=SendRcChannelsCommand.key,
         )
-        # self._scheduler.schedule(
-        #     SendChannelStatusV2ExtensionCommand(self),
-        #     interval_s=self.v2_extension_channel_status_interval_s,
-        #     key=SendChannelStatusV2ExtensionCommand.key,
-        # )
+        self._scheduler.schedule(
+            SendChannelStatusV2ExtensionCommand(self),
+            interval_s=self.v2_extension_channel_status_interval_s,
+            key=SendChannelStatusV2ExtensionCommand.key,
+        )
 
         if self.visual_detection_supplier is not None:
             self._scheduler.schedule(

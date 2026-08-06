@@ -13,6 +13,8 @@ import sys
 import time
 from typing import Any, Sequence
 
+from pymavlink import mavutil
+
 from send_rc import (
     ALT_HOLD_ARMED,
     APP_COMPONENT_ID,
@@ -47,6 +49,25 @@ PARAMETERS = (
     "ALT_OUT_LIMIT",
     "HOV_BASELINE",
 )
+
+
+def decode_parameter_value(message: Any) -> float | int:
+    """Decode the bytewise value carried by a MAVLink ``PARAM_VALUE``."""
+
+    parameter_type = int(message.param_type)
+    wire_value = float(message.param_value)
+    if parameter_type == mavutil.mavlink.MAV_PARAM_TYPE_REAL32:
+        return wire_value
+
+    raw = struct.pack("<f", wire_value)
+    if parameter_type == mavutil.mavlink.MAV_PARAM_TYPE_INT32:
+        return struct.unpack("<i", raw)[0]
+    if parameter_type == mavutil.mavlink.MAV_PARAM_TYPE_UINT8:
+        value = struct.unpack("<I", raw)[0]
+        if value > 0xFF:
+            raise ValueError(f"invalid MAV_PARAM_TYPE_UINT8 value {value}")
+        return value
+    raise ValueError(f"unsupported MAVLink parameter type {parameter_type}")
 
 SCENARIO_BANNER = """\
 ==============================================================================
@@ -199,7 +220,7 @@ class TakeoffDiagnosticScenario(MavlinkRcScenario):
         self.output_path = output_path
         self.parameter_destination = parameter_destination
         self.parameter_timeout_s = parameter_timeout_s
-        self.parameter_values: dict[str, float] = {}
+        self.parameter_values: dict[str, float | int] = {}
         self._requested_channels: tuple[int, ...] = tuple(NEUTRAL_DISARMED)
         self._phase_name = "initializing"
         self._start_s = time.monotonic()
@@ -353,7 +374,12 @@ class TakeoffDiagnosticScenario(MavlinkRcScenario):
                         name = name.split(b"\0", 1)[0].decode("ascii")
                     else:
                         name = str(name).split("\0", 1)[0]
-                    self.parameter_values[name] = float(message.param_value)
+                    try:
+                        value = decode_parameter_value(message)
+                    except ValueError as exc:
+                        self._phase(f"Ignoring parameter {name}: {exc}")
+                    else:
+                        self.parameter_values[name] = value
 
                 previous_state = self.telemetry.state
                 self.telemetry.consume(message)

@@ -192,18 +192,18 @@ def test_start_is_idempotent_and_starts_scheduler_once(monkeypatch):
     assert isinstance(scheduler.scheduled[1][0], GlobalPositionIntCommand)
     assert scheduler.scheduled[1][1] == 0.5
     assert scheduler.scheduled[1][3] == GlobalPositionIntCommand.key
-    assert isinstance(scheduler.scheduled[2][0], SysStatusCommand)
-    assert scheduler.scheduled[2][1] == 2.0
-    assert scheduler.scheduled[2][3] == SysStatusCommand.key
-    assert isinstance(scheduler.scheduled[3][0], SendRcChannelsCommand)
-    assert scheduler.scheduled[3][1] == service.rc_channels_interval_s
-    assert scheduler.scheduled[3][3] == SendRcChannelsCommand.key
-    assert isinstance(scheduler.scheduled[4][0], SendChannelStatusV2ExtensionCommand)
-    assert scheduler.scheduled[4][1] == 0.1
-    assert scheduler.scheduled[4][3] == SendChannelStatusV2ExtensionCommand.key
-    assert isinstance(scheduler.scheduled[5][0], NamedValueFloatCommand)
-    assert scheduler.scheduled[5][1] == 1.0
-    assert scheduler.scheduled[5][3] == NamedValueFloatCommand.key
+    assert isinstance(scheduler.scheduled[2][0], AttitudeCommand)
+    assert scheduler.scheduled[2][1] == service.attitude_interval_s
+    assert scheduler.scheduled[2][3] == AttitudeCommand.key
+    assert isinstance(scheduler.scheduled[3][0], SysStatusCommand)
+    assert scheduler.scheduled[3][1] == 2.0
+    assert scheduler.scheduled[3][3] == SysStatusCommand.key
+    assert isinstance(scheduler.scheduled[4][0], SendRcChannelsCommand)
+    assert scheduler.scheduled[4][1] == service.rc_channels_interval_s
+    assert scheduler.scheduled[4][3] == SendRcChannelsCommand.key
+    assert isinstance(scheduler.scheduled[5][0], SendChannelStatusV2ExtensionCommand)
+    assert scheduler.scheduled[5][1] == 0.1
+    assert scheduler.scheduled[5][3] == SendChannelStatusV2ExtensionCommand.key
     assert isinstance(scheduler.scheduled[6][0], ReceivePendingCommand)
     assert scheduler.scheduled[6][1] == service.poll_interval_s
     assert scheduler.scheduled[6][3] == ReceivePendingCommand.key
@@ -357,7 +357,7 @@ def test_named_value_float_sends_current_time(monkeypatch):
     socket = FakeSocket()
     service._socket = socket
 
-    service._send_named_value_float()
+    service._send_named_value_float("time", 1234.5)
 
     assert socket.sent
     payload, addr = socket.sent[0]
@@ -387,7 +387,7 @@ def test_named_value_float_command_sends_named_value():
     socket = FakeSocket()
     service._socket = socket
 
-    NamedValueFloatCommand(service).execute(service.context)
+    NamedValueFloatCommand(service, "alt_sp", 2.0).execute(service.context)
 
     assert socket.sent
 

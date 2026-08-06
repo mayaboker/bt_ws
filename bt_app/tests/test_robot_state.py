@@ -2,6 +2,7 @@ import pytest
 
 from bt_app.app import App
 from bt_app.common import AETR1234, MavSeverity, RobotState
+from bt_app.common.mavlink import NamedValue
 from bt_app.context import Context
 from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RC_MIN, RCChannel_alias as RCChannel
 from bt_app.parameters.generated import ParameterKey
@@ -30,6 +31,7 @@ class FakeController:
         self.setpoint = 42
         self.baseline = None
         self.reset_setpoint_altitude = None
+        self.reset_setpoint_kwargs = None
         self.reset_altitude = None
 
     def update(self, *args):
@@ -51,8 +53,9 @@ class FakeController:
     def consume_landed_event(self):
         return False
 
-    def reset_setpoint(self, altitude):
+    def reset_setpoint(self, altitude, **kwargs):
         self.reset_setpoint_altitude = altitude
+        self.reset_setpoint_kwargs = kwargs
 
     def reset(self, altitude=None):
         self.reset_altitude = altitude
@@ -204,6 +207,31 @@ def test_alt_hold_entry_uses_hover_baseline_parameter():
 
     assert controller.reset_setpoint_altitude == 3.25
     assert controller.baseline == 1325
+    assert controller.reset_setpoint_kwargs["setpoint"] == 3.25
+    assert not controller.reset_setpoint_kwargs["require_throttle_center"]
+
+
+def test_takeoff_to_alt_hold_preserves_target_and_requires_centered_throttle():
+    app = make_app_with_context()
+    controller = FakeController([1500] * 8)
+    app.controllers[RobotState.ALT_HOLD] = controller
+    app.ctx.drone_alt = 9.9
+    app.ctx.drone_vertical_speed = 0.12
+    app.ctx.drone_alt_received_at_s = 123.0
+    app.ctx.sent_rc = [1500] * 8
+    app.ctx.sent_rc[AETR1234.THROTTLE] = 1710
+
+    app._handle_before_state_changed(RobotState.TAKEOFF, RobotState.ALT_HOLD)
+
+    assert controller.reset_setpoint_altitude == 9.9
+    assert controller.reset_setpoint_kwargs == {
+        "setpoint": 42,
+        "altitude_sample_time_s": 123.0,
+        "vertical_speed_m_s": 0.12,
+        "require_throttle_center": True,
+    }
+    assert app.ctx.alt_setpoint == 42
+    assert (NamedValue.ALT_SP, 42) in app.mavlink_service.messages
 
 
 def test_failsafe_entry_uses_hover_baseline_parameter():

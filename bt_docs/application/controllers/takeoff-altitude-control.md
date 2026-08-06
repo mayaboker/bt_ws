@@ -174,12 +174,9 @@ fast, the controller remains behind the ramp and can saturate its output.
 
 ## Takeoff-to-ALT_HOLD transition
 
-The current controller accumulates `time_in_alt` while measured altitude is
-within `ALT_REACH_DELTA` of the final target. Altitude proximity alone does not
-prove that the vehicle has settled. The drone can pass through the tolerance
-band with significant vertical speed and enter `ALT_HOLD` while still moving.
-
-For a smooth transition, evaluate both position and motion:
+The controller accumulates `time_in_alt` only while measured altitude is near
+the final target and vertical speed is low. This prevents the drone from
+passing through the tolerance band and entering `ALT_HOLD` while still moving:
 
 ```python
 altitude_reached = abs(final_setpoint - altitude) < altitude_tolerance
@@ -191,8 +188,9 @@ else:
     time_in_alt = 0.0
 ```
 
-A practical starting point is an altitude tolerance around 0.5 m and a
-vertical-speed tolerance around 0.15--0.20 m/s. These are initial test values,
+The current starting values are an altitude tolerance of 0.20 m and a
+vertical-speed tolerance of 0.15 m/s. The application requires this condition
+continuously for one second before entering `ALT_HOLD`. These are test values,
 not universal limits.
 
 The ALT_HOLD controller should also receive enough state for a bumpless

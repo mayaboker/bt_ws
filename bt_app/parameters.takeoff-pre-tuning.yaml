@@ -1,0 +1,21 @@
+# Takeoff-controller values backed up before automated SITL tuning on 2026-08-06.
+# Copy these defaults back into parameters.yaml to restore the original tune.
+parameters:
+  ALT_KP:
+    type: float
+    default: 1.0
+  ALT_KI:
+    type: float
+    default: 0.1
+  ALT_KD:
+    type: float
+    default: 2.0
+  ALT_OUT_LIMIT:
+    type: float
+    default: 400.0
+  TAKEOFF_RATE:
+    type: float
+    default: 1.0
+  HOV_BASELINE:
+    type: int
+    default: 1660

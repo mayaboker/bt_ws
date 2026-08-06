@@ -404,13 +404,37 @@ class App:
 
             case RobotState.ALT_HOLD:
                 base_line = self.__params.get(ParameterKey.HOV_BASELINE)
-                self.controllers[RobotState.ALT_HOLD].reset_setpoint(self.ctx.drone_alt)
-                self.controllers[RobotState.ALT_HOLD].set_baseline(base_line)# AETR1234.THROTTLE
+                from_takeoff = prev == RobotState.TAKEOFF
+                hold_setpoint = (
+                    self.__params.get(ParameterKey.TAKEOFF_ALT)
+                    if from_takeoff
+                    else self.ctx.drone_alt
+                )
+                controller = self.controllers[RobotState.ALT_HOLD]
+                controller.reset_setpoint(
+                    self.ctx.drone_alt,
+                    setpoint=hold_setpoint,
+                    altitude_sample_time_s=self.ctx.drone_alt_received_at_s,
+                    vertical_speed_m_s=self.ctx.drone_vertical_speed,
+                    require_throttle_center=from_takeoff,
+                )
+                controller.set_baseline(base_line)# AETR1234.THROTTLE
+                self.ctx.alt_setpoint = hold_setpoint
                 self.mavlink_service.send_named_value_to_gcs(
                     NamedValue.ALT_SP,
-                    self.ctx.drone_alt
+                    hold_setpoint
                 )
-                log.info(f"switch to alt hold at altitude {self.ctx.drone_alt} with baseline {base_line}")
+                previous_throttle = self.ctx.sent_rc[AETR1234.THROTTLE]
+                log.info(
+                    "switch to alt hold target={} altitude={} vertical_speed={} "
+                    "baseline={} previous_throttle={} require_throttle_center={}",
+                    hold_setpoint,
+                    self.ctx.drone_alt,
+                    self.ctx.drone_vertical_speed,
+                    base_line,
+                    previous_throttle,
+                    from_takeoff,
+                )
 
             case RobotState.FAILSAFE:
                 # set the failsafe controller setpoint to the current altitude

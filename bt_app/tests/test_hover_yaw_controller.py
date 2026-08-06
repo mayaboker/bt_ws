@@ -124,6 +124,45 @@ def test_low_throttle_decreases_setpoint_but_not_below_min_altitude(monkeypatch)
     assert controller.setpoint == 2.0
 
 
+def test_takeoff_handover_keeps_target_until_throttle_is_centered(monkeypatch):
+    controller = controller_with_times(
+        monkeypatch,
+        [10.0, 11.0, 12.0, 13.0, 14.0, 15.0],
+    )
+    controller.reset_setpoint(
+        9.9,
+        setpoint=10.0,
+        altitude_sample_time_s=9.5,
+        vertical_speed_m_s=0.1,
+        require_throttle_center=True,
+    )
+
+    controller.update_setpoint_from_throttle(RC_MIN)
+    assert controller.setpoint == 10.0
+    assert not controller.consume_altitude_setpoint_request_event()
+
+    controller.update_setpoint_from_throttle(RC_MID)
+    controller.update_setpoint_from_throttle(RC_MAX)
+
+    assert controller.setpoint == 11.0
+    assert controller.consume_altitude_setpoint_request_event()
+
+
+def test_reset_setpoint_seeds_altitude_derivative_history(monkeypatch):
+    controller = controller_with_times(monkeypatch, [10.0])
+    controller.reset_setpoint(
+        9.9,
+        setpoint=10.0,
+        altitude_sample_time_s=8.0,
+        vertical_speed_m_s=0.2,
+    )
+
+    assert controller.setpoint == 10.0
+    assert controller._previous_altitude_m == 9.9
+    assert controller._previous_altitude_time_s == 8.0
+    assert controller._derived_vertical_speed_m_s == 0.2
+
+
 def test_centered_yaw_stick_outputs_mid_yaw(monkeypatch):
     controller = controller_with_times(monkeypatch, [0.0])
 

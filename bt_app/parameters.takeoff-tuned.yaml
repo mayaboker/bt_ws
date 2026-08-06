@@ -1,0 +1,21 @@
+# Accepted Betaflight SITL takeoff tune from 2026-08-06.
+# Validated by logs/takeoff_tune_02.csv with TAKEOFF_ALT=2.0 m.
+parameters:
+  ALT_KP:
+    type: float
+    default: 20.0
+  ALT_KI:
+    type: float
+    default: 0.0
+  ALT_KD:
+    type: float
+    default: 30.0
+  ALT_OUT_LIMIT:
+    type: float
+    default: 150.0
+  TAKEOFF_RATE:
+    type: float
+    default: 0.3
+  HOV_BASELINE:
+    type: int
+    default: 1660

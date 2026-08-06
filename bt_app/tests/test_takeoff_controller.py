@@ -104,8 +104,8 @@ def test_velocity_damping_is_included_in_takeoff_output_limit(monkeypatch):
     assert channels[RCChannel.THROTTLE] == 1560
 
 
-def test_takeoff_settle_time_uses_altitude_band_not_velocity(monkeypatch):
-    times = iter([0.0, 0.0, 1.0, 1.0, 2.0, 2.0])
+def test_takeoff_settle_time_requires_altitude_and_low_vertical_speed(monkeypatch):
+    times = iter([0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0])
     monkeypatch.setattr(
         "bt_app.control.takeoff_controller.time.monotonic",
         lambda: next(times),
@@ -113,10 +113,32 @@ def test_takeoff_settle_time_uses_altitude_band_not_velocity(monkeypatch):
     controller = TakeoffController(FakeParameters())
 
     controller.update(2.0, 1.8, altitude_sample_time_s=0.0)
-    controller.update(2.0, 2.0, altitude_sample_time_s=0.2)
+
+    # Inside the altitude band, but still climbing too quickly.
+    controller.update(2.0, 1.9, altitude_sample_time_s=0.2)
+    assert controller.time_in_alt == 0.0
+
+    # The timer starts only after vertical motion has settled.
+    controller.update(2.0, 1.91, altitude_sample_time_s=1.2)
     assert controller.time_in_alt == 1.0
 
-    controller.update(2.0, 2.6, altitude_sample_time_s=1.2)
+    controller.update(2.0, 2.21, altitude_sample_time_s=2.2)
+    assert controller.time_in_alt == 0.0
+
+
+def test_takeoff_settle_time_resets_when_vertical_speed_increases(monkeypatch):
+    times = iter([0.0, 0.0, 1.0, 1.0, 2.0, 2.0])
+    monkeypatch.setattr(
+        "bt_app.control.takeoff_controller.time.monotonic",
+        lambda: next(times),
+    )
+    controller = TakeoffController(FakeParameters())
+
+    controller.update(2.0, 1.90, altitude_sample_time_s=0.0)
+    controller.update(2.0, 1.91, altitude_sample_time_s=1.0)
+    assert controller.time_in_alt == 1.0
+
+    controller.update(2.0, 2.09, altitude_sample_time_s=2.0)
     assert controller.time_in_alt == 0.0
 
 

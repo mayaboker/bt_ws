@@ -22,7 +22,8 @@ from bt_app.msp.bt_v2 import (
     RCChannel_alias as RCChannel)
 from loguru import logger as log
 
-ALT_REACH_DELTA = 0.5
+ALT_REACH_DELTA = 0.20
+ALT_SETTLE_VERTICAL_SPEED_M_S = 0.15
 
 class TakeoffController:
     """Generate throttle commands for a ramped automatic takeoff.
@@ -33,7 +34,8 @@ class TakeoffController:
     2. Move the internal altitude setpoint toward the final target, limited by
        ``TAKEOFF_RATE``.
     3. Track how long the vehicle has been within ``ALT_REACH_DELTA`` of the
-       final target.
+       final target while its vertical speed remains below
+       ``ALT_SETTLE_VERTICAL_SPEED_M_S``.
     4. Calculate the altitude PI correction and subtract vertical-speed
        damping configured by ``ALT_KD``.
     5. Limit the correction, add it to ``HOV_BASELINE``, and return a complete
@@ -75,11 +77,11 @@ class TakeoffController:
     # region properties
     @property
     def time_in_alt(self):
-        """Return accumulated seconds within the final-altitude tolerance.
+        """Return accumulated seconds settled near the final altitude.
 
-        The timer resets to zero whenever the measured altitude leaves the
-        ``ALT_REACH_DELTA`` band.  The application uses this value as part of
-        its TAKEOFF-to-ALT_HOLD transition decision.
+        The timer resets whenever altitude leaves the ``ALT_REACH_DELTA`` band
+        or vertical speed exceeds ``ALT_SETTLE_VERTICAL_SPEED_M_S``. The
+        application uses this value for its TAKEOFF-to-ALT_HOLD transition.
         """
         return self.__time_in_alt
     # endregion properties
@@ -143,7 +145,11 @@ class TakeoffController:
         elif self._setpoint > final_setpoint:
             self._setpoint = max(final_setpoint, self._setpoint - maximum_step)
 
-        if abs(setpoint - current) < ALT_REACH_DELTA:
+        altitude_reached = abs(final_setpoint - float(current)) <= ALT_REACH_DELTA
+        vertical_speed_settled = (
+            abs(vertical_speed_m_s) <= ALT_SETTLE_VERTICAL_SPEED_M_S
+        )
+        if altitude_reached and vertical_speed_settled:
             self.__time_in_alt += dt_s
         else:
             self.__time_in_alt = 0
