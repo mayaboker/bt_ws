@@ -183,6 +183,7 @@ class GlideController:
         )
         return -rate
 
+    # region to discuss
     def _update_pi(self, target: float, measured: float, dt_s: float) -> float:
         error = target - measured
         candidate_integral = self._integral + error * max(0.0, dt_s)
@@ -265,3 +266,5 @@ class GlideController:
             self._land_confirm_s = float(value)
         elif name == ParameterKey.HOV_BASELINE:
             self._baseline = float(value)
+
+    # endregion

@@ -326,14 +326,6 @@ class App:
         bridge.start()
         return bridge
 
-    def _fresh_visual_observation(self):
-        if self.gst_bridge is None:
-            return None
-        return self.gst_bridge.fresh_observation(
-            received_after=float("-inf"),
-            max_age_s=self.config.tracker_result_timeout_s,
-        )
-
     def __load_tracker_request_publisher(self):
         publisher = TrackerRequestPublisher(self.config.tracker_request_endpoint)
         publisher.start()
@@ -359,8 +351,8 @@ class App:
         """Refresh the app-owned visual range estimate once per control cycle."""
         estimator = self._visual_range_estimator
         result = self._tracker_manager.get_result()
-        if result:
-            estimator.update(result[0][1])
+        if result is not None:
+            estimator.update(result[1])
         
 
     def __load_controllers(self):
@@ -398,14 +390,7 @@ class App:
                 f"Unable to start joystick MAVLink listener: {exc}"
             ) from exc
         log.info(f"------------------------- {config}")
-        # joy_adapter = joy_zmq_adapter.JoyZmqAdapter(self.__params)
-        # joy_adapter.start()
-        # joy_adapter.on_failsafe_enter += self._joystick_fs_enter
-        # joy_adapter.on_failsafe_exit += self.__joystick_fs_exit
-        # joy_adapter.on_interrupt += self.__handle_joy_interrupt
-        # TODO: convert to const and mapping
-        # self.register_joy_interrupt(joy_adapter)
-        log.info("load joy adapter")
+
         #endregion
 
         # fail safe controller
@@ -425,11 +410,7 @@ class App:
 
         # visual controller
 
-    # def register_joy_interrupt(self, joy_adapter):
-    #     joy_adapter.register_interrupt(AETR1234.AUX4, JoyInterrupt.TAKEOFF_REQUEST)
-    #     joy_adapter.register_interrupt(AETR1234.AUX1, JoyInterrupt.MANUAL_REQUEST)
-    #     joy_adapter.register_interrupt(AETR1234.AUX2, JoyInterrupt.AUTO_REQUEST)
-    #     joy_adapter.register_interrupt(AETR1234.AUX3, JoyInterrupt.ENABLER_REQUEST)
+
         
 
     def _state_changed_handler(self, previous_state, new_state):
@@ -1140,6 +1121,7 @@ class App:
         controller = self.controllers[RobotState.GLIDE]
         estimator = self._visual_range_estimator
         print(self._glide_velocity_estimator.update(self.ctx.drone_alt, estimator.estimate))
+        print(self._tracker_manager.get_result())
         channels = controller.update(
             self.ctx.drone_alt,
             self.ctx.drone_vertical_speed,

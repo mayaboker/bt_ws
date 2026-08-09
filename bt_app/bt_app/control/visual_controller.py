@@ -4,10 +4,10 @@ import time
 from dataclasses import dataclass
 from typing import Any
 from loguru import logger as log
-from bt_app.comm.visual_target import (
+from bt_app.bt_app.comm.gst_bridge import (
     DEFAULT_VISUAL_ZMQ_ENDPOINT,
     VisualDetectionMessage,
-    VisualTargetComm,
+    GST_Bridge,
     decode_visual_detection,
 )
 from bt_app.msgs import RCChannels
@@ -18,7 +18,7 @@ from bt_app.parameters.generated import ParameterKey
 __all__ = [
     "DEFAULT_VISUAL_ZMQ_ENDPOINT",
     "VisualDetectionMessage",
-    "VisualTargetComm",
+    "GST_Bridge",
     "decode_visual_detection",
     "VisualObservation",
     "VisualTargetController",
@@ -337,7 +337,7 @@ class VisualTrackerObserver:
         self._observation_lock = threading.Lock()
         self._latest_observation: VisualObservation | None = None
         self._latest_received_at = float("-inf")
-        self.comm = VisualTargetComm(endpoint=endpoint, context=context)
+        self.comm = GST_Bridge(endpoint=endpoint, context=context)
         self.comm.on_result = self.resolve
         self.params.on_parameter_changed.subscribe(self.on_parameter_changed)
 

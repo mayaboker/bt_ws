@@ -7,7 +7,7 @@ import statistics
 from collections import deque
 from dataclasses import dataclass
 
-from bt_app.comm.visual_target import VisualDetectionMessage
+from bt_app.comm.gst_bridge import VisualDetectionMessage
 
 
 MAX_DEPTH_DISAGREEMENT = 0.25
