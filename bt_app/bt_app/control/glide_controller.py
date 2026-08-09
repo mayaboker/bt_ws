@@ -97,7 +97,38 @@ class GlideController:
         vertical_speed_m_s: float,
         altitude_sample_time_s: float | None = None,
     ) -> list[int]:
-        """Return a complete RC command for the latest measured descent rate."""
+        """Build the GLIDE RC command from the latest altitude sample.
+
+        Args:
+            current_altitude: Height above the controller's altitude datum, in
+                metres. It selects the normal descent, flare, or landing-rate
+                vertical-speed setpoint.
+            vertical_speed_m_s: Measured vertical velocity in metres per
+                second, using the MSP upward-positive convention. A descending
+                vehicle therefore reports a negative value.
+            altitude_sample_time_s: Monotonic timestamp associated with both
+                altitude values. When omitted, the current monotonic time is
+                used, treating the values as a new sample.
+
+        Returns:
+            A complete RC channel list. The command disarms after confirmed
+            touchdown, uses hover-baseline throttle for stale telemetry, and
+            otherwise applies the most recently calculated PI correction.
+
+        Flow:
+            1. Check whether the altitude/vario sample is fresh and schedule
+               the descent-rate setpoint from the current altitude.
+            2. Update touchdown confirmation; return a disarm command as soon
+               as landing is confirmed.
+            3. For stale telemetry, clear the cached correction and command the
+               hover baseline without advancing the integrator.
+            4. On the first recovered sample, reseed PI timing and continue to
+               command the hover baseline, avoiding integration across the
+               telemetry outage.
+            5. Advance the PI controller only when the sample timestamp moves
+               forward. Between MSP samples, reuse the cached correction so
+               the faster application loop emits a stable throttle command.
+        """
         now_s = time.monotonic()
         sample_time_s = now_s if altitude_sample_time_s is None else float(
             altitude_sample_time_s

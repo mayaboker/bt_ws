@@ -65,6 +65,8 @@ from bt_joy.server.mavlink import (
     NoCommunicationEvent,
     CommunicationResumedEvent
 )
+
+from bt_app.estimators import GlideVelocityEstimator
 #endregion
 
 FCU_CONNECT_ATTEMPTS = 3
@@ -121,7 +123,8 @@ class App:
             self._glide_last_range_mavlink_s = float("-inf")
             self._last_rc_channel = [RC_MIN] * (int(InternalJoy.TRACKER_MODE) + 1)
             self.__load_drone_interface()
-            self._visual_range_estimator = self._load_visual_estimator()
+            self._visual_range_estimator = self._load_range_visual_estimator()
+            self._glide_velocity_estimator = GlideVelocityEstimator(max_vertical_speed_m_s=5.0)
             self.__load_controllers()
             self.mavlink_service = MavlinkService(
                 context=self.ctx,
@@ -337,7 +340,7 @@ class App:
         publisher.start()
         return publisher
 
-    def _load_visual_estimator(self) -> VisualRangeEstimator | None:
+    def _load_range_visual_estimator(self) -> VisualRangeEstimator | None:
         if self.visual_observer is None:
             return None
         return VisualRangeEstimator(
@@ -368,6 +371,7 @@ class App:
             estimator.reset("visual observation stale")
             return
         estimator.update(observation.detection)
+        
 
     def __load_controllers(self):
         """
@@ -1141,6 +1145,8 @@ class App:
 
     def glide_handler(self):
         controller = self.controllers[RobotState.GLIDE]
+        estimator = self._visual_range_estimator
+        print(self._glide_velocity_estimator.update(self.ctx.drone_alt, estimator.estimate))
         channels = controller.update(
             self.ctx.drone_alt,
             self.ctx.drone_vertical_speed,
@@ -1153,9 +1159,11 @@ class App:
                 NamedValue.VERTICAL_SPEED_SP,
                 setpoint,
             )
+
         self._update_glide_range_telemetry(
             self._visual_range_estimator, time.monotonic()
         )
+
         if controller.consume_landed_event():
             self.ctx.glide_landed = True
             self.ctx.armed = False
