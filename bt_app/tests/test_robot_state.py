@@ -1,7 +1,8 @@
 import pytest
+from types import SimpleNamespace
 
 from bt_app.app import App
-from bt_app.common import AETR1234, MavSeverity, RobotState
+from bt_app.common import AETR1234, InternalJoy, MavSeverity, RobotState
 from bt_app.common.mavlink import NamedValue
 from bt_app.context import Context
 from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RC_MIN, RCChannel_alias as RCChannel
@@ -29,10 +30,12 @@ class FakeController:
         self.calls = []
         self.time_in_alt = 0
         self.setpoint = 42
+        self.velocity_setpoint_m_s = -0.5
         self.baseline = None
         self.reset_setpoint_altitude = None
         self.reset_setpoint_kwargs = None
         self.reset_altitude = None
+        self.reset_kwargs = None
 
     def update(self, *args):
         self.calls.append(args)
@@ -57,8 +60,9 @@ class FakeController:
         self.reset_setpoint_altitude = altitude
         self.reset_setpoint_kwargs = kwargs
 
-    def reset(self, altitude=None):
+    def reset(self, altitude=None, **kwargs):
         self.reset_altitude = altitude
+        self.reset_kwargs = kwargs
 
     def set_baseline(self, baseline):
         self.baseline = baseline
@@ -111,6 +115,51 @@ def test_robot_state_uses_stable_integer_values():
     assert RobotState.TAKEOFF.value == 5
     assert RobotState.ARM.value == 6
     assert RobotState.ALT_HOLD.value == 7
+    assert RobotState.GLIDE.value == 8
+
+
+def test_alt_hold_enters_glide_only_when_requested():
+    ctx = Context()
+    machine = Robot_StateMachine(ctx, VehicleConfig())
+    machine.machine.set_state(RobotState.ALT_HOLD)
+    ctx.state = RobotState.ALT_HOLD
+    ctx.armed = True
+
+    machine.resolve()
+    assert ctx.state == RobotState.ALT_HOLD
+
+    ctx.joy_glide_request = True
+    machine.resolve()
+    assert ctx.state == RobotState.GLIDE
+
+
+def test_glide_has_no_manual_abort_but_enters_failsafe():
+    ctx = Context()
+    machine = Robot_StateMachine(ctx, VehicleConfig())
+    machine.machine.set_state(RobotState.GLIDE)
+    ctx.state = RobotState.GLIDE
+    ctx.armed = True
+    ctx.joy_manual_request = True
+
+    machine.resolve()
+    assert ctx.state == RobotState.GLIDE
+
+    ctx.joy_fail_safe = True
+    machine.resolve()
+    assert ctx.state == RobotState.FAILSAFE
+
+
+def test_glide_landing_transitions_to_idle():
+    ctx = Context()
+    machine = Robot_StateMachine(ctx, VehicleConfig())
+    machine.machine.set_state(RobotState.GLIDE)
+    ctx.state = RobotState.GLIDE
+    ctx.armed = False
+    ctx.glide_landed = True
+
+    machine.resolve()
+
+    assert ctx.state == RobotState.IDLE
 
 
 def test_context_state_defaults_to_robot_state_member():
@@ -245,6 +294,54 @@ def test_failsafe_entry_uses_hover_baseline_parameter():
 
     assert controller.reset_altitude == 4.5
     assert controller.baseline == 1400
+
+
+def test_glide_entry_seeds_controller_and_velocity_setpoint():
+    app = make_app_with_context()
+    app._glide_switch_armed = True
+    controller = FakeController([1500] * 8)
+    app.controllers[RobotState.GLIDE] = controller
+    app.ctx.drone_alt = 7.5
+    app.ctx.drone_vertical_speed = -0.2
+    app.ctx.drone_alt_received_at_s = 123.0
+
+    app._handle_before_state_changed(RobotState.ALT_HOLD, RobotState.GLIDE)
+
+    assert controller.reset_altitude == 7.5
+    assert controller.reset_kwargs == {
+        "altitude_sample_time_s": 123.0,
+        "vertical_speed_m_s": -0.2,
+    }
+    assert controller.baseline == 1375
+    assert app.ctx.glide_velocity_setpoint == -0.5
+    assert (NamedValue.VERTICAL_SPEED_SP, -0.5) in app.mavlink_service.messages
+    assert not app.ctx.joy_glide_request
+    assert not app.ctx.glide_landed
+
+
+def test_glide_request_requires_takeoff_switch_release_then_rising_edge():
+    app = make_app_with_context()
+    app.ctx.state = RobotState.ALT_HOLD
+    app._last_rc_channel = [1500, 1500, 1500, 1500, 2000, 2000, 2000, 1000, 1000]
+    app._glide_switch_armed = False
+    app._handle_tracker_mode = lambda *_: None
+    app._send_tracker_adjustment = lambda *_: None
+
+    def event(auto_takeoff):
+        channels = list(app._last_rc_channel)
+        channels[InternalJoy.AUTO_TAKE_OFF] = auto_takeoff
+        return SimpleNamespace(channels=tuple(channels))
+
+    app._App__handle_joy_rc(event(RC_MAX))
+    assert not app.ctx.joy_glide_request
+
+    app._App__handle_joy_rc(event(RC_MIN))
+    assert app._glide_switch_armed
+    assert not app.ctx.joy_glide_request
+
+    app._App__handle_joy_rc(event(RC_MAX))
+    assert app.ctx.joy_glide_request
+    assert not app._glide_switch_armed
 
 
 def test_manual_to_idle_waits_for_land_confirmation():

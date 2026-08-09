@@ -13,6 +13,7 @@ from bt_app.control import (
 
 from bt_app.control import (
     FailSafeController,
+    GlideController,
     TakeoffController,
     ARMController,
     HoverYawController,
@@ -109,6 +110,7 @@ class App:
                 parameter_event.subscribe(self._on_application_parameter_changed)
             self._manual_land_detection_started_notified = False
             self._manual_land_confirmed_notified = False
+            self._glide_switch_armed = False
             self._last_rc_channel = [RC_MIN] * (int(InternalJoy.TRACKER_MODE) + 1)
             self.__load_drone_interface()
             self.__load_controllers()
@@ -345,6 +347,9 @@ class App:
         # Takeoff
         self.controllers[RobotState.TAKEOFF] = TakeoffController(self.__params)
 
+        # Controlled vertical glide/descent to ground
+        self.controllers[RobotState.GLIDE] = GlideController(self.__params)
+
         # arm controller
         self.controllers[RobotState.ARM] = ARMController(self.__params)
 
@@ -400,6 +405,9 @@ class App:
                 self.ctx.joy_arm_requested = False
                 self.ctx.joy_takeoff_request = False
                 self.ctx.armed = False
+                self.ctx.joy_glide_request = False
+                self.ctx.glide_landed = False
+                self._glide_switch_armed = False
                 self._reset_manual_land_detector()
 
             case RobotState.ALT_HOLD:
@@ -434,6 +442,33 @@ class App:
                     base_line,
                     previous_throttle,
                     from_takeoff,
+                )
+                self.ctx.joy_glide_request = False
+                self.ctx.glide_landed = False
+                self._glide_switch_armed = False
+
+            case RobotState.GLIDE:
+                controller = self.controllers[RobotState.GLIDE]
+                controller.reset(
+                    self.ctx.drone_alt,
+                    altitude_sample_time_s=self.ctx.drone_alt_received_at_s,
+                    vertical_speed_m_s=self.ctx.drone_vertical_speed,
+                )
+                controller.set_baseline(
+                    self.__params.get(ParameterKey.HOV_BASELINE)
+                )
+                self.ctx.glide_velocity_setpoint = controller.velocity_setpoint_m_s
+                self.ctx.joy_glide_request = False
+                self.ctx.glide_landed = False
+                self.mavlink_service.send_named_value_to_gcs(
+                    NamedValue.VERTICAL_SPEED_SP,
+                    controller.velocity_setpoint_m_s,
+                )
+                log.info(
+                    "enter GLIDE altitude={} vertical_speed={} baseline={}",
+                    self.ctx.drone_alt,
+                    self.ctx.drone_vertical_speed,
+                    self.__params.get(ParameterKey.HOV_BASELINE),
                 )
 
             case RobotState.FAILSAFE:
@@ -479,6 +514,17 @@ class App:
                 self._last_rc_channel[InternalJoy.TRACKER_MODE],
             )
         self.ctx.auto_mode_type = requested_mode
+        glide_switch_high = self._last_rc_channel[InternalJoy.AUTO_TAKE_OFF] == RC_MAX
+        previous_glide_switch_high = (
+            prev_channels[InternalJoy.AUTO_TAKE_OFF] == RC_MAX
+        )
+        if self.ctx.state == RobotState.ALT_HOLD:
+            if not glide_switch_high:
+                self._glide_switch_armed = True
+            elif self._glide_switch_armed and not previous_glide_switch_high:
+                self.ctx.joy_glide_request = True
+                self._glide_switch_armed = False
+                log.info("GLIDE requested by takeoff-switch rising edge")
         now = time.monotonic()
         self._handle_tracker_mode(previous_mode, requested_mode, now)
 
@@ -513,6 +559,7 @@ class App:
         self.ctx.request_rc = safe_channels
         self.ctx.joy_fail_safe = True
         self.ctx.joy_takeoff_request = False
+        self.ctx.joy_glide_request = False
         self.ctx.joy_manual_request = False
         self.ctx.joy_arm_requested = False
         self.ctx.armed_allowed = False
@@ -982,6 +1029,8 @@ class App:
                 return self._arm_handler()
             case RobotState.ALT_HOLD:
                 return self.alt_hold_handler()
+            case RobotState.GLIDE:
+                return self.glide_handler()
             case RobotState.TRACKING:
                 return self.auto_mode_handler()
             case _:
@@ -1008,6 +1057,29 @@ class App:
         arm_controller: ARMController = cast(ARMController, self.controllers[RobotState.ARM])
         self.ctx.armed = arm_controller.is_arm_done
         return self.controllers[RobotState.ARM].update()
+
+    def glide_handler(self):
+        controller = self.controllers[RobotState.GLIDE]
+        channels = controller.update(
+            self.ctx.drone_alt,
+            self.ctx.drone_vertical_speed,
+            self.ctx.drone_alt_received_at_s,
+        )
+        setpoint = controller.setpoint
+        if setpoint != self.ctx.glide_velocity_setpoint:
+            self.ctx.glide_velocity_setpoint = setpoint
+            self.mavlink_service.send_named_value_to_gcs(
+                NamedValue.VERTICAL_SPEED_SP,
+                setpoint,
+            )
+        if controller.consume_landed_event():
+            self.ctx.glide_landed = True
+            self.ctx.armed = False
+            self.mavlink_service.send_text_to_gcs(
+                "GLIDE touchdown confirmed; disarming",
+                MavSeverity.INFO,
+            )
+        return channels
     #TODO: move to arm controller 
 
     def _make_disarm_channels(self) -> list[int]:

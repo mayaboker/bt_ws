@@ -73,6 +73,7 @@ def test_msp_adapter_schedules_battery_at_0_5_hz(monkeypatch):
     adapter.start()
 
     assert adapter.msp.opened
+    assert ("altitude", 0.05) in adapter.dispatcher.scheduled
     assert ("battery", 2.0) in adapter.dispatcher.scheduled
     assert ("attitude", 0.5) in adapter.dispatcher.scheduled
     assert adapter.dispatcher.started

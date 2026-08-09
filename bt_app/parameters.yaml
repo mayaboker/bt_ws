@@ -77,6 +77,60 @@ parameters:
     limits:
       min: 0.1
       max: 10.0
+  GLIDE_DESC_RATE:
+    type: float
+    default: 4.5
+    limits:
+      min: 0.1
+      max: 10.0
+  GLIDE_VEL_KP:
+    type: float
+    default: 10.0
+    limits:
+      min: 0.0
+      max: 500.0
+  GLIDE_VEL_KI:
+    type: float
+    default: 0.0
+    limits:
+      min: 0.0
+      max: 200.0
+  GLIDE_FLARE_ALT:
+    type: float
+    default: 1.0
+    limits:
+      min: 0.0
+      max: 200.0
+  GLIDE_FLARE_RATE:
+    type: float
+    default: 0.15
+    limits:
+      min: 0.0
+      max: 10.0
+  GLIDE_OUT_LIMIT:
+    type: float
+    default: 40.0
+    limits:
+      min: 0.0
+      max: 500.0
+  GLIDE_LAND_ALT:
+    type: float
+    default: 0.15
+    limits:
+      min: 0.0
+      max: 10.0
+  GLIDE_LAND_VS:
+    type: float
+    default: 0.1
+    limits:
+      min: 0.0
+      max: 10.0
+  GLIDE_LAND_SEC:
+    type: float
+    default: 1.0
+    limits:
+      min: 0.0
+      max: 30.0
   HOV_KP:
     type: float
     default: 30

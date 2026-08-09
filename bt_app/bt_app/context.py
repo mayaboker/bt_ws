@@ -17,6 +17,7 @@ class Context:
     joy_manual_request: bool = field(default=False)
     # true: if joy request arm combination, reset when disarmed or arm failed
     joy_arm_requested: bool = field(default=False)
+    joy_glide_request: bool = field(default=False)
     # drone state arm disabled update at 1hz
     arming_disable_flags: list = field(default_factory=list)
     # drone state - if drone can armed update at 1hz
@@ -36,7 +37,8 @@ class Context:
     takeoff_reach: bool = field(default=False)
     takeoff_setpoint: float = field(default=0)
     manual_land_confirmed: bool = field(default=False)
-    # current drone alt , update from drone at 10hz
+    glide_landed: bool = field(default=False)
+    # Current altitude and vertical speed, updated from MSP at 20 Hz.
     drone_alt: float = 0.0
     drone_vertical_speed: float = 0.0
     drone_alt_received_at_s: float = 0.0
@@ -53,6 +55,7 @@ class Context:
     auto_mode_type: AutoModeType = field(default=AutoModeType.DISABLED)
     # altitude request setpoint use (takeoff, alt_hold)
     alt_setpoint: float = 0.0
+    glide_velocity_setpoint: float = 0.0
 
     # auto mode enable
     auto_mode_enable: bool = field(default=False)
@@ -77,6 +80,7 @@ class Context:
         self.joy_takeoff_request = False
         self.joy_manual_request = False
         self.joy_arm_requested = False
+        self.joy_glide_request = False
         self.arming_disable_flags = []
         self.armable = False
         self.armed = False
@@ -86,6 +90,7 @@ class Context:
         self.auto_arm = False
         self.takeoff_reach = False
         self.manual_land_confirmed = False
+        self.glide_landed = False
         self.drone_alt = 0.0
         self.drone_vertical_speed = 0.0
         self.drone_alt_received_at_s = 0.0
@@ -100,4 +105,6 @@ class Context:
         self.auto_mode_enable = False
         self._initialized = True
         self.takeoff_setpoint = 0.0
+        self.alt_setpoint = 0.0
+        self.glide_velocity_setpoint = 0.0
     # endregion

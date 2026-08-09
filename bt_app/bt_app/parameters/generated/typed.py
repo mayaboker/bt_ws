@@ -71,6 +71,42 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.TAKEOFF_RATE))
 
     @property
+    def glide_desc_rate(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_DESC_RATE))
+
+    @property
+    def glide_vel_kp(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_VEL_KP))
+
+    @property
+    def glide_vel_ki(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_VEL_KI))
+
+    @property
+    def glide_flare_alt(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_FLARE_ALT))
+
+    @property
+    def glide_flare_rate(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_FLARE_RATE))
+
+    @property
+    def glide_out_limit(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_OUT_LIMIT))
+
+    @property
+    def glide_land_alt(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_LAND_ALT))
+
+    @property
+    def glide_land_vs(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_LAND_VS))
+
+    @property
+    def glide_land_sec(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_LAND_SEC))
+
+    @property
     def hov_kp(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.HOV_KP))
 

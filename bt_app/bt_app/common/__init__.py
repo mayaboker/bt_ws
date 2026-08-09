@@ -66,6 +66,7 @@ class RobotState(IntEnum):
     TAKEOFF = 5
     ARM = 6
     ALT_HOLD = 7
+    GLIDE = 8
 
 
 def print_channels(channels: list[int]):

@@ -240,6 +240,7 @@ def test_heartbeat_command_sends_heartbeat():
 def test_global_position_int_reads_context_altitude():
     ctx = Context()
     ctx.drone_alt = 12.5
+    ctx.drone_vertical_speed = -1.25
     service = MavlinkService(context=ctx)
     socket = FakeSocket()
     service._socket = socket
@@ -257,7 +258,7 @@ def test_global_position_int_reads_context_altitude():
     assert msg.relative_alt == 12500
     assert msg.vx == 0
     assert msg.vy == 0
-    assert msg.vz == 0
+    assert msg.vz == 125
     assert msg.hdg == 65535
 
 

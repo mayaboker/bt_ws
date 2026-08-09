@@ -334,6 +334,15 @@ class MavlinkService:
             return
 
         alt_mm = int(float(getattr(self.context, "drone_alt", 0.0)) * 1000.0)
+        # bt-app/MSP uses upward-positive velocity while MAVLink
+        # GLOBAL_POSITION_INT.vz is positive down.
+        vz_cm_s = int(
+            round(
+                -float(getattr(self.context, "drone_vertical_speed", 0.0))
+                * 100.0
+            )
+        )
+        vz_cm_s = max(-32768, min(32767, vz_cm_s))
         msg = self._mav.global_position_int_encode(
             self._time_boot_ms(),
             0,
@@ -342,7 +351,7 @@ class MavlinkService:
             alt_mm,
             0,
             0,
-            0,
+            vz_cm_s,
             UNKNOWN_GLOBAL_POSITION_HEADING,
         )
         self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)

@@ -66,7 +66,9 @@ class MSPAdapter:
     def start(self):
         self.msp.open()
         self.dispatcher.schedule_state(interval_s=1.0)
-        self.dispatcher.schedule_altitude(interval_s=0.1)
+        # GLIDE closes its velocity loop on MSP_ALTITUDE.vario.  Poll at 20 Hz
+        # so each controller update is based on sufficiently fresh velocity.
+        self.dispatcher.schedule_altitude(interval_s=0.05)
         self.dispatcher.schedule_battery(interval_s=2.0)
         self.dispatcher.schedule_attitude(interval_s=0.5)
         self.dispatcher.schedule_rc(interval_s=1.0)

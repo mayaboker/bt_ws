@@ -102,27 +102,11 @@ class DiagnosticTelemetry(Telemetry):
         self.output_state: int | None = None
         self.output_channels: tuple[int, ...] | None = None
         self.altitude_setpoint_m: float | None = None
-        self._last_altitude_m: float | None = None
-        self._last_altitude_time_s: float | None = None
+        self.vertical_speed_setpoint_m_s: float | None = None
 
     def consume(self, message: Any) -> bool:
-        previous_samples = self.altitude_samples
         changed = super().consume(message)
         message_type = message.get_type()
-
-        if self.altitude_samples != previous_samples:
-            now_s = time.monotonic()
-            if (
-                self._last_altitude_m is not None
-                and self._last_altitude_time_s is not None
-                and self.altitude_m is not None
-                and now_s > self._last_altitude_time_s
-            ):
-                self.vertical_speed_m_s = (
-                    self.altitude_m - self._last_altitude_m
-                ) / (now_s - self._last_altitude_time_s)
-            self._last_altitude_m = self.altitude_m
-            self._last_altitude_time_s = now_s
 
         if (
             int(message.get_srcSystem()) != APP_SYSTEM_ID
@@ -130,7 +114,10 @@ class DiagnosticTelemetry(Telemetry):
         ):
             return changed
 
-        if message_type == "ATTITUDE":
+        if message_type == "GLOBAL_POSITION_INT":
+            # MAVLink vz is positive down; bt-app diagnostics use positive up.
+            self.vertical_speed_m_s = -float(message.vz) / 100.0
+        elif message_type == "ATTITUDE":
             self.roll_deg = math.degrees(float(message.roll))
             self.pitch_deg = math.degrees(float(message.pitch))
             self.yaw_deg = math.degrees(float(message.yaw)) % 360.0
@@ -142,6 +129,8 @@ class DiagnosticTelemetry(Telemetry):
                 name = str(name).split("\0", 1)[0]
             if name == "alt_sp":
                 self.altitude_setpoint_m = float(message.value)
+            elif name == "vs_sp":
+                self.vertical_speed_setpoint_m_s = float(message.value)
         elif message_type == "RC_CHANNELS":
             channel_count = min(8, int(message.chancount))
             channels = tuple(
@@ -183,6 +172,8 @@ class DiagnosticTelemetry(Telemetry):
 class TakeoffDiagnosticScenario(MavlinkRcScenario):
     """Automatic takeoff scenario with CSV snapshots at controller-output rate."""
 
+    PARAMETERS = PARAMETERS
+
     FIELDNAMES = (
         "local_time",
         "elapsed_s",
@@ -194,6 +185,8 @@ class TakeoffDiagnosticScenario(MavlinkRcScenario):
         "altitude_setpoint_m",
         "altitude_m",
         "vertical_speed_m_s",
+        "vertical_speed_setpoint_m_s",
+        "vertical_speed_error_m_s",
         "roll_deg",
         "pitch_deg",
         "yaw_deg",
@@ -317,7 +310,7 @@ class TakeoffDiagnosticScenario(MavlinkRcScenario):
 
     def _read_takeoff_parameters(self) -> None:
         self._set_phase("Reading active takeoff parameters")
-        pending = set(PARAMETERS)
+        pending = set(self.PARAMETERS)
         deadline = time.monotonic() + self.parameter_timeout_s
         next_request_s = 0.0
         while pending and time.monotonic() < deadline:
@@ -344,7 +337,7 @@ class TakeoffDiagnosticScenario(MavlinkRcScenario):
                 "Timed out reading takeoff parameters: " + ", ".join(sorted(pending))
             )
         values = " ".join(
-            f"{name}={self.parameter_values[name]:g}" for name in PARAMETERS
+            f"{name}={self.parameter_values[name]:g}" for name in self.PARAMETERS
         )
         self._phase(f"Active parameters: {values}")
 
@@ -404,7 +397,12 @@ class TakeoffDiagnosticScenario(MavlinkRcScenario):
             if baseline is None or output is None
             else output[THROTTLE] - baseline
         )
-        limit = self.parameter_values.get("ALT_OUT_LIMIT")
+        limit_name = (
+            "GLIDE_OUT_LIMIT"
+            if "GLIDE_OUT_LIMIT" in self.PARAMETERS
+            else "ALT_OUT_LIMIT"
+        )
+        limit = self.parameter_values.get(limit_name)
         saturated = (
             correction is not None
             and limit is not None
@@ -422,6 +420,14 @@ class TakeoffDiagnosticScenario(MavlinkRcScenario):
             "altitude_setpoint_m": self.telemetry.altitude_setpoint_m,
             "altitude_m": self.telemetry.altitude_m,
             "vertical_speed_m_s": self.telemetry.vertical_speed_m_s,
+            "vertical_speed_setpoint_m_s": self.telemetry.vertical_speed_setpoint_m_s,
+            "vertical_speed_error_m_s": (
+                None
+                if self.telemetry.vertical_speed_setpoint_m_s is None
+                or self.telemetry.vertical_speed_m_s is None
+                else self.telemetry.vertical_speed_setpoint_m_s
+                - self.telemetry.vertical_speed_m_s
+            ),
             "roll_deg": self.telemetry.roll_deg,
             "pitch_deg": self.telemetry.pitch_deg,
             "yaw_deg": self.telemetry.yaw_deg,
@@ -433,7 +439,7 @@ class TakeoffDiagnosticScenario(MavlinkRcScenario):
             "output_pitch_pwm": None if output is None else output[1],
             "output_yaw_pwm": None if output is None else output[3],
         }
-        row.update({name: self.parameter_values.get(name) for name in PARAMETERS})
+        row.update({name: self.parameter_values.get(name) for name in self.PARAMETERS})
         self._csv_writer.writerow(row)
         self._csv_file.flush()
 

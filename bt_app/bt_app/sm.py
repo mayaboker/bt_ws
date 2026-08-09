@@ -105,6 +105,15 @@ class Robot_StateMachine:
             ),
             conditions=[self.enter_failsafe],
         )
+        self.machine.add_transition(
+            "resolve",
+            RobotState.GLIDE,
+            RobotState.FAILSAFE,
+            before=lambda x: self.on_before_state_changed.emit(
+                RobotState.GLIDE, RobotState.FAILSAFE
+            ),
+            conditions=[self.enter_failsafe],
+        )
         # endregion to FAILSAFE
 
         # region from FAILSAFE
@@ -170,6 +179,24 @@ class Robot_StateMachine:
             RobotState.MANUAL,
             before=lambda x: self.on_before_state_changed.emit(RobotState.ALT_HOLD, RobotState.MANUAL),
             conditions=[self.enter_manual_mode_from_hover],
+        )
+        self.machine.add_transition(
+            "resolve",
+            RobotState.ALT_HOLD,
+            RobotState.GLIDE,
+            before=lambda x: self.on_before_state_changed.emit(
+                RobotState.ALT_HOLD, RobotState.GLIDE
+            ),
+            conditions=[self.enter_glide_from_alt_hold],
+        )
+        self.machine.add_transition(
+            "resolve",
+            RobotState.GLIDE,
+            RobotState.IDLE,
+            before=lambda x: self.on_before_state_changed.emit(
+                RobotState.GLIDE, RobotState.IDLE
+            ),
+            conditions=[self.enter_idle_from_glide],
         )
         # endregion from HOVER
 
@@ -280,6 +307,15 @@ class Robot_StateMachine:
             self.ctx.drone_alt < self.ctx.alt_setpoint
         ])
         return  ok
+
+    def enter_glide_from_alt_hold(self, event):
+        return all([
+            self.ctx.armed,
+            self.ctx.joy_glide_request,
+        ])
+
+    def enter_idle_from_glide(self, event):
+        return self.ctx.glide_landed
 
     def enter_failsafe(self, event):
         """
