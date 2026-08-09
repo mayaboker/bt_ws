@@ -4,6 +4,7 @@ Application entry point
 
 #region
 import pathlib
+import math
 import signal
 import threading
 
@@ -30,6 +31,7 @@ from bt_app.mavlink_wrapper import MavlinkService
 from bt_app.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
 from bt_app.control.tracker_request import TrackerRequestPublisher
 from bt_app.control.land_detector import LandDetector
+from bt_app.control.visual_range import CameraIntrinsics, VisualRangeEstimator
 from bt_app.common import (
     AutoModeType,
     NO_RC_CHANNELS, 
@@ -67,6 +69,8 @@ from bt_joy.server.mavlink import (
 
 FCU_CONNECT_ATTEMPTS = 3
 FCU_CONNECT_RETRY_DELAY_S = 1.0
+GLIDE_RANGE_LOG_PERIOD_S = 0.5
+GLIDE_RANGE_MAVLINK_PERIOD_S = 0.2
 
 
 class App:
@@ -111,6 +115,10 @@ class App:
             self._manual_land_detection_started_notified = False
             self._manual_land_confirmed_notified = False
             self._glide_switch_armed = False
+            self._glide_range_was_valid = False
+            self._glide_last_range_frame_id: int | None = None
+            self._glide_last_range_log_s = float("-inf")
+            self._glide_last_range_mavlink_s = float("-inf")
             self._last_rc_channel = [RC_MIN] * (int(InternalJoy.TRACKER_MODE) + 1)
             self.__load_drone_interface()
             self.__load_controllers()
@@ -152,6 +160,30 @@ class App:
                 raise AppStartupError("Visual print rate must be greater than zero")
             if self.config.visual_mavlink_rate_hz <= 0:
                 raise AppStartupError("Visual MAVLink rate must be greater than zero")
+            positive_visual_values = {
+                "visual_camera_fx_px": self.config.visual_camera_fx_px,
+                "visual_camera_fy_px": self.config.visual_camera_fy_px,
+                "visual_target_width_m": self.config.visual_target_width_m,
+                "visual_target_height_m": self.config.visual_target_height_m,
+            }
+            for name, value in positive_visual_values.items():
+                if not math.isfinite(value) or value <= 0:
+                    raise AppStartupError(f"{name} must be finite and greater than zero")
+            principal_points = {
+                "visual_camera_cx_px": (
+                    self.config.visual_camera_cx_px,
+                    self.config.visual_image_width,
+                ),
+                "visual_camera_cy_px": (
+                    self.config.visual_camera_cy_px,
+                    self.config.visual_image_height,
+                ),
+            }
+            for name, (value, limit) in principal_points.items():
+                if not math.isfinite(value) or not 0 <= value < limit:
+                    raise AppStartupError(
+                        f"{name} must be finite and inside the configured image"
+                    )
 
         positive_tracker_values = {
             "tracker_adjust_step_x_px": self.config.tracker_adjust_step_x_px,
@@ -291,6 +323,14 @@ class App:
         observer.start()
         return observer
 
+    def _fresh_glide_observation(self):
+        if self.visual_observer is None:
+            return None
+        return self.visual_observer.fresh_observation(
+            received_after=float("-inf"),
+            max_age_s=self.config.tracker_result_timeout_s,
+        )
+
     def __load_tracker_request_publisher(self):
         publisher = TrackerRequestPublisher(self.config.tracker_request_endpoint)
         publisher.start()
@@ -348,7 +388,27 @@ class App:
         self.controllers[RobotState.TAKEOFF] = TakeoffController(self.__params)
 
         # Controlled vertical glide/descent to ground
-        self.controllers[RobotState.GLIDE] = GlideController(self.__params)
+        visual_range_estimator = None
+        visual_supplier = None
+        if self.visual_observer is not None:
+            visual_supplier = self._fresh_glide_observation
+            visual_range_estimator = VisualRangeEstimator(
+                CameraIntrinsics(
+                    fx_px=self.config.visual_camera_fx_px,
+                    fy_px=self.config.visual_camera_fy_px,
+                    cx_px=self.config.visual_camera_cx_px,
+                    cy_px=self.config.visual_camera_cy_px,
+                    image_width_px=self.config.visual_image_width,
+                    image_height_px=self.config.visual_image_height,
+                ),
+                target_width_m=self.config.visual_target_width_m,
+                target_height_m=self.config.visual_target_height_m,
+            )
+        self.controllers[RobotState.GLIDE] = GlideController(
+            self.__params,
+            visual_observation_supplier=visual_supplier,
+            visual_range_estimator=visual_range_estimator,
+        )
 
         # arm controller
         self.controllers[RobotState.ARM] = ARMController(self.__params)
@@ -385,6 +445,9 @@ class App:
         """
         run before the state change, one time on change
         """
+        if prev == RobotState.GLIDE and next != RobotState.GLIDE:
+            self._clear_glide_range_telemetry()
+
         if prev == RobotState.IDLE and next == RobotState.ARM:
             log.warning("reset arm controller ")
             self.controllers[RobotState.ARM].reset()
@@ -460,6 +523,11 @@ class App:
                 self.ctx.glide_velocity_setpoint = controller.velocity_setpoint_m_s
                 self.ctx.joy_glide_request = False
                 self.ctx.glide_landed = False
+                self.ctx.target_distance_m = None
+                self._glide_range_was_valid = False
+                self._glide_last_range_frame_id = None
+                self._glide_last_range_log_s = float("-inf")
+                self._glide_last_range_mavlink_s = float("-inf")
                 self.mavlink_service.send_named_value_to_gcs(
                     NamedValue.VERTICAL_SPEED_SP,
                     controller.velocity_setpoint_m_s,
@@ -1072,6 +1140,7 @@ class App:
                 NamedValue.VERTICAL_SPEED_SP,
                 setpoint,
             )
+        self._update_glide_range_telemetry(controller, time.monotonic())
         if controller.consume_landed_event():
             self.ctx.glide_landed = True
             self.ctx.armed = False
@@ -1080,6 +1149,62 @@ class App:
                 MavSeverity.INFO,
             )
         return channels
+
+    def _update_glide_range_telemetry(self, controller, now_s: float) -> None:
+        estimate = getattr(controller, "target_range", None)
+        if estimate is None:
+            self.ctx.target_distance_m = None
+            return
+        was_valid = getattr(self, "_glide_range_was_valid", False)
+        if not estimate.valid or estimate.distance_m is None:
+            self.ctx.target_distance_m = None
+            if was_valid:
+                self.mavlink_service.send_named_value_to_gcs(
+                    NamedValue.TARGET_DISTANCE,
+                    math.nan,
+                )
+                log.info("GLIDE visual range unavailable: {}", estimate.reason)
+            self._glide_range_was_valid = False
+            self._glide_last_range_frame_id = estimate.frame_id
+            return
+
+        self.ctx.target_distance_m = estimate.distance_m
+        self._glide_range_was_valid = True
+        is_new_frame = estimate.frame_id != getattr(
+            self, "_glide_last_range_frame_id", None
+        )
+        self._glide_last_range_frame_id = estimate.frame_id
+        if (
+            is_new_frame
+            and now_s - getattr(self, "_glide_last_range_mavlink_s", float("-inf"))
+            >= GLIDE_RANGE_MAVLINK_PERIOD_S
+        ):
+            self.mavlink_service.send_named_value_to_gcs(
+                NamedValue.TARGET_DISTANCE,
+                estimate.distance_m,
+            )
+            self._glide_last_range_mavlink_s = now_s
+        if now_s - getattr(self, "_glide_last_range_log_s", float("-inf")) >= (
+            GLIDE_RANGE_LOG_PERIOD_S
+        ):
+            log.info(
+                "GLIDE visual range frame={} raw_depth_m={:.2f} median_depth_m={:.2f}",
+                estimate.frame_id,
+                estimate.raw_depth_m,
+                estimate.distance_m,
+            )
+            self._glide_last_range_log_s = now_s
+
+    def _clear_glide_range_telemetry(self) -> None:
+        self.ctx.target_distance_m = None
+        if getattr(self, "_glide_range_was_valid", False) and hasattr(
+            self, "mavlink_service"
+        ):
+            self.mavlink_service.send_named_value_to_gcs(
+                NamedValue.TARGET_DISTANCE,
+                math.nan,
+            )
+        self._glide_range_was_valid = False
     #TODO: move to arm controller 
 
     def _make_disarm_channels(self) -> list[int]:

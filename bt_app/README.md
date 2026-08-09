@@ -140,3 +140,17 @@ Radiomaster BOXER config
 
 ### ALT_HOLD -> tracking(hover) before auto enable
 - SB > 1000
+
+## Visual target distance calibration
+
+During GLIDE, bt-app estimates diagnostic optical-axis distance to the complete
+1 x 1 metre planar red target. The estimate is telemetry only and does not
+change flight control. The Gazebo camera uses a 640 x 480 image and 90-degree
+horizontal field of view, which gives `fx=fy=320`, `cx=320`, and `cy=240`.
+
+For a physical camera, keep the operational resolution and focus fixed, capture
+15-30 OpenCV checkerboard images with the board at different positions and
+angles across the image, and run `cv2.calibrateCamera`. Copy `fx`, `fy`, `cx`,
+and `cy` from the returned camera matrix into `config/vehicle_config.yaml`.
+Undistort the image before target detection; the current range estimator assumes
+that bounding-box coordinates are already distortion-corrected.

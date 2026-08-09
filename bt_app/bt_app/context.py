@@ -56,6 +56,7 @@ class Context:
     # altitude request setpoint use (takeoff, alt_hold)
     alt_setpoint: float = 0.0
     glide_velocity_setpoint: float = 0.0
+    target_distance_m: float | None = None
 
     # auto mode enable
     auto_mode_enable: bool = field(default=False)
@@ -107,4 +108,5 @@ class Context:
         self.takeoff_setpoint = 0.0
         self.alt_setpoint = 0.0
         self.glide_velocity_setpoint = 0.0
+        self.target_distance_m = None
     # endregion

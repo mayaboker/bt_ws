@@ -34,6 +34,15 @@ visual_observer_enabled: true
 visual_zmq_endpoint: "tcp://127.0.0.1:5556"
 visual_image_width: 640
 visual_image_height: 480
+# Gazebo pinhole camera matrix. For a 640 px image and 90-degree horizontal
+# FOV, fx = 640 / (2 * tan(90deg / 2)) = 320 px; square pixels give fy=320.
+visual_camera_fx_px: 320.0
+visual_camera_fy_px: 320.0
+visual_camera_cx_px: 320.0
+visual_camera_cy_px: 240.0
+# Physical dimensions of the complete planar red target face.
+visual_target_width_m: 1.0
+visual_target_height_m: 1.0
 visual_print_rate_hz: 2.0
 visual_mavlink_rate_hz: 20.0
 

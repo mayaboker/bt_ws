@@ -15,3 +15,4 @@ class MavSeverity(IntEnum):
 class NamedValue(StrEnum):
     ALT_SP = "alt_sp"
     VERTICAL_SPEED_SP = "vs_sp"
+    TARGET_DISTANCE = "tgt_dist"
