@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Callable
+from typing import Any
 
 from loguru import logger as log
 
 from bt_app.common import NO_RC_CHANNELS
 from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RC_MIN, RCChannel_alias as RCChannel
 from bt_app.parameters.generated import ParameterKey
-from bt_app.control.visual_range import TargetRangeEstimate, VisualRangeEstimator
 
 
 VARIO_STALE_TIMEOUT_S = 0.25
@@ -33,9 +32,6 @@ class GlideController:
     def __init__(
         self,
         params: Any,
-        *,
-        visual_observation_supplier: Callable[[], Any | None] | None = None,
-        visual_range_estimator: VisualRangeEstimator | None = None,
     ) -> None:
         self.params = params
         self._baseline = float(params.get(ParameterKey.HOV_BASELINE))
@@ -56,11 +52,6 @@ class GlideController:
         self._land_candidate_since_s: float | None = None
         self._landed = False
         self._landed_event = False
-        self._visual_observation_supplier = visual_observation_supplier
-        self._visual_range_estimator = visual_range_estimator
-        self._target_range = TargetRangeEstimate(
-            None, None, None, False, "visual ranging disabled"
-        )
         params.on_parameter_changed.subscribe(self.on_parameter_changed)
 
     @property
@@ -75,18 +66,6 @@ class GlideController:
     @property
     def landed(self) -> bool:
         return self._landed
-
-    @property
-    def target_range(self) -> TargetRangeEstimate:
-        return self._target_range
-
-    @property
-    def target_distance_m(self) -> float | None:
-        return self._target_range.distance_m
-
-    @property
-    def target_raw_depth_m(self) -> float | None:
-        return self._target_range.raw_depth_m
 
     def consume_landed_event(self) -> bool:
         if not self._landed_event:
@@ -111,8 +90,6 @@ class GlideController:
         self._land_candidate_since_s = None
         self._landed = False
         self._landed_event = False
-        if self._visual_range_estimator is not None:
-            self._target_range = self._visual_range_estimator.reset("GLIDE reset")
 
     def update(
         self,
@@ -122,7 +99,6 @@ class GlideController:
     ) -> list[int]:
         """Return a complete RC command for the latest measured descent rate."""
         now_s = time.monotonic()
-        self._update_visual_range()
         sample_time_s = now_s if altitude_sample_time_s is None else float(
             altitude_sample_time_s
         )
@@ -160,22 +136,6 @@ class GlideController:
                 dt_s,
             )
         return self.make_channels(int(round(self._cached_correction)))
-
-    def _update_visual_range(self) -> None:
-        estimator = self._visual_range_estimator
-        supplier = self._visual_observation_supplier
-        if estimator is None or supplier is None:
-            return
-        try:
-            observation = supplier()
-        except Exception as exc:
-            log.warning("Unable to read visual observation during GLIDE: {}", exc)
-            self._target_range = estimator.reset("observation supplier failed")
-            return
-        if observation is None:
-            self._target_range = estimator.reset("visual observation stale")
-            return
-        self._target_range = estimator.update(observation.detection)
 
     def _target_velocity(self, altitude_m: float) -> float:
         altitude_m = float(altitude_m)

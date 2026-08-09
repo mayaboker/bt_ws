@@ -1,5 +1,6 @@
 import csv
 from importlib.util import module_from_spec, spec_from_file_location
+import math
 from pathlib import Path
 import struct
 import sys
@@ -81,6 +82,24 @@ class RcChannelsMessage:
         return "RC_CHANNELS"
 
 
+class NamedValueFloatMessage:
+    def __init__(self, name, value):
+        self.name = name
+        self.value = value
+
+    @staticmethod
+    def get_srcSystem():
+        return diagnostic.APP_SYSTEM_ID
+
+    @staticmethod
+    def get_srcComponent():
+        return diagnostic.APP_COMPONENT_ID
+
+    @staticmethod
+    def get_type():
+        return "NAMED_VALUE_FLOAT"
+
+
 def test_channel_status_decodes_actual_controller_output():
     telemetry = diagnostic.DiagnosticTelemetry()
 
@@ -102,6 +121,16 @@ def test_standard_rc_channels_decodes_actual_controller_output():
 
     assert telemetry.output_channels is not None
     assert telemetry.output_channels[diagnostic.THROTTLE] == 1710
+
+
+def test_named_value_float_decodes_and_clears_target_distance():
+    telemetry = diagnostic.DiagnosticTelemetry()
+
+    telemetry.consume(NamedValueFloatMessage(b"tgt_dist\0\0", 12.34))
+    assert telemetry.target_distance_m == pytest.approx(12.34)
+
+    telemetry.consume(NamedValueFloatMessage("tgt_dist", math.nan))
+    assert telemetry.target_distance_m is None
 
 
 def test_parameter_decoder_reads_real32_directly():

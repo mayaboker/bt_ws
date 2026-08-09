@@ -59,14 +59,12 @@ class VisualRangeEstimator:
         return self._estimate
 
     def update(self, detection: VisualDetectionMessage) -> TargetRangeEstimate:
-        print(detection.frame_id)
         if detection.frame_id == self._last_frame_id:
             return self._estimate
         self._last_frame_id = detection.frame_id
         reason = self._invalid_reason(detection)
         if reason is not None:
             return self._invalidate(reason, detection.frame_id)
-
         height_depth = self.intrinsics.fy_px * self.target_height_m / detection.height
         width_depth = self.intrinsics.fx_px * self.target_width_m / detection.width
         disagreement = abs(height_depth - width_depth) / max(height_depth, width_depth)
@@ -101,8 +99,8 @@ class VisualRangeEstimator:
     def _invalid_reason(self, detection: VisualDetectionMessage) -> str | None:
         if not detection.found:
             return "target not found"
-        if not detection.locked:
-            return "target not locked"
+        # if not detection.locked:
+        #     return "target not locked"
         if detection.width <= 0 or detection.height <= 0:
             return "non-positive bounding box"
         if (

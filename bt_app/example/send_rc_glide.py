@@ -45,7 +45,7 @@ GLIDE_PARAMETERS = (
     "GLIDE_LAND_VS",
     "GLIDE_LAND_SEC",
 )
-REQUEST_TAKEOFF_ALT_M = 20.0
+REQUEST_TAKEOFF_ALT_M = 10.0
 
 SCENARIO_BANNER = """\
 ==============================================================================
@@ -103,11 +103,13 @@ class GlideDiagnosticScenario(TakeoffDiagnosticScenario):
             setpoint = self.telemetry.vertical_speed_setpoint_m_s
             altitude = self.telemetry.altitude_m
             speed = self.telemetry.vertical_speed_m_s
+            target_distance = self.telemetry.target_distance_m
             self._phase(
                 "GLIDE "
                 f"velocity_setpoint={'unknown' if setpoint is None else f'{setpoint:+.2f} m/s'} "
                 f"altitude={'unknown' if altitude is None else f'{altitude:.2f} m'} "
                 f"vertical_speed={'unknown' if speed is None else f'{speed:+.2f} m/s'} "
+                f"target_distance={'unknown' if target_distance is None else f'{target_distance:.2f} m'} "
                 f"throttle={'unknown' if output_throttle is None else output_throttle} "
                 f"correction={'unknown' if correction is None else f'{correction:+g} PWM'}"
             )

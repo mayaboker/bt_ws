@@ -83,6 +83,7 @@ def test_glide_snapshot_logs_vertical_speed(monkeypatch, tmp_path):
     scenario.telemetry.vertical_speed_setpoint_m_s = -0.5
     scenario.telemetry.altitude_m = 4.7
     scenario.telemetry.vertical_speed_m_s = -0.5
+    scenario.telemetry.target_distance_m = 12.34
     scenario.telemetry.output_channels = (1500, 1500, 1600, 1500, 2000, 2000, 1000, 1000)
     scenario.parameter_values["HOV_BASELINE"] = 1660
     messages = []
@@ -93,4 +94,29 @@ def test_glide_snapshot_logs_vertical_speed(monkeypatch, tmp_path):
 
     assert any("vertical_speed=-0.50 m/s" in message for message in messages)
     assert any("velocity_setpoint=-0.50 m/s" in message for message in messages)
+    assert any("target_distance=12.34 m" in message for message in messages)
     assert any("correction=-60 PWM" in message for message in messages)
+
+
+def test_glide_snapshot_logs_unknown_target_distance(monkeypatch, tmp_path):
+    scenario = glide.GlideDiagnosticScenario(
+        destination=("127.0.0.1", 14560),
+        listen=("0.0.0.0", 14550),
+        rate_hz=50.0,
+        state_timeout_s=20.0,
+        landing_timeout_s=120.0,
+        touchdown_altitude_m=0.15,
+        alt_hold_duration_s=0.0,
+        descent_throttle=1600,
+        output_path=tmp_path / "glide.csv",
+        parameter_destination=("127.0.0.1", 14551),
+        parameter_timeout_s=1.0,
+    )
+    scenario.telemetry.state = glide.STATE_GLIDE
+    messages = []
+    monkeypatch.setattr(scenario, "_phase", lambda message, **_: messages.append(message))
+    monkeypatch.setattr(glide.time, "monotonic", lambda: 10.0)
+
+    scenario._write_snapshot("GLOBAL_POSITION_INT")
+
+    assert any("target_distance=unknown" in message for message in messages)

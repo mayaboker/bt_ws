@@ -103,6 +103,7 @@ class DiagnosticTelemetry(Telemetry):
         self.output_channels: tuple[int, ...] | None = None
         self.altitude_setpoint_m: float | None = None
         self.vertical_speed_setpoint_m_s: float | None = None
+        self.target_distance_m: float | None = None
 
     def consume(self, message: Any) -> bool:
         changed = super().consume(message)
@@ -131,6 +132,9 @@ class DiagnosticTelemetry(Telemetry):
                 self.altitude_setpoint_m = float(message.value)
             elif name == "vs_sp":
                 self.vertical_speed_setpoint_m_s = float(message.value)
+            elif name == "tgt_dist":
+                value = float(message.value)
+                self.target_distance_m = value if math.isfinite(value) else None
         elif message_type == "RC_CHANNELS":
             channel_count = min(8, int(message.chancount))
             channels = tuple(

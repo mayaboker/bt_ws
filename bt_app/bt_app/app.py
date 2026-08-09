@@ -121,6 +121,7 @@ class App:
             self._glide_last_range_mavlink_s = float("-inf")
             self._last_rc_channel = [RC_MIN] * (int(InternalJoy.TRACKER_MODE) + 1)
             self.__load_drone_interface()
+            self._visual_range_estimator = self._load_visual_estimator()
             self.__load_controllers()
             self.mavlink_service = MavlinkService(
                 context=self.ctx,
@@ -323,7 +324,7 @@ class App:
         observer.start()
         return observer
 
-    def _fresh_glide_observation(self):
+    def _fresh_visual_observation(self):
         if self.visual_observer is None:
             return None
         return self.visual_observer.fresh_observation(
@@ -335,6 +336,38 @@ class App:
         publisher = TrackerRequestPublisher(self.config.tracker_request_endpoint)
         publisher.start()
         return publisher
+
+    def _load_visual_estimator(self) -> VisualRangeEstimator | None:
+        if self.visual_observer is None:
+            return None
+        return VisualRangeEstimator(
+            CameraIntrinsics(
+                fx_px=self.config.visual_camera_fx_px,
+                fy_px=self.config.visual_camera_fy_px,
+                cx_px=self.config.visual_camera_cx_px,
+                cy_px=self.config.visual_camera_cy_px,
+                image_width_px=self.config.visual_image_width,
+                image_height_px=self.config.visual_image_height,
+            ),
+            target_width_m=self.config.visual_target_width_m,
+            target_height_m=self.config.visual_target_height_m,
+        )
+
+    def _visual_range_handler(self) -> None:
+        """Refresh the app-owned visual range estimate once per control cycle."""
+        estimator = self._visual_range_estimator
+        if estimator is None:
+            return
+        try:
+            observation = self._fresh_visual_observation()
+        except Exception as exc:
+            log.warning("Unable to read visual observation: {}", exc)
+            estimator.reset("observation supplier failed")
+            return
+        if observation is None:
+            estimator.reset("visual observation stale")
+            return
+        estimator.update(observation.detection)
 
     def __load_controllers(self):
         """
@@ -388,27 +421,7 @@ class App:
         self.controllers[RobotState.TAKEOFF] = TakeoffController(self.__params)
 
         # Controlled vertical glide/descent to ground
-        visual_range_estimator = None
-        visual_supplier = None
-        if self.visual_observer is not None:
-            visual_supplier = self._fresh_glide_observation
-            visual_range_estimator = VisualRangeEstimator(
-                CameraIntrinsics(
-                    fx_px=self.config.visual_camera_fx_px,
-                    fy_px=self.config.visual_camera_fy_px,
-                    cx_px=self.config.visual_camera_cx_px,
-                    cy_px=self.config.visual_camera_cy_px,
-                    image_width_px=self.config.visual_image_width,
-                    image_height_px=self.config.visual_image_height,
-                ),
-                target_width_m=self.config.visual_target_width_m,
-                target_height_m=self.config.visual_target_height_m,
-            )
-        self.controllers[RobotState.GLIDE] = GlideController(
-            self.__params,
-            visual_observation_supplier=visual_supplier,
-            visual_range_estimator=visual_range_estimator,
-        )
+        self.controllers[RobotState.GLIDE] = GlideController(self.__params)
 
         # arm controller
         self.controllers[RobotState.ARM] = ARMController(self.__params)
@@ -1140,7 +1153,9 @@ class App:
                 NamedValue.VERTICAL_SPEED_SP,
                 setpoint,
             )
-        self._update_glide_range_telemetry(controller, time.monotonic())
+        self._update_glide_range_telemetry(
+            self._visual_range_estimator, time.monotonic()
+        )
         if controller.consume_landed_event():
             self.ctx.glide_landed = True
             self.ctx.armed = False
@@ -1150,8 +1165,8 @@ class App:
             )
         return channels
 
-    def _update_glide_range_telemetry(self, controller, now_s: float) -> None:
-        estimate = getattr(controller, "target_range", None)
+    def _update_glide_range_telemetry(self, estimator, now_s: float) -> None:
+        estimate = getattr(estimator, "estimate", None)
         if estimate is None:
             self.ctx.target_distance_m = None
             return
@@ -1205,6 +1220,7 @@ class App:
                 math.nan,
             )
         self._glide_range_was_valid = False
+
     #TODO: move to arm controller 
 
     def _make_disarm_channels(self) -> list[int]:
@@ -1289,6 +1305,7 @@ class App:
             while not self._stop_event.is_set():
                 self._raise_if_msp_failed()
                 self._dispatch_pending_joystick_events()
+                self._visual_range_handler()
                 self.__update_state()
                 self._update_controllers()
                 self._notification_center()

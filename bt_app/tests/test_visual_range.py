@@ -117,13 +117,13 @@ def test_app_publishes_filtered_range_then_nan_on_loss():
     app.ctx = SimpleNamespace(target_distance_m=None)
     app.mavlink_service = Mavlink()
     valid = TargetRangeEstimate(1, 10.2, 10.0, True)
-    app._update_glide_range_telemetry(SimpleNamespace(target_range=valid), 1.0)
+    app._update_glide_range_telemetry(SimpleNamespace(estimate=valid), 1.0)
 
     assert app.ctx.target_distance_m == 10.0
     assert app.mavlink_service.messages == [(NamedValue.TARGET_DISTANCE, 10.0)]
 
     invalid = TargetRangeEstimate(2, None, None, False, "target not found")
-    app._update_glide_range_telemetry(SimpleNamespace(target_range=invalid), 1.1)
+    app._update_glide_range_telemetry(SimpleNamespace(estimate=invalid), 1.1)
 
     assert app.ctx.target_distance_m is None
     name, value = app.mavlink_service.messages[-1]
@@ -146,49 +146,21 @@ def test_app_rate_limits_range_mavlink_updates():
     app.mavlink_service = Mavlink()
     for frame_id, now_s in ((1, 1.0), (2, 1.1), (3, 1.2)):
         estimate = TargetRangeEstimate(frame_id, 10.0, 10.0, True)
-        app._update_glide_range_telemetry(SimpleNamespace(target_range=estimate), now_s)
+        app._update_glide_range_telemetry(SimpleNamespace(estimate=estimate), now_s)
 
     assert len(app.mavlink_service.messages) == 1
 
 
-def test_glide_controller_clears_range_when_observation_is_stale(
-    monkeypatch, estimator
-):
-    from bt_app.control.glide_controller import GlideController
-    from bt_app.parameters.generated import ParameterKey
-
-    class Event:
-        def subscribe(self, _callback):
-            pass
-
-    class Parameters:
-        on_parameter_changed = Event()
-        values = {
-            ParameterKey.GLIDE_DESC_RATE: 0.5,
-            ParameterKey.GLIDE_VEL_KP: 100.0,
-            ParameterKey.GLIDE_VEL_KI: 20.0,
-            ParameterKey.GLIDE_FLARE_ALT: 1.0,
-            ParameterKey.GLIDE_FLARE_RATE: 0.15,
-            ParameterKey.GLIDE_OUT_LIMIT: 150.0,
-            ParameterKey.GLIDE_LAND_ALT: 0.15,
-            ParameterKey.GLIDE_LAND_VS: 0.1,
-            ParameterKey.GLIDE_LAND_SEC: 1.0,
-            ParameterKey.HOV_BASELINE: 1660,
-        }
-
-        def get(self, key):
-            return self.values[key]
+def test_app_visual_range_handler_clears_range_when_observation_is_stale(estimator):
+    from bt_app.app import App
 
     observations = [SimpleNamespace(detection=detection()), None]
-    controller = GlideController(
-        Parameters(),
-        visual_observation_supplier=lambda: observations.pop(0),
-        visual_range_estimator=estimator,
-    )
-    monkeypatch.setattr("bt_app.control.glide_controller.time.monotonic", lambda: 0.0)
+    app = App.__new__(App)
+    app._visual_range_estimator = estimator
+    app._fresh_visual_observation = lambda: observations.pop(0)
 
-    controller.update(3.0, 0.0, 0.0)
-    assert controller.target_distance_m == pytest.approx(10.0)
-    controller.update(3.0, 0.0, 0.0)
-    assert controller.target_distance_m is None
-    assert controller.target_range.reason == "visual observation stale"
+    app._visual_range_handler()
+    assert estimator.estimate.distance_m == pytest.approx(10.0)
+    app._visual_range_handler()
+    assert estimator.estimate.distance_m is None
+    assert estimator.estimate.reason == "visual observation stale"
