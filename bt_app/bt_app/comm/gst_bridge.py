@@ -49,7 +49,7 @@ def decode_visual_detection(payload: bytes) -> VisualDetectionMessage | None:
     )
 
 
-class VisualTargetComm:
+class GST_Bridge:
     def __init__(
         self,
         *,

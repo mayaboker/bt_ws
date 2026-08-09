@@ -7,6 +7,7 @@ import pathlib
 import math
 import signal
 import threading
+from unittest import result
 
 from bt_app.control import (
     joy_zmq_adapter
@@ -67,6 +68,7 @@ from bt_joy.server.mavlink import (
 )
 
 from bt_app.estimators import GlideVelocityEstimator
+from bt_app.trackers import TrackerManager
 #endregion
 
 FCU_CONNECT_ATTEMPTS = 3
@@ -101,7 +103,8 @@ class App:
         self.__validate_startup_config()
         try:
             self.__params = self.__load_parameters()
-            self.visual_observer = self.__load_visual_observer()
+            self._tracker_manager = TrackerManager()
+            self.gst_bridge = self._init_gst_bridge()
             self.tracker_request_publisher = self.__load_tracker_request_publisher()
             self._tracker_session_active = False
             self._tracker_start_pending = False
@@ -132,8 +135,6 @@ class App:
                 qopenhd_addr=(self.config.gcs_ip, self.config.gcs_port),
                 visual_detection_supplier=(
                     None
-                    if self.visual_observer is None
-                    else self.visual_observer.latest_detection_map
                 ),
                 visual_mavlink_rate_hz=self.config.visual_mavlink_rate_hz,
             )
@@ -312,25 +313,23 @@ class App:
         recorder.start()
         return recorder
 
-    def __load_visual_observer(self):
+    def _init_gst_bridge(self):
         if not self.config.visual_observer_enabled:
             return None
-        from bt_app.control.visual_controller import VisualTrackerObserver
+        from bt_app.comm.gst_bridge import GST_Bridge
 
-        observer = VisualTrackerObserver(
-            self.__params,
-            endpoint=self.config.visual_zmq_endpoint,
-            image_width=self.config.visual_image_width,
-            image_height=self.config.visual_image_height,
-            print_rate_hz=self.config.visual_print_rate_hz,
+
+        bridge = GST_Bridge(
+            endpoint=self.config.visual_zmq_endpoint
         )
-        observer.start()
-        return observer
+        bridge.on_result = self._gst_tracker_result_handler
+        bridge.start()
+        return bridge
 
     def _fresh_visual_observation(self):
-        if self.visual_observer is None:
+        if self.gst_bridge is None:
             return None
-        return self.visual_observer.fresh_observation(
+        return self.gst_bridge.fresh_observation(
             received_after=float("-inf"),
             max_age_s=self.config.tracker_result_timeout_s,
         )
@@ -341,7 +340,7 @@ class App:
         return publisher
 
     def _load_range_visual_estimator(self) -> VisualRangeEstimator | None:
-        if self.visual_observer is None:
+        if self.gst_bridge is None:
             return None
         return VisualRangeEstimator(
             CameraIntrinsics(
@@ -359,18 +358,9 @@ class App:
     def _visual_range_handler(self) -> None:
         """Refresh the app-owned visual range estimate once per control cycle."""
         estimator = self._visual_range_estimator
-        if estimator is None:
-            return
-        try:
-            observation = self._fresh_visual_observation()
-        except Exception as exc:
-            log.warning("Unable to read visual observation: {}", exc)
-            estimator.reset("observation supplier failed")
-            return
-        if observation is None:
-            estimator.reset("visual observation stale")
-            return
-        estimator.update(observation.detection)
+        result = self._tracker_manager.get_result()
+        if result:
+            estimator.update(result[0][1])
         
 
     def __load_controllers(self):
@@ -720,7 +710,7 @@ class App:
                 MavSeverity.WARNING,
             )
             return
-        observation = self.visual_observer.fresh_observation(
+        observation = self.gst_bridge.fresh_observation(
             received_after=float("-inf"),
             max_age_s=self.config.tracker_result_timeout_s,
             now=now,
@@ -752,7 +742,7 @@ class App:
         )
 
     def _tracker_bridge_healthy(self, now: float) -> bool:
-        return self.visual_observer is not None and self.visual_observer.is_healthy(
+        return self.gst_bridge is not None and self.gst_bridge.is_healthy(
             self.config.tracker_bridge_health_timeout_s,
             now=now,
         )
@@ -914,8 +904,8 @@ class App:
     def auto_mode_handler(self):
         now = time.monotonic()
         observation = None
-        if self.ctx.auto_mode_enable and self.visual_observer is not None:
-            observation = self.visual_observer.fresh_observation(
+        if self.ctx.auto_mode_enable and self.gst_bridge is not None:
+            observation = self.gst_bridge.fresh_observation(
                 received_after=float("-inf"),
                 max_age_s=self.config.tracker_result_timeout_s,
                 now=now,
@@ -954,6 +944,9 @@ class App:
             self.ctx.drone_alt_received_at_s,
         )
 
+
+    def _gst_tracker_result_handler(self, result) -> None:
+        self._tracker_manager.update_tracker("default", result)
 
     def alt_hold_handler(self):
         """

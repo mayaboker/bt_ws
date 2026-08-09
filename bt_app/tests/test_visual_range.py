@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from bt_app.comm.visual_target import VisualDetectionMessage
+from bt_app.bt_app.comm.gst_bridge import VisualDetectionMessage
 from bt_app.control.visual_range import (
     CameraIntrinsics,
     TargetRangeEstimate,
@@ -94,8 +94,8 @@ def test_duplicate_frame_does_not_change_filter(estimator):
 
 
 def test_visual_controller_temporarily_reexports_comm_types():
-    from bt_app.comm.visual_target import VisualTargetComm as MovedComm
-    from bt_app.control.visual_controller import VisualTargetComm as CompatibleComm
+    from bt_app.bt_app.comm.gst_bridge import GST_Bridge as MovedComm
+    from bt_app.control.visual_controller import GST_Bridge as CompatibleComm
 
     assert CompatibleComm is MovedComm
 

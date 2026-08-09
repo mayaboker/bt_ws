@@ -104,7 +104,7 @@ def make_pretracking_app() -> App:
         tracker_bridge_health_timeout_s=1.0,
         tracker_result_timeout_s=0.25,
     )
-    app.visual_observer = HealthyObserver()
+    app.gst_bridge = HealthyObserver()
     app.tracker_request_publisher = FakePublisher()
     app._tracker_session_active = False
     app._tracker_start_pending = False
@@ -223,14 +223,14 @@ def test_auto_mode_combines_visual_lateral_command_with_hover_throttle() -> None
     )
     hover = FallbackHoverController()
     app.controllers = {RobotState.ALT_HOLD: hover}
-    app.visual_observer = ObservationSource(observation)
+    app.gst_bridge = ObservationSource(observation)
 
     expected_hover_command = [1500, 1500, 1500, 1500, 2000, 2000, 1000, 1000]
     assert app.auto_mode_handler() == expected_hover_command
     assert hover.yaw == command.yaw
     assert hover.pitch_roll == (command.pitch, 1500)
 
-    app.visual_observer.observation = VisualObservation(
+    app.gst_bridge.observation = VisualObservation(
         VisualDetectionMessage(2, 2, False, 0, 0, 0, 0, locked=True),
         0.0,
         0.0,
@@ -240,7 +240,7 @@ def test_auto_mode_combines_visual_lateral_command_with_hover_throttle() -> None
     assert hover.yaw == command.yaw
     assert hover.pitch_roll == (command.pitch, 1500)
 
-    app.visual_observer.observation = None
+    app.gst_bridge.observation = None
     assert app.auto_mode_handler() == expected_hover_command
     assert not app.ctx.auto_mode_enable
     assert hover.yaw == 1500

@@ -656,7 +656,7 @@ def test_app_shutdown_stops_resources_in_order_and_continues_after_error():
 
     app = App.__new__(App)
     app.drone_adapter = Resource("msp")
-    app.visual_observer = Resource("visual")
+    app.gst_bridge = Resource("visual")
     app.controllers = {RobotState.MANUAL: Resource("joystick", fail=True)}
     app.mavlink_service = Resource("mavlink")
     app.rc_recorder = Resource("recorder")

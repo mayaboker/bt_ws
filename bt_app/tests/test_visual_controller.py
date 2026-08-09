@@ -9,7 +9,7 @@ from bt_app.app import App
 import bt_app.control.visual_controller as visual_controller_module
 from bt_app.control.visual_controller import (
     VisualDetectionMessage,
-    VisualTargetComm,
+    GST_Bridge,
     VisualTrackerObserver,
     decode_visual_detection,
     normalized_target_error,
@@ -192,7 +192,7 @@ def test_visual_target_comm_receives_single_frame_detection() -> None:
     publisher = context.socket(zmq.PUB)
     publisher.bind(endpoint)
     received = []
-    comm = VisualTargetComm(
+    comm = GST_Bridge(
         endpoint=endpoint,
         context=context,
         on_result=received.append,
