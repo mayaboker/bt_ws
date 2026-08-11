@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="600" viewBox="0 0 1160 600" role="img" aria-labelledby="title desc">
+  <title id="title">Milestone 1 visual observation data flow</title>
+  <desc id="desc">Asynchronous tracker detections become a retained timestamped snapshot, then one validated immutable glide observation per application cycle.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .box{fill:#eff6ff;stroke:#2563eb;stroke-width:2;rx:12}.safe{fill:#ecfdf5;stroke:#059669;stroke-width:2;rx:12}.reject{fill:#fff1f2;stroke:#e11d48;stroke-width:2;rx:12}.text{font:16px sans-serif;fill:#0f172a}.small{font:14px sans-serif;fill:#334155}.title{font:bold 24px sans-serif;fill:#0f172a}.line{stroke:#334155;stroke-width:2;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <text x="580" y="38" text-anchor="middle" class="title">Milestone 1 — trusted observation pipeline</text>
+
+  <rect x="35" y="105" width="185" height="88" class="box"/>
+  <text x="127" y="138" text-anchor="middle" class="text">ZeroMQ tracker</text>
+  <text x="127" y="164" text-anchor="middle" class="small">VisualDetectionMessage</text>
+
+  <rect x="270" y="90" width="210" height="118" class="box"/>
+  <text x="375" y="126" text-anchor="middle" class="text">Tracker callback</text>
+  <text x="375" y="152" text-anchor="middle" class="small">capture monotonic time</text>
+  <text x="375" y="176" text-anchor="middle" class="small">replace latest snapshot</text>
+
+  <rect x="535" y="90" width="210" height="118" class="safe"/>
+  <text x="640" y="126" text-anchor="middle" class="text">TrackerManager</text>
+  <text x="640" y="152" text-anchor="middle" class="small">one immutable snapshot</text>
+  <text x="640" y="176" text-anchor="middle" class="small">non-destructive read</text>
+
+  <rect x="800" y="90" width="320" height="118" class="box"/>
+  <text x="960" y="126" text-anchor="middle" class="text">App cycle validation</text>
+  <text x="960" y="152" text-anchor="middle" class="small">age • lock • order • bbox</text>
+  <text x="960" y="176" text-anchor="middle" class="small">one snapshot read per cycle</text>
+
+  <path d="M220 149 H270" class="line"/><path d="M480 149 H535" class="line"/><path d="M745 149 H800" class="line"/>
+
+  <rect x="190" y="300" width="250" height="112" class="box"/>
+  <text x="315" y="336" text-anchor="middle" class="text">VisualRangeEstimator</text>
+  <text x="315" y="362" text-anchor="middle" class="small">1 m face → forward depth</text>
+  <text x="315" y="386" text-anchor="middle" class="small">geometry validation + median</text>
+
+  <rect x="500" y="300" width="250" height="112" class="box"/>
+  <text x="625" y="336" text-anchor="middle" class="text">Image geometry</text>
+  <text x="625" y="362" text-anchor="middle" class="small">ex • ey • vertical offset</text>
+  <text x="625" y="386" text-anchor="middle" class="small">centering quality</text>
+
+  <rect x="810" y="300" width="250" height="112" class="box"/>
+  <text x="935" y="336" text-anchor="middle" class="text">GlideVelocityEstimator</text>
+  <text x="935" y="362" text-anchor="middle" class="small">direction-preserving vx / vy</text>
+  <text x="935" y="386" text-anchor="middle" class="small">vertical + centering limits</text>
+
+  <path d="M960 208 V252 H315 V300" class="line"/><path d="M440 356 H500" class="line"/><path d="M750 356 H810" class="line"/>
+
+  <rect x="385" y="480" width="390" height="88" class="safe"/>
+  <text x="580" y="516" text-anchor="middle" class="text">Frozen GlideObservation</text>
+  <text x="580" y="542" text-anchor="middle" class="small">valid measurements or explicit invalid reason</text>
+  <path d="M935 412 V445 H580 V480" class="line"/>
+
+  <rect x="35" y="475" width="245" height="98" class="reject"/>
+  <text x="157" y="510" text-anchor="middle" class="text">Rejected observation</text>
+  <text x="157" y="536" text-anchor="middle" class="small">reset estimator history</text>
+  <text x="157" y="558" text-anchor="middle" class="small">zero request + reason</text>
+  <path d="M800 175 H770 V455 H280 V500" class="line"/>
+</svg>

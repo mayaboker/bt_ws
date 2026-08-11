@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 560" role="img" aria-labelledby="title desc">
+  <title id="title">Red-cube slant intercept geometry</title>
+  <desc id="desc">A drone follows a diagonal trajectory toward the center of the front face of a solid one metre red cube.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0v6l9-3z" fill="#1558a6"/></marker>
+    <style>.h{font:700 25px sans-serif;fill:#17202a}.t{font:17px sans-serif;fill:#17202a}.s{font:14px sans-serif;fill:#46515c}.g{stroke:#1558a6;stroke-width:4;stroke-dasharray:11 7;fill:none}.d{stroke:#555;stroke-width:2;fill:none}.v{stroke:#d05a00;stroke-width:5;fill:none}</style>
+  </defs>
+  <rect width="1100" height="560" fill="#fff"/><text x="45" y="48" class="h">Slant intercept geometry</text>
+  <line x1="55" y1="490" x2="1040" y2="490" stroke="#59636e" stroke-width="2"/><text x="60" y="520" class="s">simulation ground</text>
+  <g transform="translate(190 180)" stroke="#17202a" stroke-width="5" fill="none"><path d="M-48-22L48 22M-48 22L48-22"/><ellipse rx="29" ry="13" fill="#dce6f0"/><circle cx="-50" cy="-23" r="14"/><circle cx="50" cy="23" r="14"/><circle cx="-50" cy="23" r="14"/><circle cx="50" cy="-23" r="14"/></g>
+  <text x="135" y="125" class="t">drone</text>
+  <g><polygon points="850,210 945,235 945,400 850,375" fill="#8b1010"/><polygon points="850,210 885,185 980,210 945,235" fill="#db3030"/><polygon points="945,235 980,210 980,375 945,400" fill="#5f0808"/><rect x="850" y="210" width="95" height="165" fill="none" stroke="#350000" stroke-width="3"/><circle cx="897.5" cy="292.5" r="8" fill="#fff" stroke="#17202a" stroke-width="3"/></g>
+  <text x="835" y="160" class="t">solid red cube</text><text x="847" y="181" class="s">1 × 1 × 1 m</text><text x="822" y="425" class="s">front-face center objective</text>
+  <line x1="190" y1="180" x2="890" y2="291" class="g" marker-end="url(#arrow)"/><text x="470" y="203" class="t">nominal line of sight</text>
+  <line x1="190" y1="455" x2="850" y2="455" class="d" marker-start="url(#arrow)" marker-end="url(#arrow)"/><text x="480" y="446" class="t">forward depth d</text>
+  <line x1="190" y1="180" x2="365" y2="180" class="v" marker-end="url(#arrow)"/><text x="218" y="168" class="t">vx</text>
+  <line x1="190" y1="180" x2="190" y2="275" class="v" marker-end="url(#arrow)"/><text x="205" y="262" class="t">vy</text>
+  <path d="M145 330h90v55h-90z" fill="#eef5fc" stroke="#1558a6"/><text x="158" y="353" class="s">yaw keeps box</text><text x="157" y="373" class="s">at image center</text>
+  <text x="420" y="540" class="s">Phase one objective: centered front-face impact in simulation; no wind or input distortion.</text>
+</svg>

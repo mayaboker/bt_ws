@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500" role="img" aria-labelledby="title desc">
+  <title id="title">Visual intercept sensor-to-RC data flow</title><desc id="desc">Bounding box data flows through centering, range, guidance, velocity estimation, and RC composition.</desc>
+  <defs><marker id="a" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0 0v6l8-3z" fill="#245b88"/></marker><style>.h{font:700 24px sans-serif}.t{font:16px sans-serif}.s{font:13px sans-serif;fill:#42505d}.b{fill:#eef5fc;stroke:#245b88;stroke-width:2}.c{fill:#fdf2e5;stroke:#b95c00;stroke-width:2}.l{stroke:#245b88;stroke-width:3;fill:none;marker-end:url(#a)}</style></defs>
+  <rect width="1200" height="500" fill="#fff"/><text x="35" y="42" class="h">Sensor-to-RC data flow</text>
+  <g class="b"><rect x="35" y="180" width="150" height="85" rx="10"/><rect x="235" y="180" width="165" height="85" rx="10"/><rect x="455" y="70" width="175" height="75" rx="10"/><rect x="455" y="180" width="175" height="85" rx="10"/><rect x="455" y="310" width="175" height="75" rx="10"/><rect x="690" y="180" width="180" height="85" rx="10"/><rect x="930" y="180" width="215" height="85" rx="10"/></g>
+  <text x="72" y="214" class="t">camera</text><text x="52" y="240" class="s">perfect phase-one image</text>
+  <text x="262" y="213" class="t">red-box tracker</text><text x="255" y="239" class="s">bbox + frame timestamp</text>
+  <text x="486" y="101" class="t">centering errors</text><text x="507" y="126" class="s">ex, ey, quality</text>
+  <text x="495" y="213" class="t">range estimator</text><text x="482" y="239" class="s">front-face depth d</text>
+  <text x="479" y="341" class="t">depth-rate filter</text><text x="480" y="366" class="s">median + EMA → vx</text>
+  <text x="726" y="213" class="t">guidance and</text><text x="721" y="238" class="t">RC controllers</text>
+  <text x="968" y="213" class="t">RC command composer</text><text x="964" y="240" class="s">roll, pitch, throttle, yaw</text>
+  <path d="M185 222h50" class="l"/><path d="M400 205C425 205 425 108 455 108" class="l"/><path d="M400 222h55" class="l"/><path d="M400 242c35 0 20 105 55 105" class="l"/><path d="M630 108c55 0 25 94 60 94" class="l"/><path d="M630 222h60" class="l"/><path d="M630 347c65 0 25-104 60-104" class="l"/><path d="M870 222h60" class="l"/>
+  <rect x="690" y="330" width="180" height="65" rx="10" class="c"/><text x="717" y="357" class="t">phase manager</text><text x="711" y="380" class="s">acquire / track / commit</text><path d="M780 330v-65" class="l"/>
+  <path d="M1038 265v75H925" class="l"/><rect x="925" y="320" width="220" height="70" rx="10" class="b"/><text x="970" y="350" class="t">Betaflight + drone</text><text x="958" y="375" class="s">attitude and rate stabilization</text>
+</svg>

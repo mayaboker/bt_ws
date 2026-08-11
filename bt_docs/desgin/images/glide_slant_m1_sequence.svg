@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="760" viewBox="0 0 1180 760" role="img" aria-labelledby="title desc">
+  <title id="title">Milestone 1 tracker and control-cycle sequence</title>
+  <desc id="desc">Shows asynchronous tracker replacement and repeated application reads, including valid, duplicate, stale, and replacement behavior.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#334155"/></marker>
+    <style>
+      .title{font:bold 24px sans-serif;fill:#0f172a}.actor{font:bold 16px sans-serif;fill:#0f172a}.text{font:14px sans-serif;fill:#0f172a}.note{font:13px sans-serif;fill:#475569}.life{stroke:#94a3b8;stroke-width:2;stroke-dasharray:7 7}.msg{stroke:#334155;stroke-width:2;fill:none;marker-end:url(#arrow)}.valid{fill:#ecfdf5;stroke:#059669;stroke-width:1.5}.invalid{fill:#fff1f2;stroke:#e11d48;stroke-width:1.5}.head{fill:#eff6ff;stroke:#2563eb;stroke-width:2;rx:8}
+    </style>
+  </defs>
+  <text x="590" y="35" text-anchor="middle" class="title">Milestone 1 — asynchronous tracker, deterministic cycle</text>
+
+  <rect x="55" y="60" width="170" height="50" class="head"/><text x="140" y="91" text-anchor="middle" class="actor">Tracker</text>
+  <rect x="295" y="60" width="190" height="50" class="head"/><text x="390" y="91" text-anchor="middle" class="actor">Callback</text>
+  <rect x="555" y="60" width="190" height="50" class="head"/><text x="650" y="91" text-anchor="middle" class="actor">TrackerManager</text>
+  <rect x="815" y="60" width="150" height="50" class="head"/><text x="890" y="91" text-anchor="middle" class="actor">App cycle</text>
+  <rect x="1015" y="60" width="130" height="50" class="head"/><text x="1080" y="91" text-anchor="middle" class="actor">Estimators</text>
+
+  <path d="M140 110 V720 M390 110 V720 M650 110 V720 M890 110 V720 M1080 110 V720" class="life"/>
+
+  <path d="M140 155 H390" class="msg"/><text x="265" y="146" text-anchor="middle" class="text">frame 10</text>
+  <path d="M390 185 H650" class="msg"/><text x="520" y="176" text-anchor="middle" class="text">snapshot(frame 10, received_at)</text>
+
+  <path d="M890 235 H650" class="msg"/><text x="770" y="226" text-anchor="middle" class="text">get_result()</text>
+  <path d="M650 265 H890" class="msg"/><text x="770" y="256" text-anchor="middle" class="text">snapshot 10</text>
+  <path d="M890 295 H1080" class="msg"/><text x="985" y="286" text-anchor="middle" class="text">fresh valid frame</text>
+  <rect x="820" y="315" width="300" height="45" rx="7" class="valid"/><text x="970" y="343" text-anchor="middle" class="text">valid GlideObservation(frame 10)</text>
+
+  <path d="M890 405 H650" class="msg"/><text x="770" y="396" text-anchor="middle" class="text">next cycle: get_result()</text>
+  <path d="M650 435 H890" class="msg"/><text x="770" y="426" text-anchor="middle" class="text">same snapshot 10</text>
+  <path d="M890 465 H1080" class="msg"/><text x="985" y="456" text-anchor="middle" class="text">do not advance filters</text>
+  <rect x="820" y="485" width="300" height="45" rx="7" class="valid"/><text x="970" y="513" text-anchor="middle" class="text">cached frame result, age rechecked</text>
+
+  <path d="M890 565 H650" class="msg"/><text x="770" y="556" text-anchor="middle" class="text">later cycle: get_result()</text>
+  <path d="M650 595 H890" class="msg"/><text x="770" y="586" text-anchor="middle" class="text">snapshot 10 now stale</text>
+  <path d="M890 625 H1080" class="msg"/><text x="985" y="616" text-anchor="middle" class="text">reset histories</text>
+  <rect x="820" y="645" width="300" height="45" rx="7" class="invalid"/><text x="970" y="673" text-anchor="middle" class="text">invalid: visual observation stale</text>
+
+  <path d="M140 555 H390" class="msg"/><text x="265" y="546" text-anchor="middle" class="text">frame 11 arrives</text>
+  <path d="M390 695 H650" class="msg"/><text x="520" y="686" text-anchor="middle" class="text">atomically replace with frame 11</text>
+
+  <text x="55" y="742" class="note">Time flows downward. Tracker arrival is independent of the fixed-rate application cycle.</text>
+</svg>
