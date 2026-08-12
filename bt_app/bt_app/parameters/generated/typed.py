@@ -103,6 +103,10 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.GLIDE_YAW_KP))
 
     @property
+    def glide_yaw_ki(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_YAW_KI))
+
+    @property
     def glide_yaw_max(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.GLIDE_YAW_MAX))
 

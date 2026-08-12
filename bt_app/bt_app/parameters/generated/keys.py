@@ -28,6 +28,7 @@ class ParameterKey:
     GLIDE_VY_KI: Final[Literal['GLIDE_VY_KI']] = 'GLIDE_VY_KI'
     GLIDE_VY_OUT: Final[Literal['GLIDE_VY_OUT']] = 'GLIDE_VY_OUT'
     GLIDE_YAW_KP: Final[Literal['GLIDE_YAW_KP']] = 'GLIDE_YAW_KP'
+    GLIDE_YAW_KI: Final[Literal['GLIDE_YAW_KI']] = 'GLIDE_YAW_KI'
     GLIDE_YAW_MAX: Final[Literal['GLIDE_YAW_MAX']] = 'GLIDE_YAW_MAX'
     GLIDE_YAW_DB: Final[Literal['GLIDE_YAW_DB']] = 'GLIDE_YAW_DB'
     GLIDE_YAW_SLEW: Final[Literal['GLIDE_YAW_SLEW']] = 'GLIDE_YAW_SLEW'
@@ -79,6 +80,7 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'GLIDE_VY_KI',
     'GLIDE_VY_OUT',
     'GLIDE_YAW_KP',
+    'GLIDE_YAW_KI',
     'GLIDE_YAW_MAX',
     'GLIDE_YAW_DB',
     'GLIDE_YAW_SLEW',

@@ -32,6 +32,7 @@ class Params:
             ParameterKey.GLIDE_VY_KI: 0.0,
             ParameterKey.GLIDE_VY_OUT: 100.0,
             ParameterKey.GLIDE_YAW_KP: 15.0,
+            ParameterKey.GLIDE_YAW_KI: 2.0,
             ParameterKey.GLIDE_YAW_MAX: 20.0,
             ParameterKey.GLIDE_YAW_DB: 0.02,
             ParameterKey.GLIDE_YAW_SLEW: 12.0,
@@ -194,6 +195,20 @@ def test_yaw_deadband_direction_and_limit():
     assert update(controller, observation(3, 3.0, 9.0, ex=0.25)).yaw_rate_dps > 0.0
     saturated = update(controller, observation(4, 4.0, 8.0, ex=1.0))
     assert saturated.yaw_rate_dps <= 20.0
+
+
+def test_yaw_integral_strengthens_persistent_error_and_decays_on_reversal():
+    controller = GlideController(Params(), center_deadband=0.05)
+    first = update(controller, observation(1, 1.0, ex=-0.10), now=1.0)
+    persistent = update(
+        controller, observation(2, 2.0, ex=-0.10), now=2.0
+    )
+    reversed_error = update(
+        controller, observation(3, 3.0, ex=0.10), now=3.0
+    )
+
+    assert persistent.yaw_rate_dps < first.yaw_rate_dps
+    assert reversed_error.yaw_rate_dps > 0.0
 
 
 def test_short_invalid_input_is_held_but_stale_vario_aborts():

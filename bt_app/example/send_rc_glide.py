@@ -44,13 +44,14 @@ GLIDE_PARAMETERS = (
     "GLIDE_VY_KI",
     "GLIDE_VY_OUT",
     "GLIDE_YAW_KP",
+    "GLIDE_YAW_KI",
     "GLIDE_YAW_MAX",
     "GLIDE_YAW_DB",
     "GLIDE_YAW_SLEW",
     "GLIDE_CENTER_KY",
     "GLIDE_DEPTH_EMA",
 )
-REQUEST_TAKEOFF_ALT_M = 5.0
+REQUEST_TAKEOFF_ALT_M = 10.0
 
 SCENARIO_BANNER = """\
 ==============================================================================

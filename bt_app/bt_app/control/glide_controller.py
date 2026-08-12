@@ -24,6 +24,7 @@ from bt_app.parameters.generated import ParameterKey
 
 VARIO_STALE_TIMEOUT_S = 0.25
 VISUAL_HOLD_TIMEOUT_S = 0.25
+YAW_INTEGRAL_OUTPUT_LIMIT_DPS = 3.0
 EDGE_CLIPPED_REASON = "bounding box clipped by image edge"
 EDGE_REASON_PREFIX = "bounding box clipped by "
 EDGE_COMMIT_MAX_HORIZONTAL_ERROR = 0.15
@@ -140,6 +141,7 @@ class GlideController:
         self._vy_ki = float(get(ParameterKey.GLIDE_VY_KI))
         self._vy_output_limit = abs(float(get(ParameterKey.GLIDE_VY_OUT)))
         self._yaw_kp = float(get(ParameterKey.GLIDE_YAW_KP))
+        self._yaw_ki = float(get(ParameterKey.GLIDE_YAW_KI))
         self._yaw_max = abs(float(get(ParameterKey.GLIDE_YAW_MAX)))
         self._yaw_deadband = abs(float(get(ParameterKey.GLIDE_YAW_DB)))
         self._yaw_slew = abs(float(get(ParameterKey.GLIDE_YAW_SLEW)))
@@ -173,6 +175,9 @@ class GlideController:
         self._throttle_correction = 0.0
         self._yaw_rate_command = 0.0
         self._last_yaw_update_s: float | None = None
+        self._last_yaw_control_s: float | None = None
+        self._last_yaw_error = 0.0
+        self._yaw_integral = 0.0
         self._last_guidance_observation: GlideObservation | None = None
 
     @property
@@ -413,23 +418,20 @@ class GlideController:
         )
 
         ey = self._deadband(float(observation.ey))
+        print(observation.vy_geometry_m_s)
         vy_desired = self._clamp(
             float(observation.vy_geometry_m_s) + self._center_ky * ey,
             -self._max_vertical_speed,
             self._max_vertical_speed,
+
         )
         throttle_saturated = self._update_vertical(
             vy_desired,
             float(vertical_speed_m_s),
             float(vertical_speed_received_at_s),
         )
-        yaw_target = self._clamp(
-            self._yaw_kp * self._deadband(
-                float(observation.ex), self._yaw_deadband
-            ),
-            -self._yaw_max,
-            self._yaw_max,
-        )
+        yaw_error = self._deadband(float(observation.ex), self._yaw_deadband)
+        yaw_target = self._update_yaw_pi(yaw_error, now)
         yaw_rate = self._slew_yaw(yaw_target, now)
         channels = self._make_channels(pitch, yaw_rate, self._throttle_correction)
         result = GlideControlResult(
@@ -567,6 +569,37 @@ class GlideController:
         )
         return self._yaw_rate_command
 
+    def _update_yaw_pi(self, error: float, now_s: float) -> float:
+        dt = 0.0
+        if self._last_yaw_control_s is not None:
+            dt = max(0.0, now_s - self._last_yaw_control_s)
+        self._last_yaw_control_s = now_s
+
+        if error * self._last_yaw_error < 0.0:
+            self._yaw_integral *= 0.25
+        if error == 0.0:
+            self._yaw_integral *= max(0.0, 1.0 - 2.0 * dt)
+
+        candidate_integral = self._yaw_integral + error * dt
+        if self._yaw_ki > 0.0:
+            integral_limit = YAW_INTEGRAL_OUTPUT_LIMIT_DPS / self._yaw_ki
+            candidate_integral = self._clamp(
+                candidate_integral, -integral_limit, integral_limit
+            )
+        else:
+            candidate_integral = 0.0
+
+        candidate = self._yaw_kp * error + self._yaw_ki * candidate_integral
+        output = self._clamp(candidate, -self._yaw_max, self._yaw_max)
+        saturated_deeper = not math.isclose(candidate, output) and (
+            (candidate > self._yaw_max and error > 0.0)
+            or (candidate < -self._yaw_max and error < 0.0)
+        )
+        if not saturated_deeper:
+            self._yaw_integral = candidate_integral
+        self._last_yaw_error = error
+        return output
+
     @staticmethod
     def _clamp(value: float, lower: float, upper: float) -> float:
         return max(lower, min(upper, value))
@@ -578,7 +611,8 @@ class GlideController:
             ParameterKey.GLIDE_PITCH_MAX, ParameterKey.GLIDE_VX_KP,
             ParameterKey.GLIDE_VX_KI, ParameterKey.GLIDE_VY_KP,
             ParameterKey.GLIDE_VY_KI, ParameterKey.GLIDE_VY_OUT,
-            ParameterKey.GLIDE_YAW_KP, ParameterKey.GLIDE_YAW_MAX,
+            ParameterKey.GLIDE_YAW_KP, ParameterKey.GLIDE_YAW_KI,
+            ParameterKey.GLIDE_YAW_MAX,
             ParameterKey.GLIDE_YAW_DB,
             ParameterKey.GLIDE_YAW_SLEW,
             ParameterKey.GLIDE_CENTER_KY, ParameterKey.GLIDE_DEPTH_EMA,
