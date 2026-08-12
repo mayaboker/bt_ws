@@ -6,7 +6,8 @@ import math
 import statistics
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from enum import Enum
 from typing import Any
 
 from bt_app.common import NO_RC_CHANNELS
@@ -17,6 +18,18 @@ from bt_app.parameters.generated import ParameterKey
 
 
 VARIO_STALE_TIMEOUT_S = 0.25
+VISUAL_HOLD_TIMEOUT_S = 0.25
+
+
+class GlidePhase(str, Enum):
+    """Lifecycle of one guarded visual-intercept attempt."""
+
+    IDLE = "idle"
+    ACQUIRE = "acquire"
+    TRACK = "track"
+    COMMIT = "commit"
+    ABORTED = "aborted"
+    COMMIT_TIMEOUT = "commit_timeout"
 
 
 @dataclass(frozen=True)
@@ -37,15 +50,18 @@ class GlideControlResult:
     throttle_saturated: bool
     valid: bool
     reason: str | None = None
+    phase: GlidePhase = GlidePhase.IDLE
+    abort_reason: str | None = None
 
 
 class GlideController:
-    """Calculate TRACK RC commands without owning tracking or flight phases.
+    """Own acquisition, visual tracking, commit, and abort phases.
 
     New visual frames update depth-derived forward speed and the forward PI.
     New vario timestamps update the vertical PI. Duplicate application cycles
     hold both corrections. The class is intentionally isolated from ``App`` and
-    the flight state machine until milestone 3.
+    the flight state machine.  COMMIT freezes the last valid command so a
+    transient visual loss at the opening cannot reverse the intercept.
     """
 
     def __init__(
@@ -54,10 +70,27 @@ class GlideController:
         *,
         max_vertical_speed_m_s: float = 3.0,
         center_deadband: float = 0.05,
+        acquisition_error_max: float = 0.40,
+        lock_frame_count: int = 2,
+        commit_depth_m: float = 1.0,
+        commit_timeout_s: float = 1.0,
     ) -> None:
         self.params = params
         self._max_vertical_speed = float(max_vertical_speed_m_s)
         self._center_deadband = float(center_deadband)
+        self._acquisition_error_max = float(acquisition_error_max)
+        self._lock_frame_count = int(lock_frame_count)
+        self._commit_depth_m = float(commit_depth_m)
+        self._commit_timeout_s = float(commit_timeout_s)
+        if self._lock_frame_count <= 0:
+            raise ValueError("lock_frame_count must be positive")
+        if self._commit_depth_m <= 0.0 or self._commit_timeout_s <= 0.0:
+            raise ValueError("commit limits must be positive")
+        if not self._center_deadband < self._acquisition_error_max <= 1.0:
+            raise ValueError(
+                "acquisition_error_max must be greater than center_deadband "
+                "and no greater than 1"
+            )
         self._load_parameters()
         self._mapper = BetaflightRcMapper(
             yaw_rate_full_stick_dps=self._bf_yaw_rate,
@@ -83,7 +116,16 @@ class GlideController:
         self._bf_yaw_rate = float(get(ParameterKey.BF_YAW_RATE))
 
     def reset(self, *_args: Any, **_kwargs: Any) -> None:
-        """Clear filters, timestamps, PI integrals, and held corrections."""
+        """Return to IDLE and clear the complete intercept attempt."""
+        self.phase = GlidePhase.IDLE
+        self.abort_reason: str | None = None
+        self._acquisition_count = 0
+        self._acquisition_frame_id: int | None = None
+        self._commit_started_at_s: float | None = None
+        self._frozen_result: GlideControlResult | None = None
+        self._reset_control_state()
+
+    def _reset_control_state(self) -> None:
         self._last_frame_id: int | None = None
         self._last_depth_m: float | None = None
         self._last_depth_time_s: float | None = None
@@ -95,6 +137,65 @@ class GlideController:
         self._last_vario_time_s: float | None = None
         self._vy_integral = 0.0
         self._throttle_correction = 0.0
+        self._last_guidance_observation: GlideObservation | None = None
+
+    @property
+    def ready_to_engage(self) -> bool:
+        return (
+            self.phase == GlidePhase.ACQUIRE
+            and self._acquisition_count >= self._lock_frame_count
+        )
+
+    @property
+    def acquisition_count(self) -> int:
+        return self._acquisition_count
+
+    def begin_acquisition(self) -> None:
+        """Start counting distinct, consecutive, centered visual frames."""
+        self.reset()
+        self.phase = GlidePhase.ACQUIRE
+
+    def observe_acquisition(self, observation: GlideObservation) -> bool:
+        """Consume one observation and return whether the lock gate is ready.
+
+        Repeated application cycles for the same camera frame neither advance
+        nor reset the gate.  A new invalid or off-center frame resets the
+        consecutive count.
+        """
+        if self.phase != GlidePhase.ACQUIRE:
+            return False
+        if observation.frame_id == self._acquisition_frame_id:
+            return self.ready_to_engage
+        self._acquisition_frame_id = observation.frame_id
+        centered = (
+            observation.valid
+            and observation.frame_id is not None
+            and observation.ex is not None
+            and observation.ey is not None
+            and math.isfinite(float(observation.ex))
+            and math.isfinite(float(observation.ey))
+            and math.hypot(
+                float(observation.ex), float(observation.ey)
+            ) <= self._acquisition_error_max
+        )
+        self._acquisition_count = self._acquisition_count + 1 if centered else 0
+        return self.ready_to_engage
+
+    def engage(self) -> bool:
+        """Enter TRACK only after the acquisition gate has completed."""
+        if not self.ready_to_engage:
+            return False
+        self._reset_control_state()
+        self.phase = GlidePhase.TRACK
+        return True
+
+    def abort(self, reason: str) -> None:
+        """Abort an attempt; COMMIT deliberately ignores ordinary aborts."""
+        if self.phase == GlidePhase.COMMIT:
+            return
+        self.abort_reason = reason
+        self.phase = GlidePhase.ABORTED
+        self._reset_control_state()
 
     def update(
         self,
@@ -104,12 +205,54 @@ class GlideController:
         vertical_speed_received_at_s: float,
         now_s: float | None = None,
     ) -> GlideControlResult:
-        """Return a typed TRACK command from visual and vario measurements."""
+        """Advance TRACK/COMMIT and return the command for this control cycle.
+
+        TRACK validates visual and vario inputs, updates the depth/vertical
+        loops, and enters COMMIT at the configured centered depth.  COMMIT
+        replays the frozen entry command until its deadline; the following
+        cycle returns neutral with ``COMMIT_TIMEOUT`` so the state machine can
+        return to altitude hold.
+        """
         now = time.monotonic() if now_s is None else float(now_s)
+        if self.phase == GlidePhase.COMMIT:
+            if now - float(self._commit_started_at_s) < self._commit_timeout_s:
+                return self._frozen_result  # type: ignore[return-value]
+            self.phase = GlidePhase.COMMIT_TIMEOUT
+            return self._neutral_result(None, "commit timeout")
+        if self.phase != GlidePhase.TRACK:
+            return self._neutral_result(None, f"controller phase is {self.phase.value}")
+        allow_commit = observation.valid
         if not observation.valid:
-            return self._safe_result(observation.frame_id, observation.reason or "invalid observation")
+            cached = self._last_guidance_observation
+            cached_at = None if cached is None else cached.received_at_s
+            if (
+                cached is None
+                or cached_at is None
+                or now - float(cached_at) > VISUAL_HOLD_TIMEOUT_S
+            ):
+                return self._abort_result(
+                    observation.frame_id,
+                    observation.reason or "invalid observation",
+                )
+            ex = cached.ex if observation.ex is None else observation.ex
+            ey = cached.ey if observation.ey is None else observation.ey
+            observation = replace(
+                cached,
+                ex=ex,
+                ey=ey,
+                centering_error=(
+                    None if ex is None or ey is None else math.hypot(ex, ey)
+                ),
+                age_s=now - float(cached_at),
+                reason=f"visual hold: {observation.reason or 'invalid observation'}",
+            )
+        elif (
+            self._last_guidance_observation is None
+            or observation.frame_id != self._last_guidance_observation.frame_id
+        ):
+            self._last_guidance_observation = observation
         if observation.frame_id is None:
-            return self._safe_result(None, "visual frame unavailable")
+            return self._abort_result(None, "visual frame unavailable")
         required = (
             now,
             observation.received_at_s,
@@ -122,13 +265,13 @@ class GlideController:
             vertical_speed_received_at_s,
         )
         if any(value is None or not math.isfinite(float(value)) for value in required):
-            return self._safe_result(observation.frame_id, "non-finite controller input")
+            return self._abort_result(observation.frame_id, "non-finite controller input")
         if float(observation.depth_m) <= 0.0:
-            return self._safe_result(observation.frame_id, "non-positive depth")
+            return self._abort_result(observation.frame_id, "non-positive depth")
 
         vario_age = now - float(vertical_speed_received_at_s)
         if vario_age < 0.0 or vario_age > VARIO_STALE_TIMEOUT_S:
-            return self._safe_result(observation.frame_id, "vertical speed stale")
+            return self._abort_result(observation.frame_id, "vertical speed stale")
 
         new_frame = observation.frame_id != self._last_frame_id
         feedback_active = self._vx_measured is not None
@@ -160,12 +303,26 @@ class GlideController:
             self._yaw_max,
         )
         channels = self._make_channels(pitch, yaw_rate, self._throttle_correction)
-        return GlideControlResult(
+        result = GlideControlResult(
             tuple(channels), observation.frame_id, vx_desired, self._vx_measured,
             vy_desired, float(vertical_speed_m_s), pitch_ff,
             self._pitch_feedback, pitch, yaw_rate, self._throttle_correction,
             feedback_active, pitch_saturated, throttle_saturated, True,
+            reason=observation.reason,
+            phase=self.phase,
         )
+        if (
+            allow_commit
+            and
+            float(observation.depth_m) <= self._commit_depth_m
+            and abs(float(observation.ex)) <= self._center_deadband
+            and abs(float(observation.ey)) <= self._center_deadband
+        ):
+            self.phase = GlidePhase.COMMIT
+            self._commit_started_at_s = now
+            self._frozen_result = replace(result, phase=GlidePhase.COMMIT)
+            return self._frozen_result
+        return result
 
     def _update_forward(self, observation: GlideObservation) -> bool:
         depth = float(observation.depth_m)
@@ -231,12 +388,16 @@ class GlideController:
             output = max(lower, min(upper, output_sign * (kp * error + ki * integral)))
         return output, integral, saturated
 
-    def _safe_result(self, frame_id: int | None, reason: str) -> GlideControlResult:
-        self.reset()
+    def _abort_result(self, frame_id: int | None, reason: str) -> GlideControlResult:
+        self.abort(reason)
+        return self._neutral_result(frame_id, reason)
+
+    def _neutral_result(self, frame_id: int | None, reason: str) -> GlideControlResult:
         channels = self._make_channels(0.0, 0.0, 0.0)
         return GlideControlResult(tuple(channels), frame_id, 0.0, None, 0.0, 0.0,
                                   0.0, 0.0, 0.0, 0.0, 0.0, False, False,
-                                  False, False, reason)
+                                  False, False, reason, self.phase,
+                                  self.abort_reason)
 
     def _make_channels(self, pitch_deg: float, yaw_rate: float, throttle_correction: float) -> list[int]:
         channels = [RC_MID] * NO_RC_CHANNELS

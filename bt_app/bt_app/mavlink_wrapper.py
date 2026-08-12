@@ -14,7 +14,7 @@ from bt_app.common import MavSeverity
 from bt_app.context import Context
 from bt_app.parameters.mavlink import MavlinkParameterProtocol, MavlinkParameterResponse
 from bt_app.parameters.service import ParameterService
-from bt_app.scheduler import Command, CommandScheduler, SchedulerContext
+from bt_app.scheduler import Command, CommandScheduler, ScheduledCommand, SchedulerContext
 from bt_app.visual_mavlink import (
     V2_EXTENSION_RED_DETECTION_MESSAGE_TYPE,
     VisualMavlinkCodecError,
@@ -294,7 +294,13 @@ class MavlinkService:
         self._scheduler.submit(SendTextToGcsCommand(self, text, severity))
 
     def send_named_value_to_gcs(self, name, value):
-        self._scheduler.submit(NamedValueFloatCommand(self, name, value))
+        command = NamedValueFloatCommand(self, name, value)
+        self._scheduler.submit(
+            ScheduledCommand(
+                command=command,
+                key_override=f"mavlink_named_value_float:{name}",
+            )
+        )
 
     def _open_socket(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

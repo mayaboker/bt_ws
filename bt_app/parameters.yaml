@@ -79,7 +79,7 @@ parameters:
       max: 10.0
   GLIDE_PITCH_FF:
     type: float
-    default: -20.0
+    default: -25.0
     limits: {min: -60.0, max: 0.0}
   GLIDE_PITCH_MAX:
     type: float
@@ -175,7 +175,7 @@ parameters:
       max: 200.0
   TAKEOFF_ALT:
     type: float
-    default: 10.0
+    default: 5.0
     limits:
       min: 0.0
       max: 200.0

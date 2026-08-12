@@ -69,6 +69,8 @@ and diagnostics.
 Completion gate: end-to-end application tests cover acquisition, engagement,
 tracking loss, command freeze, timeout, abort, and failsafe precedence.
 
+Design and test procedure: [milestone 3 — guarded application integration](glide_slant_milestone_3_integration.md)
+
 ### 4. Simulation commissioning
 
 Run no-wind, no-distortion intercepts with the maximum forward speed staged at
@@ -91,7 +93,7 @@ not required.
 | Vertical-speed limit | 3 m/s |
 | Center deadband | 0.05 normalized radius |
 | Maximum centering error | 0.40 normalized radius |
-| Consecutive lock frames | 5 |
+| Consecutive lock frames | 2 |
 | Tracker timeout | 0.25 s |
 | Commit depth | 1.0 m |
 | Commit timeout | 1.0 s |

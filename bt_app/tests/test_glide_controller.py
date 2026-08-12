@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 
-from bt_app.control.glide_controller import GlideControlResult, GlideController
+from bt_app.control.glide_controller import GlideControlResult, GlideController, GlidePhase
 from bt_app.control.rc_mapper import BetaflightRcMapper
 from bt_app.estimators import GlideObservation
 from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RCChannel_alias as RCChannel
@@ -48,6 +48,11 @@ def observation(frame=1, received=1.0, depth=10.0, ex=0.0, ey=0.0,
 
 
 def update(controller, obs, *, vario=0.0, vario_time=None, now=None):
+    if controller.phase == GlidePhase.IDLE:
+        controller.begin_acquisition()
+        for frame_id in range(-controller._lock_frame_count, 0):
+            controller.observe_acquisition(replace(observation(), frame_id=frame_id))
+        assert controller.engage()
     sample = obs.received_at_s if vario_time is None else vario_time
     current = sample if now is None else now
     return controller.update(
@@ -91,8 +96,8 @@ def test_three_sample_median_then_ema_rejects_depth_velocity_spike():
     controller = GlideController(Params())
     update(controller, observation(1, 1.0, 10.0))
     update(controller, observation(2, 2.0, 9.0))       # raw 1
-    update(controller, observation(3, 3.0, 1.0))       # raw 8
-    result = update(controller, observation(4, 4.0, 0.5))  # raw .5, median 1
+    update(controller, observation(3, 3.0, 2.0))       # raw 7
+    result = update(controller, observation(4, 4.0, 1.5))  # raw .5, median 1
     assert result.vx_measured_m_s < 2.0
 
 
@@ -117,15 +122,14 @@ def test_yaw_deadband_direction_and_limit():
     assert saturated.yaw_rate_dps <= 20.0
 
 
-def test_invalid_or_stale_input_returns_neutral_hover_and_resets():
+def test_short_invalid_input_is_held_but_stale_vario_aborts():
     controller = GlideController(Params())
     update(controller, observation())
     invalid = update(controller, replace(observation(), valid=False, reason="lost"))
-    assert not invalid.valid and invalid.reason == "lost"
-    assert invalid.channels[RCChannel.PITCH] == RC_MID
-    assert invalid.channels[RCChannel.YAW] == RC_MID
-    assert invalid.channels[RCChannel.THROTTLE] == 1660
+    assert invalid.valid
+    assert controller.phase == GlidePhase.TRACK
     assert invalid.channels[RCChannel.ARM] == RC_MAX
+    controller.reset()
     stale = update(controller, observation(), vario_time=0.0, now=1.0)
     assert not stale.valid and stale.reason == "vertical speed stale"
 
@@ -177,3 +181,112 @@ def test_angle_mapper_clamps_physical_attitude_and_validates_limit():
     assert mapper.angle_to_rc(-120.0, angle_limit_deg=60.0) == 1000
     with pytest.raises(ValueError, match="angle_limit_deg"):
         mapper.angle_to_rc(1.0, angle_limit_deg=0.0)
+
+
+def test_acquisition_requires_distinct_consecutive_centered_frames():
+    controller = GlideController(
+        Params(), lock_frame_count=3, acquisition_error_max=0.10
+    )
+    controller.begin_acquisition()
+    assert not controller.observe_acquisition(observation(1, ex=0.0))
+    assert controller.acquisition_count == 1
+    assert not controller.observe_acquisition(observation(1, ex=0.8))
+    assert controller.acquisition_count == 1
+    assert not controller.observe_acquisition(observation(2, ex=0.2))
+    assert controller.acquisition_count == 0
+    assert not controller.observe_acquisition(observation(3))
+    assert not controller.observe_acquisition(observation(4))
+    assert controller.observe_acquisition(observation(5))
+    assert controller.engage()
+    assert controller.phase == GlidePhase.TRACK
+
+
+def test_acquisition_accepts_target_outside_full_speed_deadband():
+    controller = GlideController(
+        Params(),
+        center_deadband=0.05,
+        acquisition_error_max=0.40,
+        lock_frame_count=2,
+    )
+    controller.begin_acquisition()
+
+    assert not controller.observe_acquisition(observation(1, ex=0.30, ey=0.10))
+    assert controller.observe_acquisition(observation(2, ex=0.30, ey=0.10))
+    assert controller.engage()
+
+
+def test_acquisition_rejects_target_outside_maximum_centering_region():
+    controller = GlideController(
+        Params(), acquisition_error_max=0.40, lock_frame_count=1
+    )
+    controller.begin_acquisition()
+
+    assert not controller.observe_acquisition(observation(1, ex=0.40, ey=0.10))
+    assert controller.acquisition_count == 0
+
+
+def test_commit_freezes_complete_command_and_times_out_to_neutral():
+    controller = GlideController(
+        Params(), lock_frame_count=1, commit_depth_m=1.0, commit_timeout_s=1.0
+    )
+    first = update(controller, observation(1, 1.0, 0.9), now=1.0)
+    assert first.phase == GlidePhase.COMMIT
+    frozen = update(controller, observation(2, 1.1, 0.2, ex=0.9), now=1.5)
+    assert frozen is first
+    timed_out = update(controller, observation(3, 2.1, 0.1), now=2.01)
+    assert timed_out.phase == GlidePhase.COMMIT_TIMEOUT
+    assert timed_out.channels[RCChannel.PITCH] == RC_MID
+    assert not timed_out.valid
+
+
+def test_track_input_failure_aborts_and_returns_one_neutral_command():
+    controller = GlideController(Params(), lock_frame_count=1)
+    result = update(
+        controller, replace(observation(), valid=False, reason="target lost")
+    )
+    assert controller.phase == GlidePhase.ABORTED
+    assert result.abort_reason == "target lost"
+    assert result.channels[RCChannel.PITCH] == RC_MID
+
+
+def test_short_invalid_visual_holds_last_vector_and_new_centering_error():
+    controller = GlideController(Params(), lock_frame_count=1)
+    valid = update(controller, observation(1, 1.0, 10.0, ex=0.20), now=1.0)
+    degraded = GlideObservation.invalid(
+        "width/height depth disagreement",
+        frame_id=2,
+        received_at_s=1.1,
+        age_s=0.0,
+        ex=-0.20,
+        ey=0.10,
+        centering_error=0.22,
+    )
+
+    held = update(controller, degraded, now=1.1, vario_time=1.1)
+
+    assert controller.phase == GlidePhase.TRACK
+    assert held.valid
+    assert held.vx_desired_m_s == valid.vx_desired_m_s
+    assert held.yaw_rate_dps < 0.0
+
+
+def test_invalid_visual_aborts_after_hold_timeout():
+    controller = GlideController(Params(), lock_frame_count=1)
+    update(controller, observation(1, 1.0, 10.0), now=1.0)
+    invalid = GlideObservation.invalid(
+        "target not found", frame_id=2, received_at_s=1.4, age_s=0.0
+    )
+
+    result = update(controller, invalid, now=1.4, vario_time=1.4)
+
+    assert controller.phase == GlidePhase.ABORTED
+    assert not result.valid
+    assert result.abort_reason == "target not found"
+
+
+def test_ordinary_abort_is_ignored_after_commit():
+    controller = GlideController(Params(), lock_frame_count=1)
+    committed = update(controller, observation(depth=0.9), now=1.0)
+    controller.abort("switch released")
+    assert controller.phase == GlidePhase.COMMIT
+    assert update(controller, observation(depth=0.5), now=1.2) is committed

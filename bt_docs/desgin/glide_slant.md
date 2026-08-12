@@ -150,13 +150,16 @@ angle    = enabled
 
 ## Intercept phases
 
+Implementation detail: [milestone 3 — guarded application integration](glide_slant_milestone_3_integration.md)
+
 ![Intercept phase state machine](images/glide_slant_state_machine.svg)
 
 ### ACQUIRE
 
 - Hold position with neutral pitch.
 - Require a configured number of consecutive valid detections.
-- Require radial centering error inside the configured engagement threshold.
+- Accept radial centering error up to `center_error_max`; TRACK performs final
+  centering before full forward speed or COMMIT.
 - Reset velocity filters and controller integrators when acquisition begins.
 
 ### TRACK
@@ -187,7 +190,7 @@ All values must be finite and validated before enabling the intercept:
 
 | Parameter | Meaning |
 | --- | --- |
-| `vx_max` | Maximum forward request; initially 15 m/s |
+| `vx_max` | Maximum forward request; staged at 2 m/s before 15 m/s commissioning |
 | `vy_max` | Symmetric climb/descent speed limit |
 | `pitch_at_vx_max` | Calibrated pitch RC deflection at `vx_max` |
 | `pitch_min`, `pitch_max` | Safe pitch RC bounds |
@@ -206,7 +209,7 @@ All values must be finite and validated before enabling the intercept:
 
 - With a centered, stationary cube and no wind, the controller enters `TRACK`
   only after the configured lock sequence.
-- Forward speed never exceeds 15 m/s.
+- Forward speed never exceeds the configured staged limit.
 - Increasing centering error smoothly reduces the forward request.
 - The cube remains inside the configured center-error bound until `COMMIT`.
 - Forward PI state changes only on new tracker timestamps and does not wind up
@@ -224,4 +227,3 @@ All values must be finite and validated before enabling the intercept:
 3. Add collision sensing and centered-impact scoring.
 4. Replace linear pitch feedforward with a calibrated curve if simulation logs
    show significant model error.
-

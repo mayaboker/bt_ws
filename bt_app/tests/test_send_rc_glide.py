@@ -13,23 +13,26 @@ sys.modules[SPEC.name] = glide
 SPEC.loader.exec_module(glide)
 
 
-def test_glide_request_reuses_takeoff_switch_with_centered_throttle():
+def test_glide_request_selects_tracking_and_reuses_takeoff_switch():
     channels = glide.GLIDE_REQUEST_ARMED
 
     assert channels[glide.AUTO_TAKEOFF] == glide.RC_MAX
+    assert channels[glide.TRACKER_MODE] == glide.RC_MAX
     assert channels[2] == 1500
     assert channels[4] == glide.RC_MAX
+    assert glide.TRACKING_GLIDE_RELEASED[glide.AUTO_TAKEOFF] == 1000
+    assert glide.TRACKING_GLIDE_RELEASED[glide.TRACKER_MODE] == glide.RC_MAX
 
 
 def test_glide_diagnostic_has_dedicated_parameters():
-    assert "GLIDE_DESC_RATE" in glide.GlideDiagnosticScenario.PARAMETERS
-    assert "GLIDE_VEL_KP" in glide.GlideDiagnosticScenario.PARAMETERS
-    assert "GLIDE_FLARE_RATE" in glide.GlideDiagnosticScenario.PARAMETERS
-    assert "GLIDE_OUT_LIMIT" in glide.GlideDiagnosticScenario.FIELDNAMES
+    assert "GLIDE_PITCH_FF" in glide.GlideDiagnosticScenario.PARAMETERS
+    assert "GLIDE_VX_KP" in glide.GlideDiagnosticScenario.PARAMETERS
+    assert "GLIDE_YAW_KP" in glide.GlideDiagnosticScenario.PARAMETERS
+    assert "GLIDE_VY_OUT" in glide.GlideDiagnosticScenario.FIELDNAMES
 
 
-def test_glide_requests_twenty_meter_takeoff_altitude():
-    assert glide.REQUEST_TAKEOFF_ALT_M == 20.0
+def test_glide_requests_ten_meter_takeoff_altitude():
+    assert glide.REQUEST_TAKEOFF_ALT_M == 10.0
 
 
 def test_takeoff_altitude_restore_only_clears_saved_value_after_success(

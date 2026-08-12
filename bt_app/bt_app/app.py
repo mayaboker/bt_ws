@@ -16,6 +16,7 @@ from bt_app.control import (
 from bt_app.control import (
     FailSafeController,
     GlideController,
+    GlidePhase,
     TakeoffController,
     ARMController,
     HoverYawController,
@@ -120,6 +121,8 @@ class App:
             self._manual_land_detection_started_notified = False
             self._manual_land_confirmed_notified = False
             self._glide_switch_armed = False
+            self._glide_switch_high = False
+            self._glide_last_diagnostic_s = float("-inf")
             self._glide_range_was_valid = False
             self._glide_last_range_frame_id: int | None = None
             self._glide_last_range_log_s = float("-inf")
@@ -207,6 +210,9 @@ class App:
             "tracker_result_timeout_s": self.config.tracker_result_timeout_s,
             "glide_target_speed_m_s": self.config.glide_target_speed_m_s,
             "glide_max_vertical_speed_m_s": self.config.glide_max_vertical_speed_m_s,
+            "glide_commit_depth_m": self.config.glide_commit_depth_m,
+            "glide_commit_timeout_s": self.config.glide_commit_timeout_s,
+            "glide_diagnostic_rate_hz": self.config.glide_diagnostic_rate_hz,
         }
         if not self.config.tracker_request_endpoint:
             raise AppStartupError("Tracker request endpoint must not be empty")
@@ -215,6 +221,8 @@ class App:
                 raise AppStartupError(
                     f"{name} must be finite and greater than zero"
                 )
+        if int(self.config.glide_lock_frame_count) <= 0:
+            raise AppStartupError("glide_lock_frame_count must be positive")
         if not 0 <= self.config.tracker_adjust_deadband_pwm < 500:
             raise AppStartupError("tracker_adjust_deadband_pwm must be between 0 and 499")
         center_deadband = float(self.config.glide_center_deadband)
@@ -425,9 +433,6 @@ class App:
         if not detection.found:
             self._set_invalid_glide_observation("target not found", **metadata)
             return
-        if not detection.locked:
-            self._set_invalid_glide_observation("target not locked", **metadata)
-            return
         if detection.width <= 0 or detection.height <= 0:
             self._set_invalid_glide_observation("non-positive bounding box", **metadata)
             return
@@ -443,13 +448,6 @@ class App:
             )
             return
 
-        range_estimate = estimator.update(detection)
-        if not range_estimate.valid or range_estimate.distance_m is None:
-            self._set_invalid_glide_observation(
-                range_estimate.reason or "invalid range estimate", **metadata
-            )
-            return
-
         center_x = detection.x + detection.width / 2.0
         center_y = detection.y + detection.height / 2.0
         ex = (center_x - intrinsics.cx_px) / (intrinsics.image_width_px / 2.0)
@@ -457,6 +455,20 @@ class App:
         ex = max(-1.0, min(1.0, ex))
         ey = max(-1.0, min(1.0, ey))
         centering_error = min(1.0, math.hypot(ex, ey))
+        visual_metadata = {
+            **metadata,
+            "bbox": (detection.x, detection.y, detection.width, detection.height),
+            "ex": ex,
+            "ey": ey,
+            "centering_error": centering_error,
+        }
+
+        range_estimate = estimator.update(detection)
+        if not range_estimate.valid or range_estimate.distance_m is None:
+            self._set_invalid_glide_observation(
+                range_estimate.reason or "invalid range estimate", **visual_metadata
+            )
+            return
         depth_m = range_estimate.distance_m
         vertical_offset_m = (intrinsics.cy_px - center_y) * depth_m / intrinsics.fy_px
         vector = self._glide_velocity_estimator.update(
@@ -473,7 +485,7 @@ class App:
 
         observation = GlideObservation(
             **metadata,
-            bbox=(detection.x, detection.y, detection.width, detection.height),
+            bbox=visual_metadata["bbox"],
             ex=ex,
             ey=ey,
             centering_error=centering_error,
@@ -559,6 +571,10 @@ class App:
             self.__params,
             max_vertical_speed_m_s=self.config.glide_max_vertical_speed_m_s,
             center_deadband=self.config.glide_center_deadband,
+            acquisition_error_max=self.config.glide_center_error_max,
+            lock_frame_count=self.config.glide_lock_frame_count,
+            commit_depth_m=self.config.glide_commit_depth_m,
+            commit_timeout_s=self.config.glide_commit_timeout_s,
         )
 
         # arm controller
@@ -659,16 +675,19 @@ class App:
 
             case RobotState.GLIDE:
                 controller = self.controllers[RobotState.GLIDE]
-                controller.reset()
+                if not controller.engage():
+                    controller.abort("acquisition lock lost before engagement")
                 self.ctx.glide_velocity_setpoint = 0.0
                 self.ctx.joy_glide_request = False
-                self.ctx.glide_landed = False
+                self.ctx.glide_ready = False
+                self.ctx.glide_phase = controller.phase.value
+                self.ctx.glide_abort_reason = controller.abort_reason
                 self.ctx.target_distance_m = None
                 self._glide_range_was_valid = False
                 self._glide_last_range_frame_id = None
                 self._glide_last_range_log_s = float("-inf")
                 self._glide_last_range_mavlink_s = float("-inf")
-                log.warning("forced GLIDE entry remains gated until milestone 3")
+                log.info("GLIDE engaged phase={}", controller.phase.value)
 
             case RobotState.FAILSAFE:
                 # set the failsafe controller setpoint to the current altitude
@@ -717,18 +736,18 @@ class App:
         previous_glide_switch_high = (
             prev_channels[InternalJoy.AUTO_TAKE_OFF] == RC_MAX
         )
+        self._glide_switch_high = glide_switch_high
         if self.ctx.state == RobotState.ALT_HOLD:
             if not glide_switch_high:
                 self._glide_switch_armed = True
             elif self._glide_switch_armed and not previous_glide_switch_high:
-                self.ctx.joy_glide_request = False
                 self._glide_switch_armed = False
-                message = "GLIDE disabled until milestone 3 safety integration"
-                log.warning(message)
-                if hasattr(self, "mavlink_service"):
-                    self.mavlink_service.send_text_to_gcs(
-                        message, MavSeverity.WARNING
-                    )
+                self._request_glide_acquisition()
+        elif self.ctx.state == RobotState.GLIDE and not glide_switch_high:
+            controller = self.controllers[RobotState.GLIDE]
+            if controller.phase == GlidePhase.TRACK:
+                controller.abort("glide switch released")
+                self._sync_glide_context()
         now = time.monotonic()
         self._handle_tracker_mode(previous_mode, requested_mode, now)
 
@@ -1158,8 +1177,27 @@ class App:
         """
         update/keep the controllers with the current context
         """
-        if self.ctx.drone_rc is not None:
-            pass
+        controller = self.controllers.get(RobotState.GLIDE)
+        if controller is None:
+            return
+        if controller.phase == GlidePhase.ACQUIRE:
+            if self.ctx.state != RobotState.ALT_HOLD:
+                controller.abort("left altitude hold during acquisition")
+            elif self.ctx.auto_mode_type != AutoModeType.TRACKING:
+                controller.abort("tracker selector changed during acquisition")
+            elif not self._tracker_session_active:
+                controller.abort("tracker session lost during acquisition")
+            elif not self._glide_switch_high:
+                controller.abort("glide switch released during acquisition")
+            else:
+                controller.observe_acquisition(self._glide_observation)
+        elif controller.phase == GlidePhase.TRACK:
+            if self.ctx.auto_mode_type != AutoModeType.TRACKING:
+                controller.abort("tracker selector changed during track")
+            elif not self._tracker_session_active:
+                controller.abort("tracker session lost during track")
+        self._sync_glide_context()
+        self._log_glide_diagnostic(time.monotonic())
             #TODO: to understand why base 3
             # AETR - roll, pitch, throttle, yaw, aux1, aux2, aux3, aux4
             # AERT - roll, pitch, yaw, throttle, aux1, aux2, aux3, aux4
@@ -1218,8 +1256,100 @@ class App:
         return self.controllers[RobotState.ARM].update()
 
     def glide_handler(self):
-        """Return neutral ALT_HOLD output if GLIDE is forced before milestone 3."""
-        return self._tracking_alt_hold_fallback()
+        """Run one guarded visual-intercept cycle and expose its diagnostics."""
+        controller = self.controllers.get(RobotState.GLIDE)
+        if controller is None:
+            log.error("GLIDE selected without a glide controller; using ALT_HOLD")
+            return self._tracking_alt_hold_fallback()
+        now = time.monotonic()
+        result = controller.update(
+            self._glide_observation,
+            vertical_speed_m_s=self.ctx.drone_vertical_speed,
+            vertical_speed_received_at_s=self.ctx.drone_alt_received_at_s,
+            now_s=now,
+        )
+        self.ctx.glide_control_result = result
+        self.ctx.glide_velocity_setpoint = result.vy_desired_m_s
+        self._sync_glide_context()
+        self._update_glide_range_telemetry(self._visual_range_estimator, now)
+        return list(result.channels)
+
+    def _request_glide_acquisition(self) -> None:
+        """Accept a rising-edge request only when all entry inputs are valid."""
+        prerequisites = (
+            self.ctx.state == RobotState.ALT_HOLD
+            and self.ctx.armed
+            and self.ctx.auto_mode_type == AutoModeType.TRACKING
+            and self._tracker_session_active
+            and self._glide_observation.valid
+        )
+        if not prerequisites:
+            message = "GLIDE acquisition rejected: entry prerequisites unavailable"
+            log.warning(message)
+            if hasattr(self, "mavlink_service"):
+                self.mavlink_service.send_text_to_gcs(message, MavSeverity.WARNING)
+            return
+        self.controllers[RobotState.GLIDE].begin_acquisition()
+        self.ctx.joy_glide_request = True
+        self._sync_glide_context()
+
+    def _sync_glide_context(self) -> None:
+        controller = self.controllers[RobotState.GLIDE]
+        self.ctx.glide_phase = controller.phase.value
+        self.ctx.glide_abort_reason = controller.abort_reason
+        self.ctx.glide_ready = controller.ready_to_engage
+
+    def _log_glide_diagnostic(self, now_s: float) -> None:
+        period = 1.0 / float(self.config.glide_diagnostic_rate_hz)
+        if now_s - self._glide_last_diagnostic_s < period:
+            return
+        controller = self.controllers[RobotState.GLIDE]
+        result = self.ctx.glide_control_result
+        observation = self._glide_observation
+        snapshot = self._tracker_manager.get_result()
+        detection = None if snapshot is None else snapshot.detection
+        reason_codes = {
+            None: 0,
+            "no tracker result": 1,
+            "target not found": 2,
+            "visual observation stale": 3,
+            "invalid receipt timestamp": 4,
+            "non-monotonic visual frame": 5,
+            "non-positive bounding box": 6,
+            "bounding box clipped by image edge": 7,
+            "width/height depth disagreement": 8,
+            "non-finite depth": 9,
+            "visual estimator unavailable": 10,
+        }
+        phase_codes = {phase: index for index, phase in enumerate(GlidePhase)}
+        values = {
+            NamedValue.TARGET_DISTANCE: (
+                math.nan if observation.depth_m is None else float(observation.depth_m)
+            ),
+            NamedValue.VISUAL_FOUND: float(bool(detection and detection.found)),
+            NamedValue.VISUAL_LOCKED: float(bool(detection and detection.locked)),
+            NamedValue.VISUAL_FRAME: math.nan if detection is None else float(detection.frame_id),
+            NamedValue.VISUAL_AGE: math.nan if observation.age_s is None else float(observation.age_s),
+            NamedValue.VISUAL_ERROR_X: math.nan if observation.ex is None else float(observation.ex),
+            NamedValue.VISUAL_ERROR_Y: math.nan if observation.ey is None else float(observation.ey),
+            NamedValue.OBSERVATION_VALID: float(observation.valid),
+            NamedValue.OBSERVATION_REASON: float(reason_codes.get(observation.reason, 99)),
+            NamedValue.GLIDE_ACQUISITION_COUNT: float(controller.acquisition_count),
+            NamedValue.GLIDE_PHASE: float(phase_codes[controller.phase]),
+        }
+        for name, value in values.items():
+            self.mavlink_service.send_named_value_to_gcs(name, value)
+        # log.info(
+        #     "GLIDE phase={} lock={}/{} frame={} valid={} reason={} abort={}",
+        #     controller.phase.value,
+        #     controller.acquisition_count,
+        #     self.config.glide_lock_frame_count,
+        #     getattr(result, "frame_id", observation.frame_id),
+        #     getattr(result, "valid", observation.valid),
+        #     getattr(result, "reason", observation.reason),
+        #     controller.abort_reason,
+        # )
+        self._glide_last_diagnostic_s = now_s
 
     def _update_glide_range_telemetry(self, estimator, now_s: float) -> None:
         estimate = getattr(estimator, "estimate", None)

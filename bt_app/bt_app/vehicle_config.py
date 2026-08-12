@@ -47,10 +47,14 @@ class VehicleConfig():
     tracker_adjust_deadband_pwm: int = field(default=100)
     tracker_bridge_health_timeout_s: float = field(default=1.0)
     tracker_result_timeout_s: float = field(default=0.25)
-    glide_target_speed_m_s: float = field(default=15.0)
+    glide_target_speed_m_s: float = field(default=2.0)
     glide_max_vertical_speed_m_s: float = field(default=3.0)
     glide_center_deadband: float = field(default=0.05)
     glide_center_error_max: float = field(default=0.40)
+    glide_lock_frame_count: int = field(default=2)
+    glide_commit_depth_m: float = field(default=1.0)
+    glide_commit_timeout_s: float = field(default=1.0)
+    glide_diagnostic_rate_hz: float = field(default=5.0)
 
     # region singleton
     _instance = None

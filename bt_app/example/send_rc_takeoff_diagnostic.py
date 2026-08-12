@@ -40,6 +40,24 @@ CHANNEL_STATUS_MESSAGE_TYPE = 1
 CHANNEL_STATUS_VERSION = 1
 CHANNEL_STATUS_FORMAT = "<BBBH8H"
 CHANNEL_STATUS_SIZE = struct.calcsize(CHANNEL_STATUS_FORMAT)
+GLIDE_PHASE_NAMES = {
+    0: "idle", 1: "acquire", 2: "track", 3: "commit",
+    4: "aborted", 5: "commit_timeout",
+}
+OBSERVATION_REASON_NAMES = {
+    0: None,
+    1: "no tracker result",
+    2: "target not found",
+    3: "visual observation stale",
+    4: "invalid receipt timestamp",
+    5: "non-monotonic visual frame",
+    6: "non-positive bounding box",
+    7: "bounding box clipped by image edge",
+    8: "width/height depth disagreement",
+    9: "non-finite depth",
+    10: "visual estimator unavailable",
+    99: "other",
+}
 PARAMETERS = (
     "TAKEOFF_ALT",
     "TAKEOFF_RATE",
@@ -104,6 +122,16 @@ class DiagnosticTelemetry(Telemetry):
         self.altitude_setpoint_m: float | None = None
         self.vertical_speed_setpoint_m_s: float | None = None
         self.target_distance_m: float | None = None
+        self.visual_found: bool | None = None
+        self.visual_locked: bool | None = None
+        self.visual_frame_id: int | None = None
+        self.visual_age_s: float | None = None
+        self.visual_error_x: float | None = None
+        self.visual_error_y: float | None = None
+        self.observation_valid: bool | None = None
+        self.observation_reason_code: int | None = None
+        self.acquisition_count: int | None = None
+        self.glide_phase_code: int | None = None
 
     def consume(self, message: Any) -> bool:
         changed = super().consume(message)
@@ -135,6 +163,30 @@ class DiagnosticTelemetry(Telemetry):
             elif name == "tgt_dist":
                 value = float(message.value)
                 self.target_distance_m = value if math.isfinite(value) else None
+            elif name == "vis_found":
+                self.visual_found = bool(round(float(message.value)))
+            elif name == "vis_locked":
+                self.visual_locked = bool(round(float(message.value)))
+            elif name == "vis_frame":
+                value = float(message.value)
+                self.visual_frame_id = int(value) if math.isfinite(value) else None
+            elif name == "vis_age":
+                value = float(message.value)
+                self.visual_age_s = value if math.isfinite(value) else None
+            elif name == "vis_ex":
+                value = float(message.value)
+                self.visual_error_x = value if math.isfinite(value) else None
+            elif name == "vis_ey":
+                value = float(message.value)
+                self.visual_error_y = value if math.isfinite(value) else None
+            elif name == "obs_valid":
+                self.observation_valid = bool(round(float(message.value)))
+            elif name == "obs_reason":
+                self.observation_reason_code = int(round(float(message.value)))
+            elif name == "acq_count":
+                self.acquisition_count = int(round(float(message.value)))
+            elif name == "gld_phase":
+                self.glide_phase_code = int(round(float(message.value)))
         elif message_type == "RC_CHANNELS":
             channel_count = min(8, int(message.chancount))
             channels = tuple(
@@ -201,6 +253,19 @@ class TakeoffDiagnosticScenario(MavlinkRcScenario):
         "output_roll_pwm",
         "output_pitch_pwm",
         "output_yaw_pwm",
+        "target_distance_m",
+        "visual_found",
+        "visual_locked",
+        "visual_frame_id",
+        "visual_age_s",
+        "visual_error_x",
+        "visual_error_y",
+        "observation_valid",
+        "observation_reason_code",
+        "observation_reason",
+        "acquisition_count",
+        "glide_phase_code",
+        "glide_phase",
         *PARAMETERS,
     )
 
@@ -401,11 +466,12 @@ class TakeoffDiagnosticScenario(MavlinkRcScenario):
             if baseline is None or output is None
             else output[THROTTLE] - baseline
         )
-        limit_name = (
-            "GLIDE_OUT_LIMIT"
-            if "GLIDE_OUT_LIMIT" in self.PARAMETERS
-            else "ALT_OUT_LIMIT"
-        )
+        if "GLIDE_VY_OUT" in self.PARAMETERS:
+            limit_name = "GLIDE_VY_OUT"
+        elif "GLIDE_OUT_LIMIT" in self.PARAMETERS:
+            limit_name = "GLIDE_OUT_LIMIT"
+        else:
+            limit_name = "ALT_OUT_LIMIT"
         limit = self.parameter_values.get(limit_name)
         saturated = (
             correction is not None
@@ -442,6 +508,23 @@ class TakeoffDiagnosticScenario(MavlinkRcScenario):
             "output_roll_pwm": None if output is None else output[0],
             "output_pitch_pwm": None if output is None else output[1],
             "output_yaw_pwm": None if output is None else output[3],
+            "target_distance_m": self.telemetry.target_distance_m,
+            "visual_found": self.telemetry.visual_found,
+            "visual_locked": self.telemetry.visual_locked,
+            "visual_frame_id": self.telemetry.visual_frame_id,
+            "visual_age_s": self.telemetry.visual_age_s,
+            "visual_error_x": self.telemetry.visual_error_x,
+            "visual_error_y": self.telemetry.visual_error_y,
+            "observation_valid": self.telemetry.observation_valid,
+            "observation_reason_code": self.telemetry.observation_reason_code,
+            "observation_reason": OBSERVATION_REASON_NAMES.get(
+                self.telemetry.observation_reason_code, "unknown"
+            ),
+            "acquisition_count": self.telemetry.acquisition_count,
+            "glide_phase_code": self.telemetry.glide_phase_code,
+            "glide_phase": GLIDE_PHASE_NAMES.get(
+                self.telemetry.glide_phase_code, "unknown"
+            ),
         }
         row.update({name: self.parameter_values.get(name) for name in self.PARAMETERS})
         self._csv_writer.writerow(row)

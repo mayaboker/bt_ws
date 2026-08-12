@@ -57,6 +57,10 @@ class Context:
     alt_setpoint: float = 0.0
     glide_velocity_setpoint: float = 0.0
     target_distance_m: float | None = None
+    glide_phase: str = "idle"
+    glide_abort_reason: str | None = None
+    glide_ready: bool = False
+    glide_control_result: object | None = None
 
     # auto mode enable
     auto_mode_enable: bool = field(default=False)
@@ -109,4 +113,8 @@ class Context:
         self.alt_setpoint = 0.0
         self.glide_velocity_setpoint = 0.0
         self.target_distance_m = None
+        self.glide_phase = "idle"
+        self.glide_abort_reason = None
+        self.glide_ready = False
+        self.glide_control_result = None
     # endregion

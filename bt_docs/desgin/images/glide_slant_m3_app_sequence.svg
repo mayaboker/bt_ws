@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="390" viewBox="0 0 920 390">
+  <defs><marker id="a" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#334155"/></marker></defs>
+  <rect width="920" height="390" fill="#f8fafc"/>
+  <g font-family="sans-serif" fill="#0f172a"><g font-size="16" font-weight="bold" text-anchor="middle"><text x="100" y="30">Tracker</text><text x="320" y="30">App loop</text><text x="570" y="30">GlideController</text><text x="810" y="30">State machine / RC</text></g>
+  <g stroke="#94a3b8" stroke-dasharray="5 5"><path d="M100 45V360"/><path d="M320 45V360"/><path d="M570 45V360"/><path d="M810 45V360"/></g>
+  <g stroke="#334155" stroke-width="2" marker-end="url(#a)"><path d="M100 75H315"/><path d="M320 120H565"/><path d="M570 165H805"/><path d="M810 210H575"/><path d="M570 255H805"/><path d="M810 305H575"/><path d="M570 345H805"/></g>
+  <g font-size="13"><text x="175" y="68">fresh observation</text><text x="400" y="112">observe ACQUIRE</text><text x="660" y="157">ready after frame 2</text><text x="665" y="202">engage TRACK</text><text x="655" y="247">TRACK RC / frozen COMMIT RC</text><text x="665" y="297">abort or timeout detected next cycle</text><text x="665" y="337">neutral RC, return ALT_HOLD</text></g>
+  <text x="320" y="375" font-size="12" text-anchor="middle">ALT_HOLD supplies RC throughout ACQUIRE</text></g>
+</svg>

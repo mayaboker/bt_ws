@@ -133,6 +133,35 @@ def test_named_value_float_decodes_and_clears_target_distance():
     assert telemetry.target_distance_m is None
 
 
+def test_named_value_float_decodes_glide_visual_diagnostics():
+    telemetry = diagnostic.DiagnosticTelemetry()
+
+    for name, value in (
+        ("vis_found", 1.0),
+        ("vis_locked", 0.0),
+        ("vis_frame", 42.0),
+        ("vis_age", 0.03),
+        ("vis_ex", 0.25),
+        ("vis_ey", -0.10),
+        ("obs_valid", 1.0),
+        ("obs_reason", 0.0),
+        ("acq_count", 4.0),
+        ("gld_phase", 1.0),
+    ):
+        telemetry.consume(NamedValueFloatMessage(name, value))
+
+    assert telemetry.visual_found
+    assert not telemetry.visual_locked
+    assert telemetry.visual_frame_id == 42
+    assert telemetry.visual_age_s == pytest.approx(0.03)
+    assert telemetry.visual_error_x == pytest.approx(0.25)
+    assert telemetry.visual_error_y == pytest.approx(-0.10)
+    assert telemetry.observation_valid
+    assert telemetry.observation_reason_code == 0
+    assert telemetry.acquisition_count == 4
+    assert telemetry.glide_phase_code == 1
+
+
 def test_parameter_decoder_reads_real32_directly():
     message = SimpleNamespace(
         param_type=mavutil.mavlink.MAV_PARAM_TYPE_REAL32,

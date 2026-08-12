@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from bt_app.comm.gst_bridge import VisualDetectionMessage
 
 
-MAX_DEPTH_DISAGREEMENT = 0.25
+MAX_DEPTH_DISAGREEMENT = 0.75
 MEDIAN_WINDOW_SIZE = 5
 
 
@@ -99,8 +99,6 @@ class VisualRangeEstimator:
     def _invalid_reason(self, detection: VisualDetectionMessage) -> str | None:
         if not detection.found:
             return "target not found"
-        if not detection.locked:
-            return "target not locked"
         if detection.width <= 0 or detection.height <= 0:
             return "non-positive bounding box"
         if (

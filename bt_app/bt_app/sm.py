@@ -192,11 +192,11 @@ class Robot_StateMachine:
         self.machine.add_transition(
             "resolve",
             RobotState.GLIDE,
-            RobotState.IDLE,
+            RobotState.ALT_HOLD,
             before=lambda x: self.on_before_state_changed.emit(
-                RobotState.GLIDE, RobotState.IDLE
+                RobotState.GLIDE, RobotState.ALT_HOLD
             ),
-            conditions=[self.enter_idle_from_glide],
+            conditions=[self.enter_alt_hold_from_glide],
         )
         # endregion from HOVER
 
@@ -309,11 +309,15 @@ class Robot_StateMachine:
         return  ok
 
     def enter_glide_from_alt_hold(self, event):
-        """Milestone 2 safety gate: TRACK has no phase/abort integration yet."""
-        return False
+        """Enter only after App's visual acquisition gate is complete."""
+        return all([
+            self.ctx.armed,
+            not self.ctx.joy_fail_safe,
+            self.ctx.glide_ready,
+        ])
 
-    def enter_idle_from_glide(self, event):
-        return self.ctx.glide_landed
+    def enter_alt_hold_from_glide(self, event):
+        return self.ctx.glide_phase in {"aborted", "commit_timeout"}
 
     def enter_failsafe(self, event):
         """

@@ -118,7 +118,7 @@ def test_robot_state_uses_stable_integer_values():
     assert RobotState.GLIDE.value == 8
 
 
-def test_alt_hold_rejects_glide_until_milestone_three():
+def test_alt_hold_enters_glide_only_when_acquisition_is_ready():
     ctx = Context()
     machine = Robot_StateMachine(ctx, VehicleConfig())
     machine.machine.set_state(RobotState.ALT_HOLD)
@@ -131,6 +131,10 @@ def test_alt_hold_rejects_glide_until_milestone_three():
     ctx.joy_glide_request = True
     machine.resolve()
     assert ctx.state == RobotState.ALT_HOLD
+
+    ctx.glide_ready = True
+    machine.resolve()
+    assert ctx.state == RobotState.GLIDE
 
 
 def test_glide_has_no_manual_abort_but_enters_failsafe():
@@ -149,17 +153,31 @@ def test_glide_has_no_manual_abort_but_enters_failsafe():
     assert ctx.state == RobotState.FAILSAFE
 
 
-def test_glide_landing_transitions_to_idle():
+def test_glide_failsafe_has_priority_over_abort_return_to_alt_hold():
     ctx = Context()
     machine = Robot_StateMachine(ctx, VehicleConfig())
     machine.machine.set_state(RobotState.GLIDE)
     ctx.state = RobotState.GLIDE
-    ctx.armed = False
-    ctx.glide_landed = True
+    ctx.armed = True
+    ctx.joy_fail_safe = True
+    ctx.glide_phase = "aborted"
 
     machine.resolve()
 
-    assert ctx.state == RobotState.IDLE
+    assert ctx.state == RobotState.FAILSAFE
+
+
+def test_glide_abort_transitions_to_alt_hold():
+    ctx = Context()
+    machine = Robot_StateMachine(ctx, VehicleConfig())
+    machine.machine.set_state(RobotState.GLIDE)
+    ctx.state = RobotState.GLIDE
+    ctx.armed = True
+    ctx.glide_phase = "aborted"
+
+    machine.resolve()
+
+    assert ctx.state == RobotState.ALT_HOLD
 
 
 def test_context_state_defaults_to_robot_state_member():
@@ -296,10 +314,13 @@ def test_failsafe_entry_uses_hover_baseline_parameter():
     assert controller.baseline == 1400
 
 
-def test_forced_glide_entry_resets_isolated_controller():
+def test_glide_entry_engages_acquired_controller():
     app = make_app_with_context()
     app._glide_switch_armed = True
     controller = FakeController([1500] * 8)
+    controller.phase = SimpleNamespace(value="acquire")
+    controller.abort_reason = None
+    controller.engage = lambda: True
     app.controllers[RobotState.GLIDE] = controller
     app.ctx.drone_alt = 7.5
     app.ctx.drone_vertical_speed = -0.2
@@ -308,19 +329,19 @@ def test_forced_glide_entry_resets_isolated_controller():
     app._handle_before_state_changed(RobotState.ALT_HOLD, RobotState.GLIDE)
 
     assert controller.reset_altitude is None
-    assert controller.reset_kwargs == {}
     assert app.ctx.glide_velocity_setpoint == 0.0
     assert not app.ctx.joy_glide_request
     assert not app.ctx.glide_landed
 
 
-def test_glide_request_is_rejected_after_release_then_rising_edge():
+def test_glide_request_is_rejected_without_entry_prerequisites():
     app = make_app_with_context()
     app.ctx.state = RobotState.ALT_HOLD
     app._last_rc_channel = [1500, 1500, 1500, 1500, 2000, 2000, 2000, 1000, 1000]
     app._glide_switch_armed = False
     app._handle_tracker_mode = lambda *_: None
     app._send_tracker_adjustment = lambda *_: None
+    app._request_glide_acquisition = lambda: None
 
     def event(auto_takeoff):
         channels = list(app._last_rc_channel)

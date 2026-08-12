@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Take off, request a controlled GLIDE descent, and record diagnostics."""
+"""Take off, run the guarded visual GLIDE intercept, and record diagnostics."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from send_rc import (
     STATE_IDLE,
     STATE_MANUAL,
     STATE_TAKEOFF,
+    TRACKER_MODE,
     ScenarioError,
 )
 from send_rc_takeoff_diagnostic import (
@@ -35,42 +36,48 @@ from send_rc_takeoff_diagnostic import (
 )
 
 GLIDE_PARAMETERS = (
-    "GLIDE_DESC_RATE",
-    "GLIDE_VEL_KP",
-    "GLIDE_VEL_KI",
-    "GLIDE_FLARE_ALT",
-    "GLIDE_FLARE_RATE",
-    "GLIDE_OUT_LIMIT",
-    "GLIDE_LAND_ALT",
-    "GLIDE_LAND_VS",
-    "GLIDE_LAND_SEC",
+    "GLIDE_PITCH_FF",
+    "GLIDE_PITCH_MAX",
+    "GLIDE_VX_KP",
+    "GLIDE_VX_KI",
+    "GLIDE_VY_KP",
+    "GLIDE_VY_KI",
+    "GLIDE_VY_OUT",
+    "GLIDE_YAW_KP",
+    "GLIDE_YAW_MAX",
+    "GLIDE_CENTER_KY",
+    "GLIDE_DEPTH_EMA",
 )
-REQUEST_TAKEOFF_ALT_M = 10.0
+REQUEST_TAKEOFF_ALT_M = 5.0
 
 SCENARIO_BANNER = """\
 ==============================================================================
-bt-app Automatic Takeoff / Controlled GLIDE Diagnostic Scenario
+bt-app Automatic Takeoff / Visual GLIDE Intercept Scenario
 ==============================================================================
 Simulates this joystick flight sequence:
   1. Arm in MANUAL and request automatic takeoff.
-  2. Wait for ALT_HOLD, then release the takeoff switch.
-  3. Raise the takeoff switch again to request GLIDE.
-  4. Record the ramped descent to ground.
-  5. Wait for bt-app touchdown confirmation, automatic disarm, and IDLE.
+  2. In ALT_HOLD, select TRACKING with the glide switch released.
+  3. Raise the glide switch to request ACQUIRE and wait for GLIDE/TRACK.
+  4. Record TRACK and the frozen COMMIT command until return to ALT_HOLD.
+  5. Switch to MANUAL, land, disarm, and verify IDLE.
 
-CSV data includes measured altitude, vertical-speed setpoint and error,
-requested throttle, actual controller throttle, correction, saturation, and
-the active takeoff/glide parameters.
+The red-box tracker and visual result publisher must already be running, with
+the target visible and centered. CSV data includes target distance, measured
+attitude and velocity, complete controller RC output, and active controller
+parameters. bt-app's structured log provides the internal glide phase.
 =============================================================================="""
 
 
-def glide_request_channels() -> tuple[int, ...]:
+def tracking_glide_channels(*, switch_high: bool) -> tuple[int, ...]:
+    """Select TRACKING while controlling the glide request switch."""
     channels = list(ALT_HOLD_ARMED)
-    channels[AUTO_TAKEOFF] = RC_MAX
+    channels[TRACKER_MODE] = RC_MAX
+    channels[AUTO_TAKEOFF] = RC_MAX if switch_high else 1000
     return tuple(channels)
 
 
-GLIDE_REQUEST_ARMED = glide_request_channels()
+TRACKING_GLIDE_RELEASED = tracking_glide_channels(switch_high=False)
+GLIDE_REQUEST_ARMED = tracking_glide_channels(switch_high=True)
 
 
 class GlideDiagnosticScenario(TakeoffDiagnosticScenario):
@@ -81,6 +88,7 @@ class GlideDiagnosticScenario(TakeoffDiagnosticScenario):
     )
 
     def __init__(self, **kwargs) -> None:
+        self.acquisition_attempt_s = float(kwargs.pop("acquisition_attempt_s", 2.0))
         super().__init__(**kwargs)
         self._next_glide_console_log_s = 0.0
         self._original_takeoff_alt: float | int | None = None
@@ -145,28 +153,31 @@ class GlideDiagnosticScenario(TakeoffDiagnosticScenario):
                 STATE_ALT_HOLD,
                 self.landing_timeout_s,
             )
-            self._set_phase("Releasing takeoff switch to arm GLIDE request")
-            self._send_for(ALT_HOLD_ARMED, 1.0)
+            self._set_phase(
+                "Selecting TRACKING with GLIDE released; target must be visible"
+            )
+            self._send_for(TRACKING_GLIDE_RELEASED, 2.0)
             if self.telemetry.state != STATE_ALT_HOLD:
                 raise ScenarioError(
                     "Vehicle left ALT_HOLD before GLIDE request; "
                     f"last telemetry: {self.telemetry.describe()}"
                 )
-            self._set_phase("Raising takeoff switch and requesting GLIDE")
-            self._wait_for_state(
-                GLIDE_REQUEST_ARMED,
-                STATE_GLIDE,
-                self.state_timeout_s,
-            )
-            self._set_phase("Recording controlled GLIDE descent to automatic disarm")
+            self._set_phase("Requesting ACQUIRE and waiting for GLIDE/TRACK")
+            self._wait_for_glide_entry()
+            self._set_phase("Recording TRACK/COMMIT until return to ALT_HOLD")
             self._wait_for(
                 GLIDE_REQUEST_ARMED,
-                lambda: self.telemetry.state == STATE_IDLE
-                and not self.telemetry.armed,
+                lambda: self.telemetry.state == STATE_ALT_HOLD,
                 self.landing_timeout_s,
-                "automatic GLIDE touchdown, disarm, and IDLE",
+                "GLIDE abort or COMMIT timeout return to ALT_HOLD",
             )
-            self._airborne = False
+            self._set_phase("Switching to MANUAL for controlled landing")
+            self._wait_for_state(
+                self.manual_descent_channels,
+                STATE_MANUAL,
+                self.state_timeout_s,
+            )
+            self._land_and_disarm()
             self._completed = True
             self._set_phase(f"Scenario completed; CSV saved to {self.output_path}")
         finally:
@@ -185,9 +196,93 @@ class GlideDiagnosticScenario(TakeoffDiagnosticScenario):
             self._cleanup()
             self._close_recording()
 
+    def _wait_for_glide_entry(self) -> None:
+        """Retry the required low-to-high edge until visual entry succeeds.
+
+        A request made before the first fresh tracker result is intentionally
+        rejected by bt-app. Once bt-app reports ACQUIRE, the switch remains
+        high until engagement or the overall timeout; an active acquisition
+        must never be cancelled merely to create another request edge.
+        """
+        deadline = time.monotonic() + self.state_timeout_s
+        attempt = 0
+        while time.monotonic() < deadline:
+            attempt += 1
+            self._set_phase(f"GLIDE acquisition attempt {attempt}: switch released")
+            self._send_for(TRACKING_GLIDE_RELEASED, 0.5)
+            self._set_phase(f"GLIDE acquisition attempt {attempt}: switch raised")
+            attempt_deadline = min(
+                deadline, time.monotonic() + self.acquisition_attempt_s
+            )
+            while time.monotonic() < attempt_deadline:
+                self._send_rc(GLIDE_REQUEST_ARMED)
+                self._receive_pending()
+                if self.telemetry.state == STATE_GLIDE:
+                    return
+                if self.telemetry.glide_phase_code == 1:
+                    attempt_deadline = deadline
+                if self.telemetry.state != STATE_ALT_HOLD:
+                    raise ScenarioError(
+                        "Vehicle left ALT_HOLD during acquisition; "
+                        f"last telemetry: {self.telemetry.describe()}"
+                    )
+                time.sleep(self.period_s)
+        raise ScenarioError(
+            "Timed out waiting for GLIDE; verify TRACKING session, fresh red-box "
+            f"detections, and centering. Last telemetry: {self.telemetry.describe()}"
+        )
+
     def _read_takeoff_parameters(self) -> None:
-        self._set_phase("Reading active takeoff and GLIDE parameters")
-        super()._read_takeoff_parameters()
+        """Require takeoff parameters but treat GLIDE diagnostics as optional.
+
+        A running/deployed bt-app can use the new controller while its MAVLink
+        parameter registry still exposes an older schema. Missing GLIDE values
+        reduce CSV detail but must not prevent the flight scenario.
+        """
+        self._set_phase("Reading required takeoff parameters")
+        self.PARAMETERS = TAKEOFF_PARAMETERS
+        try:
+            super()._read_takeoff_parameters()
+        finally:
+            del self.PARAMETERS
+
+        self._set_phase("Reading optional GLIDE diagnostic parameters")
+        pending = set(GLIDE_PARAMETERS)
+        deadline = time.monotonic() + min(2.0, self.parameter_timeout_s)
+        next_request_s = 0.0
+        while pending and time.monotonic() < deadline:
+            now_s = time.monotonic()
+            self._send_rc(NEUTRAL_DISARMED)
+            if now_s >= next_request_s:
+                for name in sorted(pending):
+                    message = self._encoder.param_request_read_encode(
+                        APP_SYSTEM_ID,
+                        APP_COMPONENT_ID,
+                        name.encode("ascii"),
+                        -1,
+                    )
+                    if self._socket is not None:
+                        self._socket.sendto(
+                            message.pack(self._encoder), self.parameter_destination
+                        )
+                next_request_s = now_s + 0.5
+            self._receive_pending()
+            pending.difference_update(self.parameter_values)
+            time.sleep(min(0.01, self.period_s))
+
+        if pending:
+            self._phase(
+                "Continuing without unavailable GLIDE parameter telemetry: "
+                + ", ".join(sorted(pending))
+            )
+        available = [name for name in GLIDE_PARAMETERS if name in self.parameter_values]
+        if available:
+            self._phase(
+                "Active GLIDE parameters: "
+                + " ".join(
+                    f"{name}={self.parameter_values[name]:g}" for name in available
+                )
+            )
 
     def _set_parameter(self, name: str, value: float) -> None:
         self.parameter_values.pop(name, None)
@@ -249,6 +344,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--parameter-port", type=int, default=14551)
     parser.add_argument("--parameter-timeout", type=float, default=10.0)
+    parser.add_argument(
+        "--acquisition-attempt",
+        type=float,
+        default=2.0,
+        help="seconds to hold each GLIDE request high before retrying the edge",
+    )
     return parser
 
 
@@ -258,6 +359,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("rate and timeouts must be positive")
     if args.parameter_timeout <= 0:
         raise SystemExit("--parameter-timeout must be positive")
+    if args.acquisition_attempt <= 0:
+        raise SystemExit("--acquisition-attempt must be positive")
     scenario = GlideDiagnosticScenario(
         destination=(args.destination_host, args.destination_port),
         listen=(args.listen_host, args.listen_port),
@@ -270,6 +373,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         output_path=args.output,
         parameter_destination=(args.destination_host, args.parameter_port),
         parameter_timeout_s=args.parameter_timeout,
+        acquisition_attempt_s=args.acquisition_attempt,
     )
     try:
         scenario.run()

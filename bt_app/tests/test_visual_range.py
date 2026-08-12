@@ -62,7 +62,6 @@ def test_rejects_inconsistent_or_clipped_geometry(estimator):
     ("overrides", "reason"),
     [
         ({"found": False}, "target not found"),
-        ({"locked": False}, "target not locked"),
         ({"width": 0}, "non-positive bounding box"),
     ],
 )
@@ -71,6 +70,13 @@ def test_rejects_untrusted_detections(estimator, overrides, reason):
 
     assert not estimate.valid
     assert estimate.reason == reason
+
+
+def test_found_detection_is_valid_even_when_optional_lock_is_inactive(estimator):
+    estimate = estimator.update(detection(locked=False))
+
+    assert estimate.valid
+    assert estimate.distance_m == pytest.approx(10.0)
 
 
 def test_rolling_median_and_reset_on_loss(estimator):

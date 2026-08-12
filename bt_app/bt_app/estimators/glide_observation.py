@@ -34,9 +34,13 @@ class GlideObservation:
         source_timestamp_ns: int | None = None,
         received_at_s: float | None = None,
         age_s: float | None = None,
+        bbox: tuple[int, int, int, int] | None = None,
+        ex: float | None = None,
+        ey: float | None = None,
+        centering_error: float | None = None,
     ) -> "GlideObservation":
         return cls(
-            frame_id, source_timestamp_ns, received_at_s, age_s, None,
-            None, None, None, 0.0, None, None, 0.0, 0.0, 0.0,
+            frame_id, source_timestamp_ns, received_at_s, age_s, bbox,
+            ex, ey, centering_error, 0.0, None, None, 0.0, 0.0, 0.0,
             False, False, reason,
         )
