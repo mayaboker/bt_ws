@@ -54,7 +54,10 @@ class VehicleConfig():
     glide_lock_frame_count: int = field(default=2)
     glide_commit_depth_m: float = field(default=1.0)
     glide_commit_timeout_s: float = field(default=1.0)
-    glide_diagnostic_rate_hz: float = field(default=5.0)
+    glide_log_enabled: bool = field(default=True)
+    glide_log_path: str = field(default="logs/glide_control.csv")
+    glide_log_flush_interval_s: float = field(default=1.0)
+    glide_log_queue_size: int = field(default=3000)
 
     # region singleton
     _instance = None

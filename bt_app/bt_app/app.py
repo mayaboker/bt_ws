@@ -31,6 +31,11 @@ from bt_app.msp_adapter import MSPAdapter
 from bt_app.msp import MspTransportDependencyError
 from bt_app.mavlink_wrapper import MavlinkService
 from bt_app.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
+from bt_app.glide_diagnostic_recorder import (
+    GlideAircraftState,
+    GlideDiagnosticRecorder,
+    NullGlideDiagnosticRecorder,
+)
 from bt_app.control.tracker_request import TrackerRequestPublisher
 from bt_app.control.land_detector import LandDetector
 from bt_app.control.visual_range import CameraIntrinsics, VisualRangeEstimator
@@ -122,7 +127,6 @@ class App:
             self._manual_land_confirmed_notified = False
             self._glide_switch_armed = False
             self._glide_switch_high = False
-            self._glide_last_diagnostic_s = float("-inf")
             self._glide_range_was_valid = False
             self._glide_last_range_frame_id: int | None = None
             self._glide_last_range_log_s = float("-inf")
@@ -140,6 +144,7 @@ class App:
                 center_deadband=self.config.glide_center_deadband,
                 center_error_max=self.config.glide_center_error_max,
             )
+            self.glide_diagnostic_recorder = self.__load_glide_diagnostic_recorder()
             self.__load_controllers()
             self.mavlink_service = MavlinkService(
                 context=self.ctx,
@@ -212,7 +217,8 @@ class App:
             "glide_max_vertical_speed_m_s": self.config.glide_max_vertical_speed_m_s,
             "glide_commit_depth_m": self.config.glide_commit_depth_m,
             "glide_commit_timeout_s": self.config.glide_commit_timeout_s,
-            "glide_diagnostic_rate_hz": self.config.glide_diagnostic_rate_hz,
+            "glide_log_flush_interval_s": self.config.glide_log_flush_interval_s,
+            "glide_log_queue_size": self.config.glide_log_queue_size,
         }
         if not self.config.tracker_request_endpoint:
             raise AppStartupError("Tracker request endpoint must not be empty")
@@ -341,6 +347,17 @@ class App:
             self.config.rc_record_path,
             flush_interval_s=self.config.rc_record_flush_interval_s,
             queue_size=self.config.rc_record_queue_size,
+        )
+        recorder.start()
+        return recorder
+
+    def __load_glide_diagnostic_recorder(self):
+        if not self.config.glide_log_enabled:
+            return NullGlideDiagnosticRecorder()
+        recorder = GlideDiagnosticRecorder(
+            self.config.glide_log_path,
+            flush_interval_s=self.config.glide_log_flush_interval_s,
+            queue_size=self.config.glide_log_queue_size,
         )
         recorder.start()
         return recorder
@@ -575,6 +592,7 @@ class App:
             lock_frame_count=self.config.glide_lock_frame_count,
             commit_depth_m=self.config.glide_commit_depth_m,
             commit_timeout_s=self.config.glide_commit_timeout_s,
+            diagnostic_recorder=self.glide_diagnostic_recorder,
         )
 
         # arm controller
@@ -1197,7 +1215,6 @@ class App:
             elif not self._tracker_session_active:
                 controller.abort("tracker session lost during track")
         self._sync_glide_context()
-        self._log_glide_diagnostic(time.monotonic())
             #TODO: to understand why base 3
             # AETR - roll, pitch, throttle, yaw, aux1, aux2, aux3, aux4
             # AERT - roll, pitch, yaw, throttle, aux1, aux2, aux3, aux4
@@ -1266,6 +1283,12 @@ class App:
             self._glide_observation,
             vertical_speed_m_s=self.ctx.drone_vertical_speed,
             vertical_speed_received_at_s=self.ctx.drone_alt_received_at_s,
+            aircraft_state=GlideAircraftState(
+                altitude_m=self.ctx.drone_alt,
+                roll_deg=self.ctx.drone_roll_deg,
+                pitch_deg=self.ctx.drone_pitch_deg,
+                yaw_deg=self.ctx.drone_heading_deg,
+            ),
             now_s=now,
         )
         self.ctx.glide_control_result = result
@@ -1298,58 +1321,6 @@ class App:
         self.ctx.glide_phase = controller.phase.value
         self.ctx.glide_abort_reason = controller.abort_reason
         self.ctx.glide_ready = controller.ready_to_engage
-
-    def _log_glide_diagnostic(self, now_s: float) -> None:
-        period = 1.0 / float(self.config.glide_diagnostic_rate_hz)
-        if now_s - self._glide_last_diagnostic_s < period:
-            return
-        controller = self.controllers[RobotState.GLIDE]
-        result = self.ctx.glide_control_result
-        observation = self._glide_observation
-        snapshot = self._tracker_manager.get_result()
-        detection = None if snapshot is None else snapshot.detection
-        reason_codes = {
-            None: 0,
-            "no tracker result": 1,
-            "target not found": 2,
-            "visual observation stale": 3,
-            "invalid receipt timestamp": 4,
-            "non-monotonic visual frame": 5,
-            "non-positive bounding box": 6,
-            "bounding box clipped by image edge": 7,
-            "width/height depth disagreement": 8,
-            "non-finite depth": 9,
-            "visual estimator unavailable": 10,
-        }
-        phase_codes = {phase: index for index, phase in enumerate(GlidePhase)}
-        values = {
-            NamedValue.TARGET_DISTANCE: (
-                math.nan if observation.depth_m is None else float(observation.depth_m)
-            ),
-            NamedValue.VISUAL_FOUND: float(bool(detection and detection.found)),
-            NamedValue.VISUAL_LOCKED: float(bool(detection and detection.locked)),
-            NamedValue.VISUAL_FRAME: math.nan if detection is None else float(detection.frame_id),
-            NamedValue.VISUAL_AGE: math.nan if observation.age_s is None else float(observation.age_s),
-            NamedValue.VISUAL_ERROR_X: math.nan if observation.ex is None else float(observation.ex),
-            NamedValue.VISUAL_ERROR_Y: math.nan if observation.ey is None else float(observation.ey),
-            NamedValue.OBSERVATION_VALID: float(observation.valid),
-            NamedValue.OBSERVATION_REASON: float(reason_codes.get(observation.reason, 99)),
-            NamedValue.GLIDE_ACQUISITION_COUNT: float(controller.acquisition_count),
-            NamedValue.GLIDE_PHASE: float(phase_codes[controller.phase]),
-        }
-        for name, value in values.items():
-            self.mavlink_service.send_named_value_to_gcs(name, value)
-        # log.info(
-        #     "GLIDE phase={} lock={}/{} frame={} valid={} reason={} abort={}",
-        #     controller.phase.value,
-        #     controller.acquisition_count,
-        #     self.config.glide_lock_frame_count,
-        #     getattr(result, "frame_id", observation.frame_id),
-        #     getattr(result, "valid", observation.valid),
-        #     getattr(result, "reason", observation.reason),
-        #     controller.abort_reason,
-        # )
-        self._glide_last_diagnostic_s = now_s
 
     def _update_glide_range_telemetry(self, estimator, now_s: float) -> None:
         estimate = getattr(estimator, "estimate", None)
@@ -1437,6 +1408,7 @@ class App:
             ("tracker request publisher", getattr(self, "tracker_request_publisher", None)),
             ("MAVLink service", getattr(self, "mavlink_service", None)),
             ("RC state recorder", getattr(self, "rc_recorder", None)),
+            ("GLIDE diagnostic recorder", getattr(self, "glide_diagnostic_recorder", None)),
             ("parameter service", getattr(self, "_App__params", None)),
         )
         for resource_name, resource in resources:

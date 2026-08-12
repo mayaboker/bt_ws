@@ -65,4 +65,7 @@ glide_center_error_max: 0.99
 glide_lock_frame_count: 2
 glide_commit_depth_m: 1.0
 glide_commit_timeout_s: 1.0
-glide_diagnostic_rate_hz: 5.0
+glide_log_enabled: true
+glide_log_path: "logs/glide_control.csv"
+glide_log_flush_interval_s: 1.0
+glide_log_queue_size: 3000

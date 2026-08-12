@@ -13,6 +13,11 @@ from typing import Any
 from bt_app.common import NO_RC_CHANNELS
 from bt_app.control.rc_mapper import BetaflightRcMapper
 from bt_app.estimators import GlideObservation
+from bt_app.glide_diagnostic_recorder import (
+    GlideAircraftState,
+    GlideDiagnosticSample,
+    NullGlideDiagnosticRecorder,
+)
 from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RC_MIN, RCChannel_alias as RCChannel
 from bt_app.parameters.generated import ParameterKey
 
@@ -74,6 +79,7 @@ class GlideController:
         lock_frame_count: int = 2,
         commit_depth_m: float = 1.0,
         commit_timeout_s: float = 1.0,
+        diagnostic_recorder: Any | None = None,
     ) -> None:
         self.params = params
         self._max_vertical_speed = float(max_vertical_speed_m_s)
@@ -82,6 +88,11 @@ class GlideController:
         self._lock_frame_count = int(lock_frame_count)
         self._commit_depth_m = float(commit_depth_m)
         self._commit_timeout_s = float(commit_timeout_s)
+        self._diagnostic_recorder = (
+            diagnostic_recorder
+            if diagnostic_recorder is not None
+            else NullGlideDiagnosticRecorder()
+        )
         if self._lock_frame_count <= 0:
             raise ValueError("lock_frame_count must be positive")
         if self._commit_depth_m <= 0.0 or self._commit_timeout_s <= 0.0:
@@ -198,6 +209,45 @@ class GlideController:
         self._reset_control_state()
 
     def update(
+        self,
+        observation: GlideObservation,
+        *,
+        vertical_speed_m_s: float,
+        vertical_speed_received_at_s: float,
+        aircraft_state: GlideAircraftState | None = None,
+        now_s: float | None = None,
+    ) -> GlideControlResult:
+        """Advance control and record exactly one diagnostic sample."""
+        result = self._update_control(
+            observation,
+            vertical_speed_m_s=vertical_speed_m_s,
+            vertical_speed_received_at_s=vertical_speed_received_at_s,
+            now_s=now_s,
+        )
+        state = aircraft_state or GlideAircraftState(0.0, 0.0, 0.0, 0.0)
+        self._record_diagnostic(observation, result, state)
+        return result
+
+    def _record_diagnostic(
+        self,
+        observation: GlideObservation,
+        result: GlideControlResult,
+        aircraft_state: GlideAircraftState,
+    ) -> None:
+        self._diagnostic_recorder.record(
+            GlideDiagnosticSample(
+                time.monotonic_ns(), result.phase.value, result.frame_id,
+                result.valid, result.reason, result.abort_reason or self.abort_reason,
+                observation.ex, observation.ey, result.vx_desired_m_s,
+                result.vx_measured_m_s, result.vy_desired_m_s,
+                result.vy_measured_m_s, aircraft_state.altitude_m,
+                observation.depth_m, aircraft_state.roll_deg,
+                aircraft_state.pitch_deg, aircraft_state.yaw_deg,
+                int(result.channels[RCChannel.THROTTLE]),
+            )
+        )
+
+    def _update_control(
         self,
         observation: GlideObservation,
         *,

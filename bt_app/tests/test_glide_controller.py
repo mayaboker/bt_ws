@@ -5,6 +5,7 @@ import pytest
 from bt_app.control.glide_controller import GlideControlResult, GlideController, GlidePhase
 from bt_app.control.rc_mapper import BetaflightRcMapper
 from bt_app.estimators import GlideObservation
+from bt_app.glide_diagnostic_recorder import GlideAircraftState
 from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RCChannel_alias as RCChannel
 from bt_app.parameters.generated import ParameterKey
 
@@ -70,6 +71,42 @@ def test_first_frame_uses_feedforward_without_forward_feedback():
     assert result.pitch_feedback_deg == 0.0
     assert not result.forward_feedback_active
     assert result.channels[RCChannel.PITCH] > RC_MID
+
+
+def test_each_update_records_aircraft_and_control_diagnostic():
+    class Recorder:
+        def __init__(self):
+            self.samples = []
+
+        def record(self, sample):
+            self.samples.append(sample)
+
+    recorder = Recorder()
+    controller = GlideController(Params(), diagnostic_recorder=recorder)
+    obs = observation(ex=0.2, ey=-0.1, depth=8.0, vx=2.0, vy=-0.4)
+    if controller.phase == GlidePhase.IDLE:
+        controller.begin_acquisition()
+        for frame_id in range(-controller._lock_frame_count, 0):
+            controller.observe_acquisition(replace(observation(), frame_id=frame_id))
+        assert controller.engage()
+
+    result = controller.update(
+        obs,
+        vertical_speed_m_s=-0.3,
+        vertical_speed_received_at_s=1.0,
+        aircraft_state=GlideAircraftState(5.0, 1.0, 2.0, 3.0),
+        now_s=1.0,
+    )
+
+    assert len(recorder.samples) == 1
+    diagnostic = recorder.samples[0]
+    assert diagnostic.glide_phase == result.phase.value
+    assert diagnostic.dx_norm == pytest.approx(0.2)
+    assert diagnostic.dy_norm == pytest.approx(-0.1)
+    assert diagnostic.altitude_m == pytest.approx(5.0)
+    assert diagnostic.distance_to_target_m == pytest.approx(8.0)
+    assert diagnostic.pitch_deg == pytest.approx(2.0)
+    assert diagnostic.throttle_rc == result.channels[RCChannel.THROTTLE]
 
 
 def test_depth_derivative_uses_local_receipt_time_and_activates_feedback():
