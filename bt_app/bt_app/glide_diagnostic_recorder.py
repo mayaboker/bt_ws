@@ -18,7 +18,8 @@ CSV_HEADER = (
     "reason", "abort_reason", "dx_norm", "dy_norm",
     "vx_setpoint_m_s", "vx_measured_m_s", "vy_setpoint_m_s",
     "vy_measured_m_s", "altitude_m", "distance_to_target_m",
-    "roll_deg", "pitch_deg", "yaw_deg", "throttle_rc",
+    "roll_deg", "pitch_deg", "yaw_deg", "yaw_rate_setpoint_dps",
+    "yaw_rc", "throttle_rc",
 )
 
 
@@ -41,6 +42,8 @@ class GlideDiagnosticSample:
     roll_deg: float
     pitch_deg: float
     yaw_deg: float
+    yaw_rate_setpoint_dps: float
+    yaw_rc: int
     throttle_rc: int
 
     def row(self) -> tuple[object, ...]:
@@ -83,6 +86,7 @@ class GlideDiagnosticRecorder:
             return
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path = self._compatible_path(self.path)
             write_header = not self.path.exists() or self.path.stat().st_size == 0
             self._file = self.path.open("a", encoding="utf-8", newline="")
             self._writer = csv.writer(self._file)
@@ -99,6 +103,28 @@ class GlideDiagnosticRecorder:
             target=self._run, daemon=True, name="glide-diagnostic-recorder"
         )
         self._thread.start()
+
+    @staticmethod
+    def _compatible_path(path: Path) -> Path:
+        candidate = path
+        version = 2
+        while candidate.exists() and candidate.stat().st_size:
+            try:
+                with candidate.open(newline="", encoding="utf-8") as stream:
+                    header = next(csv.reader(stream), [])
+            except OSError:
+                return candidate
+            if header == list(CSV_HEADER):
+                return candidate
+            candidate = path.with_name(f"{path.stem}.v{version}{path.suffix}")
+            version += 1
+        if candidate != path:
+            log.warning(
+                "GLIDE diagnostic schema changed; preserving {} and writing {}",
+                path,
+                candidate,
+            )
+        return candidate
 
     def record(self, sample: GlideDiagnosticSample) -> None:
         if not self._enabled:

@@ -34,6 +34,7 @@ class Params:
             ParameterKey.GLIDE_YAW_KP: 15.0,
             ParameterKey.GLIDE_YAW_MAX: 20.0,
             ParameterKey.GLIDE_YAW_DB: 0.02,
+            ParameterKey.GLIDE_YAW_SLEW: 12.0,
             ParameterKey.GLIDE_CENTER_KY: 1.0,
             ParameterKey.GLIDE_DEPTH_EMA: 0.35,
             ParameterKey.BF_ANGLE_LIMIT: 60.0,
@@ -340,7 +341,10 @@ def test_short_invalid_visual_holds_last_vector_and_new_centering_error():
     assert controller.phase == GlidePhase.TRACK
     assert held.valid
     assert held.vx_desired_m_s == valid.vx_desired_m_s
-    assert held.yaw_rate_dps < 0.0
+    assert held.yaw_rate_dps < valid.yaw_rate_dps
+    update(controller, degraded, now=1.2, vario_time=1.2)
+    reversed_command = update(controller, degraded, now=1.24, vario_time=1.24)
+    assert reversed_command.yaw_rate_dps < 0.0
 
 
 def test_invalid_visual_aborts_after_hold_timeout():
@@ -355,6 +359,55 @@ def test_invalid_visual_aborts_after_hold_timeout():
     assert controller.phase == GlidePhase.ABORTED
     assert not result.valid
     assert result.abort_reason == "target not found"
+
+
+def test_clipped_edge_freezes_last_valid_command_until_commit_timeout():
+    controller = GlideController(
+        Params(), lock_frame_count=1, commit_timeout_s=1.0
+    )
+    valid = update(
+        controller, observation(1, 1.0, 1.5, ex=-0.10), now=1.0
+    )
+    clipped = GlideObservation.invalid(
+        "bounding box clipped by image edge",
+        frame_id=2,
+        received_at_s=1.1,
+        age_s=0.0,
+    )
+
+    committed = update(controller, clipped, now=1.1, vario_time=1.1)
+
+    assert controller.phase == GlidePhase.COMMIT
+    assert committed.channels[RCChannel.PITCH] == valid.channels[RCChannel.PITCH]
+    assert committed.channels[RCChannel.THROTTLE] == valid.channels[RCChannel.THROTTLE]
+    assert committed.yaw_rate_dps == 0.0
+    assert committed.reason == "edge commit: bounding box clipped by image edge"
+    assert update(controller, clipped, now=1.9, vario_time=1.9) is committed
+
+    timed_out = update(controller, clipped, now=2.1, vario_time=2.1)
+    assert timed_out.phase == GlidePhase.COMMIT_TIMEOUT
+    assert timed_out.channels[RCChannel.PITCH] == RC_MID
+
+
+def test_side_clipping_reduces_forward_command_and_does_not_commit():
+    controller = GlideController(Params(), lock_frame_count=1)
+    valid = update(
+        controller, observation(1, 1.0, 1.5, ex=-0.10, vx=5.0), now=1.0
+    )
+    clipped = GlideObservation.invalid(
+        "bounding box clipped by left image edge",
+        frame_id=2,
+        received_at_s=1.1,
+        age_s=0.0,
+        ex=-0.8,
+        ey=0.0,
+    )
+
+    recovery = update(controller, clipped, now=1.1, vario_time=1.1)
+
+    assert controller.phase == GlidePhase.TRACK
+    assert recovery.vx_desired_m_s == 0.5
+    assert recovery.vx_desired_m_s < valid.vx_desired_m_s
 
 
 def test_ordinary_abort_is_ignored_after_commit():

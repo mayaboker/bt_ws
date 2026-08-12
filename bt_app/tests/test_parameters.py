@@ -45,10 +45,10 @@ def decode_int32(value: float) -> int:
     return struct.unpack("<i", struct.pack("<f", value))[0]
 
 
-def test_canonical_parameter_registry_has_47_mavlink_names():
+def test_canonical_parameter_registry_has_48_mavlink_names():
     service = make_service()
 
-    assert len(ALL_PARAMETER_KEYS) == 47
+    assert len(ALL_PARAMETER_KEYS) == 48
     assert tuple(name for name, _, _ in service.snapshot()) == ALL_PARAMETER_KEYS
     assert all(
         re.fullmatch(r"[A-Z][A-Z0-9_]{0,15}", name) for name in ALL_PARAMETER_KEYS
@@ -125,9 +125,9 @@ def test_list_read_and_int_set_use_canonical_names():
 
     responses = protocol.handle(mav.param_request_list_encode(1, 1), source)
 
-    assert len(responses) == 47
+    assert len(responses) == 48
     assert responses[0].message.param_id == "FS_HOLD_TIME"
-    assert responses[-1].delay_s == pytest.approx(0.92)
+    assert responses[-1].delay_s == pytest.approx(0.94)
 
     request = mav.param_set_encode(
         1,

@@ -30,6 +30,7 @@ class ParameterKey:
     GLIDE_YAW_KP: Final[Literal['GLIDE_YAW_KP']] = 'GLIDE_YAW_KP'
     GLIDE_YAW_MAX: Final[Literal['GLIDE_YAW_MAX']] = 'GLIDE_YAW_MAX'
     GLIDE_YAW_DB: Final[Literal['GLIDE_YAW_DB']] = 'GLIDE_YAW_DB'
+    GLIDE_YAW_SLEW: Final[Literal['GLIDE_YAW_SLEW']] = 'GLIDE_YAW_SLEW'
     GLIDE_CENTER_KY: Final[Literal['GLIDE_CENTER_KY']] = 'GLIDE_CENTER_KY'
     GLIDE_DEPTH_EMA: Final[Literal['GLIDE_DEPTH_EMA']] = 'GLIDE_DEPTH_EMA'
     BF_ANGLE_LIMIT: Final[Literal['BF_ANGLE_LIMIT']] = 'BF_ANGLE_LIMIT'
@@ -80,6 +81,7 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'GLIDE_YAW_KP',
     'GLIDE_YAW_MAX',
     'GLIDE_YAW_DB',
+    'GLIDE_YAW_SLEW',
     'GLIDE_CENTER_KY',
     'GLIDE_DEPTH_EMA',
     'BF_ANGLE_LIMIT',

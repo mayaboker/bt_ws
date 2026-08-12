@@ -111,6 +111,10 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.GLIDE_YAW_DB))
 
     @property
+    def glide_yaw_slew(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_YAW_SLEW))
+
+    @property
     def glide_center_ky(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.GLIDE_CENTER_KY))
 

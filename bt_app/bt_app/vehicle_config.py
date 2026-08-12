@@ -53,7 +53,7 @@ class VehicleConfig():
     glide_center_error_max: float = field(default=0.40)
     glide_lock_frame_count: int = field(default=2)
     glide_commit_depth_m: float = field(default=1.0)
-    glide_commit_timeout_s: float = field(default=1.0)
+    glide_commit_timeout_s: float = field(default=2.0)
     glide_log_enabled: bool = field(default=True)
     glide_log_path: str = field(default="logs/glide_control.csv")
     glide_log_flush_interval_s: float = field(default=1.0)

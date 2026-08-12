@@ -438,17 +438,6 @@ class App:
             self._set_invalid_glide_observation("non-positive bounding box", **metadata)
             return
         intrinsics = estimator.intrinsics
-        if (
-            detection.x <= 0
-            or detection.y <= 0
-            or detection.x + detection.width >= intrinsics.image_width_px
-            or detection.y + detection.height >= intrinsics.image_height_px
-        ):
-            self._set_invalid_glide_observation(
-                "bounding box clipped by image edge", **metadata
-            )
-            return
-
         center_x = detection.x + detection.width / 2.0
         center_y = detection.y + detection.height / 2.0
         ex = (center_x - intrinsics.cx_px) / (intrinsics.image_width_px / 2.0)
@@ -463,6 +452,21 @@ class App:
             "ey": ey,
             "centering_error": centering_error,
         }
+        clipped_edges = []
+        if detection.x <= 0:
+            clipped_edges.append("left")
+        if detection.x + detection.width >= intrinsics.image_width_px:
+            clipped_edges.append("right")
+        if detection.y <= 0:
+            clipped_edges.append("top")
+        if detection.y + detection.height >= intrinsics.image_height_px:
+            clipped_edges.append("bottom")
+        if clipped_edges:
+            self._set_invalid_glide_observation(
+                f"bounding box clipped by {'/'.join(clipped_edges)} image edge",
+                **visual_metadata,
+            )
+            return
 
         range_estimate = estimator.update(detection)
         if not range_estimate.valid or range_estimate.distance_m is None:

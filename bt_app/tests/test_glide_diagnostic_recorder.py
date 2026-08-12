@@ -12,7 +12,7 @@ from bt_app.glide_diagnostic_recorder import (
 def sample(timestamp=123):
     return GlideDiagnosticSample(
         timestamp, "track", 7, True, None, None, 0.1, -0.2,
-        2.0, 1.5, -0.4, -0.3, 5.0, 8.0, 1.0, 2.0, 3.0, 1660,
+        2.0, 1.5, -0.4, -0.3, 5.0, 8.0, 1.0, 2.0, 3.0, -2.0, 1485, 1660,
     )
 
 
@@ -52,6 +52,19 @@ def test_stop_drains_queue(tmp_path):
         recorder.record(sample(timestamp))
     recorder.stop()
     assert len(rows(path)) == 4
+
+
+def test_schema_change_preserves_old_log_and_writes_versioned_file(tmp_path):
+    path = tmp_path / "glide.csv"
+    path.write_text("old,header\n1,2\n", encoding="utf-8")
+    recorder = GlideDiagnosticRecorder(path, flush_interval_s=0.01)
+
+    recorder.start()
+    recorder.record(sample())
+    recorder.stop()
+
+    assert path.read_text(encoding="utf-8") == "old,header\n1,2\n"
+    assert rows(tmp_path / "glide.v2.csv")[0] == list(CSV_HEADER)
 
 
 def test_null_recorder_is_noop():

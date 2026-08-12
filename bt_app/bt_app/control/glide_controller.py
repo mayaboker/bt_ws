@@ -24,6 +24,11 @@ from bt_app.parameters.generated import ParameterKey
 
 VARIO_STALE_TIMEOUT_S = 0.25
 VISUAL_HOLD_TIMEOUT_S = 0.25
+EDGE_CLIPPED_REASON = "bounding box clipped by image edge"
+EDGE_REASON_PREFIX = "bounding box clipped by "
+EDGE_COMMIT_MAX_HORIZONTAL_ERROR = 0.15
+EDGE_COMMIT_MAX_DEPTH_M = 2.0
+EDGE_RECOVERY_VX_M_S = 0.5
 
 
 class GlidePhase(str, Enum):
@@ -137,6 +142,7 @@ class GlideController:
         self._yaw_kp = float(get(ParameterKey.GLIDE_YAW_KP))
         self._yaw_max = abs(float(get(ParameterKey.GLIDE_YAW_MAX)))
         self._yaw_deadband = abs(float(get(ParameterKey.GLIDE_YAW_DB)))
+        self._yaw_slew = abs(float(get(ParameterKey.GLIDE_YAW_SLEW)))
         self._center_ky = float(get(ParameterKey.GLIDE_CENTER_KY))
         self._depth_alpha = float(get(ParameterKey.GLIDE_DEPTH_EMA))
         self._angle_limit = abs(float(get(ParameterKey.BF_ANGLE_LIMIT)))
@@ -150,6 +156,7 @@ class GlideController:
         self._acquisition_frame_id: int | None = None
         self._commit_started_at_s: float | None = None
         self._frozen_result: GlideControlResult | None = None
+        self._last_valid_result: GlideControlResult | None = None
         self._reset_control_state()
 
     def _reset_control_state(self) -> None:
@@ -164,6 +171,8 @@ class GlideController:
         self._last_vario_time_s: float | None = None
         self._vy_integral = 0.0
         self._throttle_correction = 0.0
+        self._yaw_rate_command = 0.0
+        self._last_yaw_update_s: float | None = None
         self._last_guidance_observation: GlideObservation | None = None
 
     @property
@@ -269,6 +278,7 @@ class GlideController:
                 result.vy_measured_m_s, aircraft_state.altitude_m,
                 observation.depth_m, aircraft_state.roll_deg,
                 aircraft_state.pitch_deg, aircraft_state.yaw_deg,
+                result.yaw_rate_dps, int(result.channels[RCChannel.YAW]),
                 int(result.channels[RCChannel.THROTTLE]),
             )
         )
@@ -299,6 +309,39 @@ class GlideController:
             return self._neutral_result(None, f"controller phase is {self.phase.value}")
         allow_commit = observation.valid
         if not observation.valid:
+            clipped_reason = observation.reason or ""
+            edge_clipped = (
+                clipped_reason == EDGE_CLIPPED_REASON
+                or clipped_reason.startswith(EDGE_REASON_PREFIX)
+            )
+            side_clipped = edge_clipped and (
+                "left" in clipped_reason or "right" in clipped_reason
+            )
+            last_visual = self._last_guidance_observation
+            edge_commit_allowed = (
+                edge_clipped
+                and not side_clipped
+                and self._last_valid_result is not None
+                and last_visual is not None
+                and last_visual.ex is not None
+                and last_visual.depth_m is not None
+                and abs(float(last_visual.ex)) <= EDGE_COMMIT_MAX_HORIZONTAL_ERROR
+                and float(last_visual.depth_m) <= EDGE_COMMIT_MAX_DEPTH_M
+            )
+            if edge_commit_allowed:
+                self.phase = GlidePhase.COMMIT
+                self._commit_started_at_s = now
+                edge_yaw = 0.0
+                channels = list(self._last_valid_result.channels)
+                channels[RCChannel.YAW] = self._mapper.yaw_rate_to_rc(edge_yaw)
+                self._frozen_result = replace(
+                    self._last_valid_result,
+                    channels=tuple(channels),
+                    yaw_rate_dps=edge_yaw,
+                    phase=GlidePhase.COMMIT,
+                    reason=f"edge commit: {clipped_reason}",
+                )
+                return self._frozen_result
             cached = self._last_guidance_observation
             cached_at = None if cached is None else cached.received_at_s
             if (
@@ -322,6 +365,13 @@ class GlideController:
                 age_s=now - float(cached_at),
                 reason=f"visual hold: {observation.reason or 'invalid observation'}",
             )
+            if edge_clipped:
+                observation = replace(
+                    observation,
+                    vx_geometry_m_s=min(
+                        observation.vx_geometry_m_s, EDGE_RECOVERY_VX_M_S
+                    ),
+                )
         elif (
             self._last_guidance_observation is None
             or observation.frame_id != self._last_guidance_observation.frame_id
@@ -373,13 +423,14 @@ class GlideController:
             float(vertical_speed_m_s),
             float(vertical_speed_received_at_s),
         )
-        yaw_rate = self._clamp(
+        yaw_target = self._clamp(
             self._yaw_kp * self._deadband(
                 float(observation.ex), self._yaw_deadband
             ),
             -self._yaw_max,
             self._yaw_max,
         )
+        yaw_rate = self._slew_yaw(yaw_target, now)
         channels = self._make_channels(pitch, yaw_rate, self._throttle_correction)
         result = GlideControlResult(
             tuple(channels), observation.frame_id, vx_desired, self._vx_measured,
@@ -389,6 +440,7 @@ class GlideController:
             reason=observation.reason,
             phase=self.phase,
         )
+        self._last_valid_result = result
         if (
             allow_commit
             and
@@ -503,6 +555,18 @@ class GlideController:
             return 0.0
         return math.copysign(abs(value) - threshold, value)
 
+    def _slew_yaw(self, target: float, now_s: float) -> float:
+        if self._last_yaw_update_s is None or now_s <= self._last_yaw_update_s:
+            self._last_yaw_update_s = now_s
+            self._yaw_rate_command = target
+            return target
+        maximum_change = self._yaw_slew * (now_s - self._last_yaw_update_s)
+        self._last_yaw_update_s = now_s
+        self._yaw_rate_command += self._clamp(
+            target - self._yaw_rate_command, -maximum_change, maximum_change
+        )
+        return self._yaw_rate_command
+
     @staticmethod
     def _clamp(value: float, lower: float, upper: float) -> float:
         return max(lower, min(upper, value))
@@ -516,6 +580,7 @@ class GlideController:
             ParameterKey.GLIDE_VY_KI, ParameterKey.GLIDE_VY_OUT,
             ParameterKey.GLIDE_YAW_KP, ParameterKey.GLIDE_YAW_MAX,
             ParameterKey.GLIDE_YAW_DB,
+            ParameterKey.GLIDE_YAW_SLEW,
             ParameterKey.GLIDE_CENTER_KY, ParameterKey.GLIDE_DEPTH_EMA,
             ParameterKey.BF_ANGLE_LIMIT, ParameterKey.BF_YAW_RATE,
         }
