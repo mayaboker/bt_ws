@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import threading
-from typing import Any
+import time
+from dataclasses import dataclass
+
+from bt_app.comm.gst_bridge import VisualDetectionMessage
 
 
-TrackerResult = tuple[str, Any]
+@dataclass(frozen=True)
+class TrackerSnapshot:
+    tracker_id: str
+    detection: VisualDetectionMessage
+    received_at_s: float
 
 
 class TrackerManager:
@@ -12,14 +19,33 @@ class TrackerManager:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._last_result: TrackerResult | None = None
+        self._last_result: TrackerSnapshot | None = None
 
-    def update_tracker(self, tracker_id: str, result: Any) -> None:
+    def update_tracker(
+        self,
+        tracker_id: str,
+        result: VisualDetectionMessage,
+        *,
+        received_at_s: float | None = None,
+    ) -> TrackerSnapshot:
         """Atomically replace the retained result with the newest value."""
+        snapshot = TrackerSnapshot(
+            tracker_id=tracker_id,
+            detection=result,
+            received_at_s=(
+                time.monotonic() if received_at_s is None else float(received_at_s)
+            ),
+        )
         with self._lock:
-            self._last_result = (tracker_id, result)
+            self._last_result = snapshot
+        return snapshot
 
-    def get_result(self) -> TrackerResult | None:
-        """Return the latest ``(tracker_id, result)`` without removing it."""
+    def get_result(self) -> TrackerSnapshot | None:
+        """Return the latest snapshot without removing it."""
         with self._lock:
             return self._last_result
+
+    def clear(self) -> None:
+        """Atomically discard the retained snapshot."""
+        with self._lock:
+            self._last_result = None

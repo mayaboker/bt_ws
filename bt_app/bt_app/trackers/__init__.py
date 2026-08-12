@@ -1,6 +1,7 @@
 
-from bt_app.trackers.tracker_manager import TrackerManager
+from bt_app.trackers.tracker_manager import TrackerManager, TrackerSnapshot
 
 __all__ = [
-    "TrackerManager"
+    "TrackerManager",
+    "TrackerSnapshot",
 ]

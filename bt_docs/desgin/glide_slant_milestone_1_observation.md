@@ -95,12 +95,18 @@ Validation order is stable so a frame always reports the same first failure:
 8. non-finite depth or excessive width/height disagreement: preserve the range estimator reason
 9. invalid vector geometry: preserve the glide estimator reason
 
-Only a frame ID newer than the last accepted frame may update range or velocity
-filters. A duplicate frame returns the already calculated observation only
-while its retained snapshot remains fresh; freshness is reevaluated every
-cycle. A lower frame ID or a non-increasing source timestamp is invalid and
-resets filters as `non-monotonic visual frame`. A new tracker session explicitly
-resets the last-frame gate before accepting its first frame.
+Frame ID is the primary ordering authority. Only a frame ID newer than the last
+accepted frame may update range or velocity filters. When both consecutive
+accepted frames provide a source timestamp, that timestamp must also increase.
+A duplicate cycle read creates a new frozen observation with refreshed `age_s`
+but cached geometry; it does not advance filters. A duplicate transport delivery
+is ignored and cannot extend the original receipt time. A lower frame ID or a
+non-increasing available source timestamp is invalid and resets filters as
+`non-monotonic visual frame`.
+
+A new tracker session clears the retained snapshot, estimator histories, and
+ordering gates. It therefore requires a detection received after the new session
+starts.
 
 Any invalid observation resets the range and glide estimator history. It must
 not reuse depth, image errors, or requested velocity from the previous valid
@@ -183,9 +189,17 @@ added here; milestone 2 owns the bounded vertical control correction.
   boundary and keep `GlideController` free of visual-estimator dependencies.
 - Rewrite `GlideVelocityEstimator` for forward depth and vertical image offset;
   remove the current slant-range/altitude calculation.
-- Do not call `gst_bridge.fresh_observation()` or `gst_bridge.is_healthy()` on
-  the raw `GST_Bridge`; use retained-snapshot receipt age for these checks or
-  introduce the observer wrapper in a separately reviewed compatibility change.
+- Expose the latest frozen value through the read-only `App.glide_observation`
+  property; do not add estimator state to the global flight `Context`.
+- Use retained-snapshot receipt age instead of calling nonexistent
+  `fresh_observation()` or `is_healthy()` methods on the raw `GST_Bridge`.
+- Temporarily reject legacy visual `TRACKING` engagement in `ALT_HOLD` and send
+  a GCS warning that it remains disabled until milestone 2. A forced TRACKING
+  state uses neutral ALT_HOLD output.
+
+The geometry settings are startup-validated `VehicleConfig` fields with these
+defaults: target speed 15 m/s, maximum vertical speed 3 m/s, center deadband
+0.05, and maximum center error 0.40.
 
 ## Tests and completion criteria
 
@@ -202,4 +216,26 @@ Milestone 1 is complete when automated tests demonstrate:
 - missing, stale, unlocked, clipped, inconsistent, duplicate, and non-monotonic
   frames produce the specified invalid observations and clear estimator history;
 - the application creates at most one observation from one snapshot per cycle;
-- RC output and state-machine behavior are unchanged.
+- all non-TRACKING RC output and state-machine behavior are unchanged, while
+  legacy TRACKING engagement is rejected safely as specified above.
+
+Run the focused milestone tests first:
+
+```bash
+cd /home/user/projects/bt_ws/bt_app
+pytest -q tests/test_tracker_manager.py tests/test_visual_range.py \
+  tests/test_glide_estimator.py tests/test_tracker_request.py
+```
+
+Then run the regression gate from the workspace root so tests that use
+workspace-relative fixture paths resolve correctly:
+
+```bash
+cd /home/user/projects/bt_ws
+pytest -q bt_app/tests
+```
+
+The full environment must provide the Gazebo Python message package used by
+`test_yolo_segmentation_frame.py`; without it, pytest stops during collection
+before application tests run. No SITL/Gazebo flight is required because this
+milestone does not route the observation into RC output.

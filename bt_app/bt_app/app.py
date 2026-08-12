@@ -7,7 +7,7 @@ import pathlib
 import math
 import signal
 import threading
-from unittest import result
+from dataclasses import replace
 
 from bt_app.control import (
     joy_zmq_adapter
@@ -67,7 +67,7 @@ from bt_joy.server.mavlink import (
     CommunicationResumedEvent
 )
 
-from bt_app.estimators import GlideVelocityEstimator
+from bt_app.estimators import GlideObservation, GlideVelocityEstimator
 from bt_app.trackers import TrackerManager
 #endregion
 
@@ -124,10 +124,19 @@ class App:
             self._glide_last_range_frame_id: int | None = None
             self._glide_last_range_log_s = float("-inf")
             self._glide_last_range_mavlink_s = float("-inf")
+            self._glide_observation = GlideObservation.invalid("no tracker result")
+            self._glide_last_accepted_frame_id: int | None = None
+            self._glide_last_accepted_timestamp_ns: int | None = None
+            self._glide_cached_observation: GlideObservation | None = None
             self._last_rc_channel = [RC_MIN] * (int(InternalJoy.TRACKER_MODE) + 1)
             self.__load_drone_interface()
             self._visual_range_estimator = self._load_range_visual_estimator()
-            self._glide_velocity_estimator = GlideVelocityEstimator(max_vertical_speed_m_s=5.0)
+            self._glide_velocity_estimator = GlideVelocityEstimator(
+                max_vertical_speed_m_s=self.config.glide_max_vertical_speed_m_s,
+                target_speed_m_s=self.config.glide_target_speed_m_s,
+                center_deadband=self.config.glide_center_deadband,
+                center_error_max=self.config.glide_center_error_max,
+            )
             self.__load_controllers()
             self.mavlink_service = MavlinkService(
                 context=self.ctx,
@@ -196,14 +205,29 @@ class App:
             "tracker_adjust_rate_hz": self.config.tracker_adjust_rate_hz,
             "tracker_bridge_health_timeout_s": self.config.tracker_bridge_health_timeout_s,
             "tracker_result_timeout_s": self.config.tracker_result_timeout_s,
+            "glide_target_speed_m_s": self.config.glide_target_speed_m_s,
+            "glide_max_vertical_speed_m_s": self.config.glide_max_vertical_speed_m_s,
         }
         if not self.config.tracker_request_endpoint:
             raise AppStartupError("Tracker request endpoint must not be empty")
         for name, value in positive_tracker_values.items():
-            if value <= 0:
-                raise AppStartupError(f"{name} must be greater than zero")
+            if not math.isfinite(float(value)) or float(value) <= 0:
+                raise AppStartupError(
+                    f"{name} must be finite and greater than zero"
+                )
         if not 0 <= self.config.tracker_adjust_deadband_pwm < 500:
             raise AppStartupError("tracker_adjust_deadband_pwm must be between 0 and 499")
+        center_deadband = float(self.config.glide_center_deadband)
+        center_error_max = float(self.config.glide_center_error_max)
+        if not all(
+            math.isfinite(float(value))
+            for value in (center_deadband, center_error_max)
+        ):
+            raise AppStartupError("glide centering limits must be finite")
+        if not 0 <= center_deadband < center_error_max <= 1:
+            raise AppStartupError(
+                "glide centering limits must satisfy 0 <= deadband < maximum <= 1"
+            )
 
         if self.config.drone_sink != DroneSink.SERIAL.value:
             return
@@ -348,12 +372,143 @@ class App:
         )
 
     def _visual_range_handler(self) -> None:
-        """Refresh the app-owned visual range estimate once per control cycle."""
+        """Build one fresh immutable glide observation for this control cycle."""
+        if not hasattr(self, "_visual_range_estimator") or not hasattr(
+            self, "_tracker_manager"
+        ):
+            return
+        now_s = time.monotonic()
         estimator = self._visual_range_estimator
-        result = self._tracker_manager.get_result()
-        if result is not None:
-            estimator.update(result[1])
-        
+        snapshot = self._tracker_manager.get_result()
+        if estimator is None:
+            self._set_invalid_glide_observation("visual estimator unavailable")
+            return
+        if snapshot is None:
+            self._set_invalid_glide_observation("no tracker result")
+            return
+
+        age_s = now_s - snapshot.received_at_s
+        detection = snapshot.detection
+        metadata = {
+            "frame_id": detection.frame_id,
+            "source_timestamp_ns": detection.timestamp_ns,
+            "received_at_s": snapshot.received_at_s,
+            "age_s": age_s,
+        }
+        if not math.isfinite(age_s) or age_s < 0.0:
+            self._set_invalid_glide_observation("invalid receipt timestamp", **metadata)
+            return
+        if age_s > self.config.tracker_result_timeout_s:
+            self._set_invalid_glide_observation("visual observation stale", **metadata)
+            return
+
+        if detection.frame_id == self._glide_last_accepted_frame_id:
+            cached = self._glide_cached_observation
+            if cached is not None:
+                self._glide_observation = replace(cached, age_s=age_s)
+                return
+        elif (
+            self._glide_last_accepted_frame_id is not None
+            and detection.frame_id < self._glide_last_accepted_frame_id
+        ):
+            self._set_invalid_glide_observation("non-monotonic visual frame", **metadata)
+            return
+
+        if (
+            self._glide_last_accepted_timestamp_ns is not None
+            and detection.timestamp_ns is not None
+            and detection.timestamp_ns <= self._glide_last_accepted_timestamp_ns
+        ):
+            self._set_invalid_glide_observation("non-monotonic visual frame", **metadata)
+            return
+
+        if not detection.found:
+            self._set_invalid_glide_observation("target not found", **metadata)
+            return
+        if not detection.locked:
+            self._set_invalid_glide_observation("target not locked", **metadata)
+            return
+        if detection.width <= 0 or detection.height <= 0:
+            self._set_invalid_glide_observation("non-positive bounding box", **metadata)
+            return
+        intrinsics = estimator.intrinsics
+        if (
+            detection.x <= 0
+            or detection.y <= 0
+            or detection.x + detection.width >= intrinsics.image_width_px
+            or detection.y + detection.height >= intrinsics.image_height_px
+        ):
+            self._set_invalid_glide_observation(
+                "bounding box clipped by image edge", **metadata
+            )
+            return
+
+        range_estimate = estimator.update(detection)
+        if not range_estimate.valid or range_estimate.distance_m is None:
+            self._set_invalid_glide_observation(
+                range_estimate.reason or "invalid range estimate", **metadata
+            )
+            return
+
+        center_x = detection.x + detection.width / 2.0
+        center_y = detection.y + detection.height / 2.0
+        ex = (center_x - intrinsics.cx_px) / (intrinsics.image_width_px / 2.0)
+        ey = (intrinsics.cy_px - center_y) / (intrinsics.image_height_px / 2.0)
+        ex = max(-1.0, min(1.0, ex))
+        ey = max(-1.0, min(1.0, ey))
+        centering_error = min(1.0, math.hypot(ex, ey))
+        depth_m = range_estimate.distance_m
+        vertical_offset_m = (intrinsics.cy_px - center_y) * depth_m / intrinsics.fy_px
+        vector = self._glide_velocity_estimator.update(
+            frame_id=detection.frame_id,
+            depth_m=depth_m,
+            vertical_offset_m=vertical_offset_m,
+            centering_error=centering_error,
+        )
+        if not vector.valid:
+            self._set_invalid_glide_observation(
+                vector.reason or "invalid vector geometry", **metadata
+            )
+            return
+
+        observation = GlideObservation(
+            **metadata,
+            bbox=(detection.x, detection.y, detection.width, detection.height),
+            ex=ex,
+            ey=ey,
+            centering_error=centering_error,
+            speed_quality=vector.speed_quality,
+            depth_m=depth_m,
+            vertical_offset_m=vertical_offset_m,
+            vx_geometry_m_s=vector.vx_m_s,
+            vy_geometry_m_s=vector.vy_m_s,
+            achieved_speed_m_s=vector.achieved_speed_m_s,
+            vertical_limited=vector.vertical_limited,
+            valid=True,
+        )
+        self._glide_last_accepted_frame_id = detection.frame_id
+        self._glide_last_accepted_timestamp_ns = detection.timestamp_ns
+        self._glide_cached_observation = observation
+        self._glide_observation = observation
+
+    @property
+    def glide_observation(self) -> GlideObservation:
+        """Return the immutable observation produced by the latest cycle."""
+        return self._glide_observation
+
+    def _set_invalid_glide_observation(self, reason: str, **metadata) -> None:
+        if getattr(self, "_visual_range_estimator", None) is not None:
+            self._visual_range_estimator.reset(reason)
+        if hasattr(self, "_glide_velocity_estimator"):
+            self._glide_velocity_estimator.reset(reason)
+        self._glide_cached_observation = None
+        self._glide_observation = GlideObservation.invalid(reason, **metadata)
+
+    def _reset_glide_observation_pipeline(self, reason: str) -> None:
+        self._tracker_manager.clear()
+        self._glide_last_accepted_frame_id = None
+        self._glide_last_accepted_timestamp_ns = None
+        self._set_invalid_glide_observation(reason)
 
     def __load_controllers(self):
         """
@@ -651,6 +806,7 @@ class App:
             return
 
         if previous == AutoModeType.DISABLED and not self._tracker_session_active:
+            self._reset_glide_observation_pipeline("new tracker session")
             self.tracker_request_publisher.start_tracking(
                 self.config.tracker_initial_x,
                 self.config.tracker_initial_y,
@@ -671,6 +827,7 @@ class App:
             self._tracker_last_lateral_command = None
 
     def _handle_tracker_enabler(self, now: float) -> None:
+        del now
         if self.ctx.auto_mode_enable:
             self.ctx.auto_mode_enable = False
             self._tracker_enabled_at = float("inf")
@@ -684,48 +841,21 @@ class App:
         ):
             log.warning("Tracker enable ignored: TRACKING selector and ALT_HOLD required")
             return
-        if not self._tracker_bridge_healthy(now):
-            log.warning("Tracker enable ignored: no recent bt_gst telemetry")
-            self.mavlink_service.send_text_to_gcs(
-                "Tracker unavailable: no recent telemetry",
-                MavSeverity.WARNING,
-            )
-            return
-        observation = self.gst_bridge.fresh_observation(
-            received_after=float("-inf"),
-            max_age_s=self.config.tracker_result_timeout_s,
-            now=now,
-        )
-        if (
-            observation is None
-            or not observation.detection.found
-            or not observation.detection.locked
-        ):
-            log.warning("Tracker enable ignored: fresh detector lock required")
-            self.mavlink_service.send_text_to_gcs(
-                "Tracker unavailable: target is not locked",
-                MavSeverity.WARNING,
-            )
-            return
-        self.ctx.auto_mode_enable = True
-        self._tracker_enabled_at = now
-        self._tracker_last_lateral_command = (
-            observation.command.pitch,
-            observation.command.yaw,
-        )
-        log.info(
-            "tracker result control enabled frame={} bbox=({}, {}, {}, {})",
-            observation.detection.frame_id,
-            observation.detection.x,
-            observation.detection.y,
-            observation.detection.width,
-            observation.detection.height,
-        )
+        message = "Visual RC tracking disabled until glide milestone 2"
+        log.warning(message)
+        if hasattr(self, "mavlink_service"):
+            self.mavlink_service.send_text_to_gcs(message, MavSeverity.WARNING)
 
     def _tracker_bridge_healthy(self, now: float) -> bool:
-        return self.gst_bridge is not None and self.gst_bridge.is_healthy(
-            self.config.tracker_bridge_health_timeout_s,
-            now=now,
+        if self.gst_bridge is None:
+            return False
+        snapshot = self._tracker_manager.get_result()
+        if snapshot is None:
+            return False
+        age_s = float(now) - snapshot.received_at_s
+        return (
+            math.isfinite(age_s)
+            and 0.0 <= age_s <= self.config.tracker_bridge_health_timeout_s
         )
 
     def _send_tracker_adjustment(self, now: float) -> None:
@@ -883,37 +1013,11 @@ class App:
         return rc
 
     def auto_mode_handler(self):
-        now = time.monotonic()
-        observation = None
-        if self.ctx.auto_mode_enable and self.gst_bridge is not None:
-            observation = self.gst_bridge.fresh_observation(
-                received_after=float("-inf"),
-                max_age_s=self.config.tracker_result_timeout_s,
-                now=now,
-            )
-        if observation is None or not observation.detection.locked:
-            if self.ctx.auto_mode_enable:
-                reason = "stale telemetry" if observation is None else "detector lock lost"
-                log.warning("leaving TRACKING: {}", reason)
-            self.ctx.auto_mode_enable = False
-            self._tracker_enabled_at = float("inf")
-            self._tracker_last_lateral_command = None
-            return self._tracking_alt_hold_fallback()
-
-        if observation.detection.found:
-            self._tracker_last_lateral_command = (
-                observation.command.pitch,
-                observation.command.yaw,
-            )
-        pitch, yaw = self._tracker_last_lateral_command or (RC_MID, RC_MID)
-        controller = self.controllers[RobotState.ALT_HOLD]
-        controller.update_yaw_from_direct_rc(yaw)
-        controller.update_pitch_roll(pitch, RC_MID)
-        return controller.update(
-            controller.setpoint,
-            self.ctx.drone_alt,
-            self.ctx.drone_alt_received_at_s,
-        )
+        """Safely reject the legacy visual-RC mode until milestone 2."""
+        self.ctx.auto_mode_enable = False
+        self._tracker_enabled_at = float("inf")
+        self._tracker_last_lateral_command = None
+        return self._tracking_alt_hold_fallback()
 
     def _tracking_alt_hold_fallback(self):
         controller = self.controllers[RobotState.ALT_HOLD]
@@ -927,6 +1031,9 @@ class App:
 
 
     def _gst_tracker_result_handler(self, result) -> None:
+        previous = self._tracker_manager.get_result()
+        if previous is not None and previous.detection.frame_id == result.frame_id:
+            return
         self._tracker_manager.update_tracker("default", result)
 
     def alt_hold_handler(self):
@@ -1119,9 +1226,6 @@ class App:
 
     def glide_handler(self):
         controller = self.controllers[RobotState.GLIDE]
-        estimator = self._visual_range_estimator
-        print(self._glide_velocity_estimator.update(self.ctx.drone_alt, estimator.estimate))
-        print(self._tracker_manager.get_result())
         channels = controller.update(
             self.ctx.drone_alt,
             self.ctx.drone_vertical_speed,

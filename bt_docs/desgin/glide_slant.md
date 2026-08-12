@@ -224,3 +224,4 @@ All values must be finite and validated before enabling the intercept:
 3. Add collision sensing and centered-impact scoring.
 4. Replace linear pitch feedforward with a calibrated curve if simulation logs
    show significant model error.
+

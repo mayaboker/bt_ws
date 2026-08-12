@@ -99,8 +99,8 @@ class VisualRangeEstimator:
     def _invalid_reason(self, detection: VisualDetectionMessage) -> str | None:
         if not detection.found:
             return "target not found"
-        # if not detection.locked:
-        #     return "target not locked"
+        if not detection.locked:
+            return "target not locked"
         if detection.width <= 0 or detection.height <= 0:
             return "non-positive bounding box"
         if (

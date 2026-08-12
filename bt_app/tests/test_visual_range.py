@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from bt_app.bt_app.comm.gst_bridge import VisualDetectionMessage
+from bt_app.comm.gst_bridge import VisualDetectionMessage
 from bt_app.control.visual_range import (
     CameraIntrinsics,
     TargetRangeEstimate,
@@ -94,7 +94,7 @@ def test_duplicate_frame_does_not_change_filter(estimator):
 
 
 def test_visual_controller_temporarily_reexports_comm_types():
-    from bt_app.bt_app.comm.gst_bridge import GST_Bridge as MovedComm
+    from bt_app.comm.gst_bridge import GST_Bridge as MovedComm
     from bt_app.control.visual_controller import GST_Bridge as CompatibleComm
 
     assert CompatibleComm is MovedComm
@@ -153,14 +153,99 @@ def test_app_rate_limits_range_mavlink_updates():
 
 def test_app_visual_range_handler_clears_range_when_observation_is_stale(estimator):
     from bt_app.app import App
+    from bt_app.estimators import GlideObservation, GlideVelocityEstimator
+    from bt_app.trackers import TrackerManager
 
-    observations = [SimpleNamespace(detection=detection()), None]
     app = App.__new__(App)
+    app.config = SimpleNamespace(tracker_result_timeout_s=0.25)
+    app._tracker_manager = TrackerManager()
     app._visual_range_estimator = estimator
-    app._fresh_visual_observation = lambda: observations.pop(0)
+    app._glide_velocity_estimator = GlideVelocityEstimator(
+        max_vertical_speed_m_s=3.0
+    )
+    app._glide_observation = GlideObservation.invalid("no tracker result")
+    app._glide_last_accepted_frame_id = None
+    app._glide_last_accepted_timestamp_ns = None
+    app._glide_cached_observation = None
+    app._tracker_manager.update_tracker(
+        "default", detection(x=304, y=224), received_at_s=10.0
+    )
 
+    import bt_app.app as app_module
+    original = app_module.time.monotonic
+    app_module.time.monotonic = lambda: 10.1
     app._visual_range_handler()
     assert estimator.estimate.distance_m == pytest.approx(10.0)
+    assert app.glide_observation.valid
+    assert app.glide_observation.ex == pytest.approx(0.0)
+    assert app.glide_observation.ey == pytest.approx(0.0)
+    assert app.glide_observation.vx_geometry_m_s == pytest.approx(15.0)
+
+    first = app.glide_observation
+    app_module.time.monotonic = lambda: 10.2
     app._visual_range_handler()
+    assert app.glide_observation is not first
+    assert app.glide_observation.age_s == pytest.approx(0.2)
+    assert app.glide_observation.depth_m == first.depth_m
+
+    app_module.time.monotonic = lambda: 10.3
+    app._visual_range_handler()
+    app_module.time.monotonic = original
     assert estimator.estimate.distance_m is None
     assert estimator.estimate.reason == "visual observation stale"
+    assert not app.glide_observation.valid
+    assert app.glide_observation.reason == "visual observation stale"
+
+
+def test_app_rejects_non_monotonic_source_timestamp(estimator, monkeypatch):
+    from bt_app.app import App
+    from bt_app.estimators import GlideObservation, GlideVelocityEstimator
+    from bt_app.trackers import TrackerManager
+
+    app = App.__new__(App)
+    app.config = SimpleNamespace(tracker_result_timeout_s=0.25)
+    app._tracker_manager = TrackerManager()
+    app._visual_range_estimator = estimator
+    app._glide_velocity_estimator = GlideVelocityEstimator(max_vertical_speed_m_s=3.0)
+    app._glide_observation = GlideObservation.invalid("no tracker result")
+    app._glide_last_accepted_frame_id = None
+    app._glide_last_accepted_timestamp_ns = None
+    app._glide_cached_observation = None
+    monkeypatch.setattr("bt_app.app.time.monotonic", lambda: 5.0)
+    app._tracker_manager.update_tracker(
+        "default", detection(1, timestamp_ns=20, x=304, y=224), received_at_s=4.9
+    )
+    app._visual_range_handler()
+    assert app.glide_observation.valid
+
+    app._tracker_manager.update_tracker(
+        "default", detection(2, timestamp_ns=20, x=304, y=224), received_at_s=4.95
+    )
+    app._visual_range_handler()
+    assert app.glide_observation.reason == "non-monotonic visual frame"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("glide_target_speed_m_s", float("nan")),
+        ("glide_max_vertical_speed_m_s", 0.0),
+        ("glide_center_deadband", -0.1),
+        ("glide_center_error_max", 1.1),
+    ],
+)
+def test_app_rejects_invalid_glide_geometry_config(field, value):
+    from bt_app.app import App
+    from bt_app.errors import AppStartupError
+    from bt_app.vehicle_config import VehicleConfig
+
+    app = App.__new__(App)
+    app.config = VehicleConfig()
+    original = getattr(app.config, field)
+    setattr(app.config, field, value)
+
+    try:
+        with pytest.raises(AppStartupError):
+            app._App__validate_startup_config()
+    finally:
+        setattr(app.config, field, original)

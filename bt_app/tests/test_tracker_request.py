@@ -10,6 +10,7 @@ from bt_app.context import Context
 from bt_app.msgs import RCChannels
 from bt_app.sm import Robot_StateMachine
 from bt_app.vehicle_config import VehicleConfig
+from bt_app.trackers import TrackerManager
 
 
 class FakeSocket:
@@ -105,6 +106,11 @@ def make_pretracking_app() -> App:
         tracker_result_timeout_s=0.25,
     )
     app.gst_bridge = HealthyObserver()
+    app._tracker_manager = TrackerManager()
+    app._tracker_manager.update_tracker(
+        "default", app.gst_bridge.observation.detection, received_at_s=19.5
+    )
+    app._reset_glide_observation_pipeline = lambda _reason: app._tracker_manager.clear()
     app.tracker_request_publisher = FakePublisher()
     app._tracker_session_active = False
     app._tracker_start_pending = False
@@ -113,13 +119,16 @@ def make_pretracking_app() -> App:
     app._tracker_enabled_at = float("inf")
     app._tracker_last_lateral_command = None
     app._last_rc_channel = [1500] * (int(InternalJoy.TRACKER_MODE) + 1)
+    app.mavlink_service = SimpleNamespace(send_text_to_gcs=lambda *_args: None)
     return app
 
 
 def test_cursor_session_starts_adjusts_at_rate_and_stops() -> None:
     app = make_pretracking_app()
+    assert app._tracker_manager.get_result() is not None
     app.ctx.auto_mode_type = AutoModeType.CURSOR
     app._handle_tracker_mode(AutoModeType.DISABLED, AutoModeType.CURSOR, 10.0)
+    assert app._tracker_manager.get_result() is None
     app._last_rc_channel[InternalJoy.ROLL] = 1300
     app._last_rc_channel[InternalJoy.PITCH] = 1700
 
@@ -136,18 +145,29 @@ def test_cursor_session_starts_adjusts_at_rate_and_stops() -> None:
     ]
 
 
-def test_enabler_requires_tracking_alt_hold_and_toggles() -> None:
+def test_duplicate_transport_delivery_does_not_extend_receipt_time() -> None:
+    app = make_pretracking_app()
+    original = app._tracker_manager.get_result()
+
+    app._gst_tracker_result_handler(original.detection)
+
+    assert app._tracker_manager.get_result() is original
+
+
+def test_bridge_health_uses_local_snapshot_age() -> None:
+    app = make_pretracking_app()
+
+    assert app._tracker_bridge_healthy(20.0)
+    assert not app._tracker_bridge_healthy(20.6)
+
+
+def test_enabler_rejects_legacy_tracking_mode() -> None:
     app = make_pretracking_app()
     app._tracker_session_active = True
     app.ctx.auto_mode_type = AutoModeType.TRACKING
     app.ctx.state = RobotState.ALT_HOLD
 
     app._handle_tracker_enabler(20.0)
-    assert app.ctx.auto_mode_enable
-    assert app._tracker_enabled_at == 20.0
-
-    app.ctx.state = RobotState.TRACKING
-    app._handle_tracker_enabler(21.0)
     assert not app.ctx.auto_mode_enable
     assert app._tracker_enabled_at == float("inf")
 
@@ -204,7 +224,7 @@ class FallbackHoverController:
         return [1500, 1500, 1500, 1500, 2000, 2000, 1000, 1000]
 
 
-def test_auto_mode_combines_visual_lateral_command_with_hover_throttle() -> None:
+def test_auto_mode_forced_entry_uses_neutral_alt_hold_fallback() -> None:
     app = object.__new__(App)
     app.ctx = SimpleNamespace(
         auto_mode_enable=True,
@@ -226,21 +246,6 @@ def test_auto_mode_combines_visual_lateral_command_with_hover_throttle() -> None
     app.gst_bridge = ObservationSource(observation)
 
     expected_hover_command = [1500, 1500, 1500, 1500, 2000, 2000, 1000, 1000]
-    assert app.auto_mode_handler() == expected_hover_command
-    assert hover.yaw == command.yaw
-    assert hover.pitch_roll == (command.pitch, 1500)
-
-    app.gst_bridge.observation = VisualObservation(
-        VisualDetectionMessage(2, 2, False, 0, 0, 0, 0, locked=True),
-        0.0,
-        0.0,
-        RCChannels(1500, 1500, 1500, 1500, 1900, 1900, 1000, 1000),
-    )
-    assert app.auto_mode_handler() == expected_hover_command
-    assert hover.yaw == command.yaw
-    assert hover.pitch_roll == (command.pitch, 1500)
-
-    app.gst_bridge.observation = None
     assert app.auto_mode_handler() == expected_hover_command
     assert not app.ctx.auto_mode_enable
     assert hover.yaw == 1500

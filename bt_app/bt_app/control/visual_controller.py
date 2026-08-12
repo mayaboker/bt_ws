@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 from loguru import logger as log
-from bt_app.bt_app.comm.gst_bridge import (
+from bt_app.comm.gst_bridge import (
     DEFAULT_VISUAL_ZMQ_ENDPOINT,
     VisualDetectionMessage,
     GST_Bridge,
