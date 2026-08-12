@@ -14,7 +14,7 @@ from bt_app.common import NO_RC_CHANNELS
 from bt_app.control.rc_mapper import BetaflightRcMapper
 from bt_app.estimators import GlideObservation
 from bt_app.glide_diagnostic_recorder import (
-    GlideAircraftState,
+    GlideDiagnosticRecorder,
     GlideDiagnosticSample,
     NullGlideDiagnosticRecorder,
 )
@@ -59,6 +59,14 @@ class GlideControlResult:
     abort_reason: str | None = None
 
 
+@dataclass(frozen=True)
+class GlideAircraftState:
+    altitude_m: float
+    roll_deg: float
+    pitch_deg: float
+    yaw_deg: float
+
+
 class GlideController:
     """Own acquisition, visual tracking, commit, and abort phases.
 
@@ -79,7 +87,10 @@ class GlideController:
         lock_frame_count: int = 2,
         commit_depth_m: float = 1.0,
         commit_timeout_s: float = 1.0,
-        diagnostic_recorder: Any | None = None,
+        diagnostic_enabled: bool = False,
+        diagnostic_path: str = "logs/glide_control.csv",
+        diagnostic_flush_interval_s: float = 1.0,
+        diagnostic_queue_size: int = 3000,
     ) -> None:
         self.params = params
         self._max_vertical_speed = float(max_vertical_speed_m_s)
@@ -89,8 +100,12 @@ class GlideController:
         self._commit_depth_m = float(commit_depth_m)
         self._commit_timeout_s = float(commit_timeout_s)
         self._diagnostic_recorder = (
-            diagnostic_recorder
-            if diagnostic_recorder is not None
+            GlideDiagnosticRecorder(
+                diagnostic_path,
+                flush_interval_s=diagnostic_flush_interval_s,
+                queue_size=diagnostic_queue_size,
+            )
+            if diagnostic_enabled
             else NullGlideDiagnosticRecorder()
         )
         if self._lock_frame_count <= 0:
@@ -121,6 +136,7 @@ class GlideController:
         self._vy_output_limit = abs(float(get(ParameterKey.GLIDE_VY_OUT)))
         self._yaw_kp = float(get(ParameterKey.GLIDE_YAW_KP))
         self._yaw_max = abs(float(get(ParameterKey.GLIDE_YAW_MAX)))
+        self._yaw_deadband = abs(float(get(ParameterKey.GLIDE_YAW_DB)))
         self._center_ky = float(get(ParameterKey.GLIDE_CENTER_KY))
         self._depth_alpha = float(get(ParameterKey.GLIDE_DEPTH_EMA))
         self._angle_limit = abs(float(get(ParameterKey.BF_ANGLE_LIMIT)))
@@ -198,7 +214,17 @@ class GlideController:
             return False
         self._reset_control_state()
         self.phase = GlidePhase.TRACK
+        self._diagnostic_recorder.start()
         return True
+
+    def close_attempt(self) -> None:
+        """Drain diagnostics and clear controller state after leaving GLIDE."""
+        self._diagnostic_recorder.stop()
+        self.reset()
+
+    def stop(self) -> None:
+        """Shutdown fallback for an active or partially initialized attempt."""
+        self._diagnostic_recorder.stop()
 
     def abort(self, reason: str) -> None:
         """Abort an attempt; COMMIT deliberately ignores ordinary aborts."""
@@ -348,7 +374,9 @@ class GlideController:
             float(vertical_speed_received_at_s),
         )
         yaw_rate = self._clamp(
-            self._yaw_kp * self._deadband(float(observation.ex)),
+            self._yaw_kp * self._deadband(
+                float(observation.ex), self._yaw_deadband
+            ),
             -self._yaw_max,
             self._yaw_max,
         )
@@ -411,7 +439,14 @@ class GlideController:
     def _update_vertical(self, desired: float, measured: float, sample_time: float) -> bool:
         if self._last_vario_time_s is None:
             self._last_vario_time_s = sample_time
-            return False
+            error = desired - measured
+            correction = self._vy_kp * error
+            self._throttle_correction = self._clamp(
+                correction,
+                -self._vy_output_limit,
+                self._vy_output_limit,
+            )
+            return not math.isclose(correction, self._throttle_correction)
         if sample_time <= self._last_vario_time_s:
             return abs(self._throttle_correction) >= self._vy_output_limit
         dt = sample_time - self._last_vario_time_s
@@ -462,10 +497,11 @@ class GlideController:
         channels[RCChannel.ANGLE] = RC_MAX
         return channels
 
-    def _deadband(self, value: float) -> float:
-        if abs(value) <= self._center_deadband:
+    def _deadband(self, value: float, deadband: float | None = None) -> float:
+        threshold = self._center_deadband if deadband is None else deadband
+        if abs(value) <= threshold:
             return 0.0
-        return math.copysign(abs(value) - self._center_deadband, value)
+        return math.copysign(abs(value) - threshold, value)
 
     @staticmethod
     def _clamp(value: float, lower: float, upper: float) -> float:
@@ -479,6 +515,7 @@ class GlideController:
             ParameterKey.GLIDE_VX_KI, ParameterKey.GLIDE_VY_KP,
             ParameterKey.GLIDE_VY_KI, ParameterKey.GLIDE_VY_OUT,
             ParameterKey.GLIDE_YAW_KP, ParameterKey.GLIDE_YAW_MAX,
+            ParameterKey.GLIDE_YAW_DB,
             ParameterKey.GLIDE_CENTER_KY, ParameterKey.GLIDE_DEPTH_EMA,
             ParameterKey.BF_ANGLE_LIMIT, ParameterKey.BF_YAW_RATE,
         }

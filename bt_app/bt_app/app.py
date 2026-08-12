@@ -15,6 +15,7 @@ from bt_app.control import (
 
 from bt_app.control import (
     FailSafeController,
+    GlideAircraftState,
     GlideController,
     GlidePhase,
     TakeoffController,
@@ -31,11 +32,6 @@ from bt_app.msp_adapter import MSPAdapter
 from bt_app.msp import MspTransportDependencyError
 from bt_app.mavlink_wrapper import MavlinkService
 from bt_app.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
-from bt_app.glide_diagnostic_recorder import (
-    GlideAircraftState,
-    GlideDiagnosticRecorder,
-    NullGlideDiagnosticRecorder,
-)
 from bt_app.control.tracker_request import TrackerRequestPublisher
 from bt_app.control.land_detector import LandDetector
 from bt_app.control.visual_range import CameraIntrinsics, VisualRangeEstimator
@@ -144,7 +140,6 @@ class App:
                 center_deadband=self.config.glide_center_deadband,
                 center_error_max=self.config.glide_center_error_max,
             )
-            self.glide_diagnostic_recorder = self.__load_glide_diagnostic_recorder()
             self.__load_controllers()
             self.mavlink_service = MavlinkService(
                 context=self.ctx,
@@ -347,17 +342,6 @@ class App:
             self.config.rc_record_path,
             flush_interval_s=self.config.rc_record_flush_interval_s,
             queue_size=self.config.rc_record_queue_size,
-        )
-        recorder.start()
-        return recorder
-
-    def __load_glide_diagnostic_recorder(self):
-        if not self.config.glide_log_enabled:
-            return NullGlideDiagnosticRecorder()
-        recorder = GlideDiagnosticRecorder(
-            self.config.glide_log_path,
-            flush_interval_s=self.config.glide_log_flush_interval_s,
-            queue_size=self.config.glide_log_queue_size,
         )
         recorder.start()
         return recorder
@@ -592,7 +576,10 @@ class App:
             lock_frame_count=self.config.glide_lock_frame_count,
             commit_depth_m=self.config.glide_commit_depth_m,
             commit_timeout_s=self.config.glide_commit_timeout_s,
-            diagnostic_recorder=self.glide_diagnostic_recorder,
+            diagnostic_enabled=self.config.glide_log_enabled,
+            diagnostic_path=self.config.glide_log_path,
+            diagnostic_flush_interval_s=self.config.glide_log_flush_interval_s,
+            diagnostic_queue_size=self.config.glide_log_queue_size,
         )
 
         # arm controller
@@ -628,6 +615,7 @@ class App:
         """
         if prev == RobotState.GLIDE and next != RobotState.GLIDE:
             self._clear_glide_range_telemetry()
+            self.controllers[RobotState.GLIDE].close_attempt()
 
         if prev == RobotState.IDLE and next == RobotState.ARM:
             log.warning("reset arm controller ")
@@ -1408,7 +1396,7 @@ class App:
             ("tracker request publisher", getattr(self, "tracker_request_publisher", None)),
             ("MAVLink service", getattr(self, "mavlink_service", None)),
             ("RC state recorder", getattr(self, "rc_recorder", None)),
-            ("GLIDE diagnostic recorder", getattr(self, "glide_diagnostic_recorder", None)),
+            ("GLIDE controller", getattr(self, "controllers", {}).get(RobotState.GLIDE)),
             ("parameter service", getattr(self, "_App__params", None)),
         )
         for resource_name, resource in resources:

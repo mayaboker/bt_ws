@@ -23,14 +23,6 @@ CSV_HEADER = (
 
 
 @dataclass(frozen=True)
-class GlideAircraftState:
-    altitude_m: float
-    roll_deg: float
-    pitch_deg: float
-    yaw_deg: float
-
-
-@dataclass(frozen=True)
 class GlideDiagnosticSample:
     time_monotonic_ns: int
     glide_phase: str

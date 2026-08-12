@@ -28,6 +28,7 @@ def test_glide_diagnostic_has_dedicated_parameters():
     assert "GLIDE_PITCH_FF" in glide.GlideDiagnosticScenario.PARAMETERS
     assert "GLIDE_VX_KP" in glide.GlideDiagnosticScenario.PARAMETERS
     assert "GLIDE_YAW_KP" in glide.GlideDiagnosticScenario.PARAMETERS
+    assert "GLIDE_YAW_DB" in glide.GlideDiagnosticScenario.PARAMETERS
     assert "GLIDE_VY_OUT" in glide.GlideDiagnosticScenario.FIELDNAMES
 
 

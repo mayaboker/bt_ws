@@ -58,7 +58,7 @@ tracker_bridge_health_timeout_s: 1.0
 tracker_result_timeout_s: 0.25
 
 # Milestone-1 visual glide geometry. These values do not command RC yet.
-glide_target_speed_m_s: 2.0
+glide_target_speed_m_s: 5.0
 glide_max_vertical_speed_m_s: 3.0
 glide_center_deadband: 0.05
 glide_center_error_max: 0.99

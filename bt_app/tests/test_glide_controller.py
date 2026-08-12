@@ -2,10 +2,14 @@ from dataclasses import replace
 
 import pytest
 
-from bt_app.control.glide_controller import GlideControlResult, GlideController, GlidePhase
+from bt_app.control.glide_controller import (
+    GlideAircraftState,
+    GlideControlResult,
+    GlideController,
+    GlidePhase,
+)
 from bt_app.control.rc_mapper import BetaflightRcMapper
 from bt_app.estimators import GlideObservation
-from bt_app.glide_diagnostic_recorder import GlideAircraftState
 from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RCChannel_alias as RCChannel
 from bt_app.parameters.generated import ParameterKey
 
@@ -29,6 +33,7 @@ class Params:
             ParameterKey.GLIDE_VY_OUT: 100.0,
             ParameterKey.GLIDE_YAW_KP: 15.0,
             ParameterKey.GLIDE_YAW_MAX: 20.0,
+            ParameterKey.GLIDE_YAW_DB: 0.02,
             ParameterKey.GLIDE_CENTER_KY: 1.0,
             ParameterKey.GLIDE_DEPTH_EMA: 0.35,
             ParameterKey.BF_ANGLE_LIMIT: 60.0,
@@ -77,12 +82,21 @@ def test_each_update_records_aircraft_and_control_diagnostic():
     class Recorder:
         def __init__(self):
             self.samples = []
+            self.started = 0
+            self.stopped = 0
+
+        def start(self):
+            self.started += 1
 
         def record(self, sample):
             self.samples.append(sample)
 
+        def stop(self):
+            self.stopped += 1
+
     recorder = Recorder()
-    controller = GlideController(Params(), diagnostic_recorder=recorder)
+    controller = GlideController(Params(), diagnostic_enabled=False)
+    controller._diagnostic_recorder = recorder
     obs = observation(ex=0.2, ey=-0.1, depth=8.0, vx=2.0, vy=-0.4)
     if controller.phase == GlidePhase.IDLE:
         controller.begin_acquisition()
@@ -107,6 +121,11 @@ def test_each_update_records_aircraft_and_control_diagnostic():
     assert diagnostic.distance_to_target_m == pytest.approx(8.0)
     assert diagnostic.pitch_deg == pytest.approx(2.0)
     assert diagnostic.throttle_rc == result.channels[RCChannel.THROTTLE]
+    assert recorder.started == 1
+
+    controller.close_attempt()
+    assert recorder.stopped == 1
+    assert controller.phase == GlidePhase.IDLE
 
 
 def test_depth_derivative_uses_local_receipt_time_and_activates_feedback():
@@ -142,7 +161,7 @@ def test_vertical_request_correction_and_vario_timestamp_gate():
     controller = GlideController(Params(), max_vertical_speed_m_s=3.0)
     first = update(controller, observation(ey=0.25, vy=2.9), vario_time=1.0)
     assert first.vy_desired_m_s == 3.0
-    assert first.throttle_correction_rc == 0.0
+    assert first.throttle_correction_rc == pytest.approx(30.0)
     second = update(controller, observation(2, 2.0, 9.0, ey=0.25, vy=2.9),
                     vario=0.0, vario_time=2.0)
     assert second.throttle_correction_rc > 0.0
@@ -151,11 +170,28 @@ def test_vertical_request_correction_and_vario_timestamp_gate():
     assert held.throttle_correction_rc == second.throttle_correction_rc
 
 
+def test_first_vertical_sample_applies_descent_proportional_correction():
+    controller = GlideController(Params())
+
+    result = update(
+        controller,
+        observation(vy=-1.0),
+        vario=0.0,
+        vario_time=1.0,
+    )
+
+    assert result.vy_desired_m_s == pytest.approx(-1.0)
+    assert result.throttle_correction_rc == pytest.approx(-10.0)
+    assert result.channels[RCChannel.THROTTLE] == 1650
+    assert not result.throttle_saturated
+
+
 def test_yaw_deadband_direction_and_limit():
     controller = GlideController(Params(), center_deadband=0.05)
-    assert update(controller, observation(ex=0.04)).yaw_rate_dps == 0.0
-    assert update(controller, observation(2, 2.0, 9.0, ex=0.25)).yaw_rate_dps > 0.0
-    saturated = update(controller, observation(3, 3.0, 8.0, ex=1.0))
+    assert update(controller, observation(ex=0.01)).yaw_rate_dps == 0.0
+    assert update(controller, observation(2, 2.0, 9.5, ex=0.04)).yaw_rate_dps > 0.0
+    assert update(controller, observation(3, 3.0, 9.0, ex=0.25)).yaw_rate_dps > 0.0
+    saturated = update(controller, observation(4, 4.0, 8.0, ex=1.0))
     assert saturated.yaw_rate_dps <= 20.0
 
 

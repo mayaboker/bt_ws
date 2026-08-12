@@ -79,7 +79,7 @@ parameters:
       max: 10.0
   GLIDE_PITCH_FF:
     type: float
-    default: -25.0
+    default: -35.0
     limits: {min: -60.0, max: 0.0}
   GLIDE_PITCH_MAX:
     type: float
@@ -87,7 +87,7 @@ parameters:
     limits: {min: 1.0, max: 60.0}
   GLIDE_VX_KP:
     type: float
-    default: 1.0
+    default: 2.0
     limits: {min: 0.0, max: 20.0}
   GLIDE_VX_KI:
     type: float
@@ -95,7 +95,7 @@ parameters:
     limits: {min: 0.0, max: 10.0}
   GLIDE_VY_KP:
     type: float
-    default: 10.0
+    default: 12.0
     limits: {min: 0.0, max: 500.0}
   GLIDE_VY_KI:
     type: float
@@ -107,15 +107,19 @@ parameters:
     limits: {min: 0.0, max: 500.0}
   GLIDE_YAW_KP:
     type: float
-    default: 15.0
+    default: 12.0
     limits: {min: 0.0, max: 500.0}
   GLIDE_YAW_MAX:
     type: float
-    default: 20.0
+    default: 8.0
     limits: {min: 0.0, max: 1000.0}
+  GLIDE_YAW_DB:
+    type: float
+    default: 0.02
+    limits: {min: 0.0, max: 0.2}
   GLIDE_CENTER_KY:
     type: float
-    default: 1.0
+    default: 0.5
     limits: {min: 0.0, max: 20.0}
   GLIDE_DEPTH_EMA:
     type: float
