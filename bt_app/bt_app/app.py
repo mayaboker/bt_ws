@@ -555,7 +555,11 @@ class App:
         self.controllers[RobotState.TAKEOFF] = TakeoffController(self.__params)
 
         # Controlled vertical glide/descent to ground
-        self.controllers[RobotState.GLIDE] = GlideController(self.__params)
+        self.controllers[RobotState.GLIDE] = GlideController(
+            self.__params,
+            max_vertical_speed_m_s=self.config.glide_max_vertical_speed_m_s,
+            center_deadband=self.config.glide_center_deadband,
+        )
 
         # arm controller
         self.controllers[RobotState.ARM] = ARMController(self.__params)
@@ -655,15 +659,8 @@ class App:
 
             case RobotState.GLIDE:
                 controller = self.controllers[RobotState.GLIDE]
-                controller.reset(
-                    self.ctx.drone_alt,
-                    altitude_sample_time_s=self.ctx.drone_alt_received_at_s,
-                    vertical_speed_m_s=self.ctx.drone_vertical_speed,
-                )
-                controller.set_baseline(
-                    self.__params.get(ParameterKey.HOV_BASELINE)
-                )
-                self.ctx.glide_velocity_setpoint = controller.velocity_setpoint_m_s
+                controller.reset()
+                self.ctx.glide_velocity_setpoint = 0.0
                 self.ctx.joy_glide_request = False
                 self.ctx.glide_landed = False
                 self.ctx.target_distance_m = None
@@ -671,16 +668,7 @@ class App:
                 self._glide_last_range_frame_id = None
                 self._glide_last_range_log_s = float("-inf")
                 self._glide_last_range_mavlink_s = float("-inf")
-                self.mavlink_service.send_named_value_to_gcs(
-                    NamedValue.VERTICAL_SPEED_SP,
-                    controller.velocity_setpoint_m_s,
-                )
-                log.info(
-                    "enter GLIDE altitude={} vertical_speed={} baseline={}",
-                    self.ctx.drone_alt,
-                    self.ctx.drone_vertical_speed,
-                    self.__params.get(ParameterKey.HOV_BASELINE),
-                )
+                log.warning("forced GLIDE entry remains gated until milestone 3")
 
             case RobotState.FAILSAFE:
                 # set the failsafe controller setpoint to the current altitude
@@ -733,9 +721,14 @@ class App:
             if not glide_switch_high:
                 self._glide_switch_armed = True
             elif self._glide_switch_armed and not previous_glide_switch_high:
-                self.ctx.joy_glide_request = True
+                self.ctx.joy_glide_request = False
                 self._glide_switch_armed = False
-                log.info("GLIDE requested by takeoff-switch rising edge")
+                message = "GLIDE disabled until milestone 3 safety integration"
+                log.warning(message)
+                if hasattr(self, "mavlink_service"):
+                    self.mavlink_service.send_text_to_gcs(
+                        message, MavSeverity.WARNING
+                    )
         now = time.monotonic()
         self._handle_tracker_mode(previous_mode, requested_mode, now)
 
@@ -1225,32 +1218,8 @@ class App:
         return self.controllers[RobotState.ARM].update()
 
     def glide_handler(self):
-        controller = self.controllers[RobotState.GLIDE]
-        channels = controller.update(
-            self.ctx.drone_alt,
-            self.ctx.drone_vertical_speed,
-            self.ctx.drone_alt_received_at_s,
-        )
-        setpoint = controller.setpoint
-        if setpoint != self.ctx.glide_velocity_setpoint:
-            self.ctx.glide_velocity_setpoint = setpoint
-            self.mavlink_service.send_named_value_to_gcs(
-                NamedValue.VERTICAL_SPEED_SP,
-                setpoint,
-            )
-
-        self._update_glide_range_telemetry(
-            self._visual_range_estimator, time.monotonic()
-        )
-
-        if controller.consume_landed_event():
-            self.ctx.glide_landed = True
-            self.ctx.armed = False
-            self.mavlink_service.send_text_to_gcs(
-                "GLIDE touchdown confirmed; disarming",
-                MavSeverity.INFO,
-            )
-        return channels
+        """Return neutral ALT_HOLD output if GLIDE is forced before milestone 3."""
+        return self._tracking_alt_hold_fallback()
 
     def _update_glide_range_telemetry(self, estimator, now_s: float) -> None:
         estimate = getattr(estimator, "estimate", None)

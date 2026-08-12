@@ -118,7 +118,7 @@ def test_robot_state_uses_stable_integer_values():
     assert RobotState.GLIDE.value == 8
 
 
-def test_alt_hold_enters_glide_only_when_requested():
+def test_alt_hold_rejects_glide_until_milestone_three():
     ctx = Context()
     machine = Robot_StateMachine(ctx, VehicleConfig())
     machine.machine.set_state(RobotState.ALT_HOLD)
@@ -130,7 +130,7 @@ def test_alt_hold_enters_glide_only_when_requested():
 
     ctx.joy_glide_request = True
     machine.resolve()
-    assert ctx.state == RobotState.GLIDE
+    assert ctx.state == RobotState.ALT_HOLD
 
 
 def test_glide_has_no_manual_abort_but_enters_failsafe():
@@ -296,7 +296,7 @@ def test_failsafe_entry_uses_hover_baseline_parameter():
     assert controller.baseline == 1400
 
 
-def test_glide_entry_seeds_controller_and_velocity_setpoint():
+def test_forced_glide_entry_resets_isolated_controller():
     app = make_app_with_context()
     app._glide_switch_armed = True
     controller = FakeController([1500] * 8)
@@ -307,19 +307,14 @@ def test_glide_entry_seeds_controller_and_velocity_setpoint():
 
     app._handle_before_state_changed(RobotState.ALT_HOLD, RobotState.GLIDE)
 
-    assert controller.reset_altitude == 7.5
-    assert controller.reset_kwargs == {
-        "altitude_sample_time_s": 123.0,
-        "vertical_speed_m_s": -0.2,
-    }
-    assert controller.baseline == 1375
-    assert app.ctx.glide_velocity_setpoint == -0.5
-    assert (NamedValue.VERTICAL_SPEED_SP, -0.5) in app.mavlink_service.messages
+    assert controller.reset_altitude is None
+    assert controller.reset_kwargs == {}
+    assert app.ctx.glide_velocity_setpoint == 0.0
     assert not app.ctx.joy_glide_request
     assert not app.ctx.glide_landed
 
 
-def test_glide_request_requires_takeoff_switch_release_then_rising_edge():
+def test_glide_request_is_rejected_after_release_then_rising_edge():
     app = make_app_with_context()
     app.ctx.state = RobotState.ALT_HOLD
     app._last_rc_channel = [1500, 1500, 1500, 1500, 2000, 2000, 2000, 1000, 1000]
@@ -340,7 +335,7 @@ def test_glide_request_requires_takeoff_switch_release_then_rising_edge():
     assert not app.ctx.joy_glide_request
 
     app._App__handle_joy_rc(event(RC_MAX))
-    assert app.ctx.joy_glide_request
+    assert not app.ctx.joy_glide_request
     assert not app._glide_switch_armed
 
 

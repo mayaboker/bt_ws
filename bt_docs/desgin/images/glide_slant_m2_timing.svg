@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="520" viewBox="0 0 1100 520" role="img" aria-labelledby="t d">
+ <title id="t">Milestone 2 update timing</title><desc id="d">Visual filters update on new frame receipt timestamps, vertical PI updates on new vario timestamps, and duplicate App cycles hold state.</desc>
+ <defs><style>.h{font:bold 23px sans-serif;fill:#0f172a}.x{font:15px sans-serif;fill:#0f172a}.s{stroke:#64748b;stroke-width:2}.v{fill:#dbeafe;stroke:#2563eb}.m{fill:#dcfce7;stroke:#059669}.d{fill:#f1f5f9;stroke:#64748b}</style></defs>
+ <text x="550" y="35" text-anchor="middle" class="h">Milestone 2 — independent sample clocks</text>
+ <text x="35" y="100" class="x">App cycles</text><line x1="180" y1="95" x2="1040" y2="95" class="s"/>
+ <g class="d"><circle cx="220" cy="95" r="9"/><circle cx="340" cy="95" r="9"/><circle cx="460" cy="95" r="9"/><circle cx="580" cy="95" r="9"/><circle cx="700" cy="95" r="9"/><circle cx="820" cy="95" r="9"/><circle cx="940" cy="95" r="9"/></g>
+ <text x="35" y="205" class="x">Visual frame</text><line x1="180" y1="200" x2="1040" y2="200" class="s"/>
+ <g class="v"><rect x="205" y="180" width="30" height="40"/><rect x="565" y="180" width="30" height="40"/><rect x="925" y="180" width="30" height="40"/></g><text x="220" y="250" text-anchor="middle" class="x">seed depth</text><text x="580" y="250" text-anchor="middle" class="x">update vx + pitch PI</text><text x="940" y="250" text-anchor="middle" class="x">update vx + pitch PI</text>
+ <text x="35" y="325" class="x">MSP vario</text><line x1="180" y1="320" x2="1040" y2="320" class="s"/>
+ <g class="m"><rect x="325" y="300" width="30" height="40"/><rect x="685" y="300" width="30" height="40"/><rect x="925" y="300" width="30" height="40"/></g><text x="340" y="370" text-anchor="middle" class="x">seed vertical PI</text><text x="700" y="370" text-anchor="middle" class="x">update vertical PI</text><text x="940" y="370" text-anchor="middle" class="x">update vertical PI</text>
+ <rect x="180" y="420" width="860" height="62" rx="10" class="d"/><text x="610" y="447" text-anchor="middle" class="x">Between new samples: hold median/EMA, integrals, pitch feedback, and throttle correction.</text><text x="610" y="470" text-anchor="middle" class="x">Yaw remains algebraic from the current immutable observation.</text>
+</svg>

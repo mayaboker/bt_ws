@@ -71,40 +71,52 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.TAKEOFF_RATE))
 
     @property
-    def glide_desc_rate(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.GLIDE_DESC_RATE))
+    def glide_pitch_ff(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_PITCH_FF))
 
     @property
-    def glide_vel_kp(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.GLIDE_VEL_KP))
+    def glide_pitch_max(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_PITCH_MAX))
 
     @property
-    def glide_vel_ki(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.GLIDE_VEL_KI))
+    def glide_vx_kp(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_VX_KP))
 
     @property
-    def glide_flare_alt(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.GLIDE_FLARE_ALT))
+    def glide_vx_ki(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_VX_KI))
 
     @property
-    def glide_flare_rate(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.GLIDE_FLARE_RATE))
+    def glide_vy_kp(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_VY_KP))
 
     @property
-    def glide_out_limit(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.GLIDE_OUT_LIMIT))
+    def glide_vy_ki(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_VY_KI))
 
     @property
-    def glide_land_alt(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.GLIDE_LAND_ALT))
+    def glide_vy_out(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_VY_OUT))
 
     @property
-    def glide_land_vs(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.GLIDE_LAND_VS))
+    def glide_yaw_kp(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_YAW_KP))
 
     @property
-    def glide_land_sec(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.GLIDE_LAND_SEC))
+    def glide_yaw_max(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_YAW_MAX))
+
+    @property
+    def glide_center_ky(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_CENTER_KY))
+
+    @property
+    def glide_depth_ema(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.GLIDE_DEPTH_EMA))
+
+    @property
+    def bf_angle_limit(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.BF_ANGLE_LIMIT))
 
     @property
     def hov_kp(self) -> float:

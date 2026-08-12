@@ -250,3 +250,19 @@ def test_auto_mode_forced_entry_uses_neutral_alt_hold_fallback() -> None:
     assert not app.ctx.auto_mode_enable
     assert hover.yaw == 1500
     assert hover.pitch_roll == (1500, 1500)
+
+
+def test_forced_glide_handler_uses_neutral_alt_hold_fallback() -> None:
+    app = object.__new__(App)
+    app.ctx = SimpleNamespace(
+        drone_alt=2.0,
+        drone_alt_received_at_s=1.0,
+    )
+    hover = FallbackHoverController()
+    app.controllers = {RobotState.ALT_HOLD: hover}
+
+    channels = app.glide_handler()
+
+    assert channels == [1500, 1500, 1500, 1500, 2000, 2000, 1000, 1000]
+    assert hover.yaw == 1500
+    assert hover.pitch_roll == (1500, 1500)

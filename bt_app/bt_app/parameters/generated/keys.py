@@ -20,15 +20,18 @@ class ParameterKey:
     ALT_KD: Final[Literal['ALT_KD']] = 'ALT_KD'
     ALT_OUT_LIMIT: Final[Literal['ALT_OUT_LIMIT']] = 'ALT_OUT_LIMIT'
     TAKEOFF_RATE: Final[Literal['TAKEOFF_RATE']] = 'TAKEOFF_RATE'
-    GLIDE_DESC_RATE: Final[Literal['GLIDE_DESC_RATE']] = 'GLIDE_DESC_RATE'
-    GLIDE_VEL_KP: Final[Literal['GLIDE_VEL_KP']] = 'GLIDE_VEL_KP'
-    GLIDE_VEL_KI: Final[Literal['GLIDE_VEL_KI']] = 'GLIDE_VEL_KI'
-    GLIDE_FLARE_ALT: Final[Literal['GLIDE_FLARE_ALT']] = 'GLIDE_FLARE_ALT'
-    GLIDE_FLARE_RATE: Final[Literal['GLIDE_FLARE_RATE']] = 'GLIDE_FLARE_RATE'
-    GLIDE_OUT_LIMIT: Final[Literal['GLIDE_OUT_LIMIT']] = 'GLIDE_OUT_LIMIT'
-    GLIDE_LAND_ALT: Final[Literal['GLIDE_LAND_ALT']] = 'GLIDE_LAND_ALT'
-    GLIDE_LAND_VS: Final[Literal['GLIDE_LAND_VS']] = 'GLIDE_LAND_VS'
-    GLIDE_LAND_SEC: Final[Literal['GLIDE_LAND_SEC']] = 'GLIDE_LAND_SEC'
+    GLIDE_PITCH_FF: Final[Literal['GLIDE_PITCH_FF']] = 'GLIDE_PITCH_FF'
+    GLIDE_PITCH_MAX: Final[Literal['GLIDE_PITCH_MAX']] = 'GLIDE_PITCH_MAX'
+    GLIDE_VX_KP: Final[Literal['GLIDE_VX_KP']] = 'GLIDE_VX_KP'
+    GLIDE_VX_KI: Final[Literal['GLIDE_VX_KI']] = 'GLIDE_VX_KI'
+    GLIDE_VY_KP: Final[Literal['GLIDE_VY_KP']] = 'GLIDE_VY_KP'
+    GLIDE_VY_KI: Final[Literal['GLIDE_VY_KI']] = 'GLIDE_VY_KI'
+    GLIDE_VY_OUT: Final[Literal['GLIDE_VY_OUT']] = 'GLIDE_VY_OUT'
+    GLIDE_YAW_KP: Final[Literal['GLIDE_YAW_KP']] = 'GLIDE_YAW_KP'
+    GLIDE_YAW_MAX: Final[Literal['GLIDE_YAW_MAX']] = 'GLIDE_YAW_MAX'
+    GLIDE_CENTER_KY: Final[Literal['GLIDE_CENTER_KY']] = 'GLIDE_CENTER_KY'
+    GLIDE_DEPTH_EMA: Final[Literal['GLIDE_DEPTH_EMA']] = 'GLIDE_DEPTH_EMA'
+    BF_ANGLE_LIMIT: Final[Literal['BF_ANGLE_LIMIT']] = 'BF_ANGLE_LIMIT'
     HOV_KP: Final[Literal['HOV_KP']] = 'HOV_KP'
     HOV_KI: Final[Literal['HOV_KI']] = 'HOV_KI'
     HOV_KD: Final[Literal['HOV_KD']] = 'HOV_KD'
@@ -66,15 +69,18 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'ALT_KD',
     'ALT_OUT_LIMIT',
     'TAKEOFF_RATE',
-    'GLIDE_DESC_RATE',
-    'GLIDE_VEL_KP',
-    'GLIDE_VEL_KI',
-    'GLIDE_FLARE_ALT',
-    'GLIDE_FLARE_RATE',
-    'GLIDE_OUT_LIMIT',
-    'GLIDE_LAND_ALT',
-    'GLIDE_LAND_VS',
-    'GLIDE_LAND_SEC',
+    'GLIDE_PITCH_FF',
+    'GLIDE_PITCH_MAX',
+    'GLIDE_VX_KP',
+    'GLIDE_VX_KI',
+    'GLIDE_VY_KP',
+    'GLIDE_VY_KI',
+    'GLIDE_VY_OUT',
+    'GLIDE_YAW_KP',
+    'GLIDE_YAW_MAX',
+    'GLIDE_CENTER_KY',
+    'GLIDE_DEPTH_EMA',
+    'BF_ANGLE_LIMIT',
     'HOV_KP',
     'HOV_KI',
     'HOV_KD',

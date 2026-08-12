@@ -1,171 +1,179 @@
+from dataclasses import replace
+
 import pytest
 
-from bt_app.control.glide_controller import GlideController
-from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RC_MIN, RCChannel_alias as RCChannel
+from bt_app.control.glide_controller import GlideControlResult, GlideController
+from bt_app.control.rc_mapper import BetaflightRcMapper
+from bt_app.estimators import GlideObservation
+from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RCChannel_alias as RCChannel
 from bt_app.parameters.generated import ParameterKey
 
 
-class FakeEvent:
-    def __init__(self):
-        self.subscribers = []
-
+class Event:
     def subscribe(self, callback):
-        self.subscribers.append(callback)
+        self.callback = callback
 
 
-class FakeParameters:
+class Params:
     def __init__(self):
-        self.on_parameter_changed = FakeEvent()
+        self.on_parameter_changed = Event()
         self.values = {
-            ParameterKey.GLIDE_DESC_RATE: 0.5,
-            ParameterKey.GLIDE_VEL_KP: 100.0,
-            ParameterKey.GLIDE_VEL_KI: 20.0,
-            ParameterKey.GLIDE_FLARE_ALT: 1.0,
-            ParameterKey.GLIDE_FLARE_RATE: 0.15,
-            ParameterKey.GLIDE_OUT_LIMIT: 150.0,
-            ParameterKey.GLIDE_LAND_ALT: 0.15,
-            ParameterKey.GLIDE_LAND_VS: 0.1,
-            ParameterKey.GLIDE_LAND_SEC: 1.0,
             ParameterKey.HOV_BASELINE: 1660,
+            ParameterKey.GLIDE_PITCH_FF: -20.0,
+            ParameterKey.GLIDE_PITCH_MAX: 25.0,
+            ParameterKey.GLIDE_VX_KP: 1.0,
+            ParameterKey.GLIDE_VX_KI: 0.1,
+            ParameterKey.GLIDE_VY_KP: 10.0,
+            ParameterKey.GLIDE_VY_KI: 0.0,
+            ParameterKey.GLIDE_VY_OUT: 100.0,
+            ParameterKey.GLIDE_YAW_KP: 15.0,
+            ParameterKey.GLIDE_YAW_MAX: 20.0,
+            ParameterKey.GLIDE_CENTER_KY: 1.0,
+            ParameterKey.GLIDE_DEPTH_EMA: 0.35,
+            ParameterKey.BF_ANGLE_LIMIT: 60.0,
+            ParameterKey.BF_YAW_RATE: 67.0,
         }
 
     def get(self, name):
         return self.values[name]
 
 
-def make_clock(monkeypatch, initial=0.0):
-    clock = [initial]
-    monkeypatch.setattr(
-        "bt_app.control.glide_controller.time.monotonic", lambda: clock[0]
+def observation(frame=1, received=1.0, depth=10.0, ex=0.0, ey=0.0,
+                vx=15.0, vy=0.0, valid=True, reason=None):
+    return GlideObservation(
+        frame, frame, received, 0.0, (100, 100, 50, 50), ex, ey,
+        min(1.0, (ex * ex + ey * ey) ** 0.5), 1.0, depth, 0.0,
+        vx, vy, (vx * vx + vy * vy) ** 0.5, False, valid, reason,
     )
-    return clock
 
 
-def test_velocity_pi_lowers_throttle_when_descent_is_too_slow(monkeypatch):
-    clock = make_clock(monkeypatch)
-    controller = GlideController(FakeParameters())
-    controller.reset(3.0, altitude_sample_time_s=0.0)
-
-    clock[0] = 0.05
-    channels = controller.update(3.0, 0.0, altitude_sample_time_s=0.05)
-
-    assert controller.setpoint == -0.5
-    assert channels[RCChannel.THROTTLE] < 1660
-
-
-def test_velocity_pi_adds_throttle_when_descent_is_too_fast(monkeypatch):
-    clock = make_clock(monkeypatch)
-    controller = GlideController(FakeParameters())
-    controller.reset(3.0, altitude_sample_time_s=0.0)
-
-    clock[0] = 0.05
-    channels = controller.update(3.0, -1.0, altitude_sample_time_s=0.05)
-
-    assert channels[RCChannel.THROTTLE] > 1660
+def update(controller, obs, *, vario=0.0, vario_time=None, now=None):
+    sample = obs.received_at_s if vario_time is None else vario_time
+    current = sample if now is None else now
+    return controller.update(
+        obs,
+        vertical_speed_m_s=vario,
+        vertical_speed_received_at_s=sample,
+        now_s=current,
+    )
 
 
-def test_pi_updates_only_once_for_each_msp_sample(monkeypatch):
-    clock = make_clock(monkeypatch)
-    controller = GlideController(FakeParameters())
-    controller.reset(3.0, altitude_sample_time_s=0.0)
-    clock[0] = 0.05
-    first = controller.update(3.0, 0.0, altitude_sample_time_s=0.05)
-    integral = controller._integral
-
-    clock[0] = 0.06
-    repeated = controller.update(3.0, 0.0, altitude_sample_time_s=0.05)
-
-    assert repeated == first
-    assert controller._integral == integral
+def test_first_frame_uses_feedforward_without_forward_feedback():
+    result = update(GlideController(Params()), observation())
+    assert isinstance(result, GlideControlResult)
+    assert result.pitch_feedforward_deg == pytest.approx(-20.0)
+    assert result.pitch_feedback_deg == 0.0
+    assert not result.forward_feedback_active
+    assert result.channels[RCChannel.PITCH] > RC_MID
 
 
-def test_pi_anti_windup_rejects_error_that_deepens_saturation():
-    controller = GlideController(FakeParameters())
-    controller._output_limit = 10.0
-
-    output = controller._update_pi(-0.5, 2.0, 1.0)
-
-    assert output == -10.0
-    assert controller._integral == 0.0
-
-
-def test_flare_interpolates_descent_target():
-    controller = GlideController(FakeParameters())
-
-    assert controller._target_velocity(2.0) == -0.5
-    assert controller._target_velocity(0.15) == -0.15
-    assert controller._target_velocity(0.575) == pytest.approx(-0.325)
+def test_depth_derivative_uses_local_receipt_time_and_activates_feedback():
+    controller = GlideController(Params())
+    update(controller, observation(frame=1, received=1.0, depth=10.0))
+    result = update(controller, observation(frame=2, received=1.5, depth=8.0))
+    assert result.vx_measured_m_s == pytest.approx(4.0)
+    assert result.forward_feedback_active
+    assert result.pitch_feedback_deg < 0.0
+    assert result.pitch_command_deg < result.pitch_feedforward_deg
 
 
-def test_stale_vario_commands_hover_baseline_without_integrating(monkeypatch):
-    clock = make_clock(monkeypatch, 1.0)
-    controller = GlideController(FakeParameters())
-    controller.reset(3.0, altitude_sample_time_s=0.0)
-    controller._integral = -2.0
-
-    channels = controller.update(3.0, -2.0, altitude_sample_time_s=0.0)
-
-    assert channels[RCChannel.THROTTLE] == 1660
-    assert controller._integral == -2.0
-
-    clock[0] = 1.05
-    recovered = controller.update(3.0, -0.5, altitude_sample_time_s=1.05)
-    assert recovered[RCChannel.THROTTLE] == 1660
-    assert controller._integral == -2.0
-
-    clock[0] = 1.1
-    controller.update(3.0, -0.5, altitude_sample_time_s=1.1)
-    assert controller._integral == -2.0
+def test_duplicate_frame_holds_forward_filter_and_integral():
+    controller = GlideController(Params())
+    update(controller, observation(frame=1, received=1.0, depth=10.0))
+    first = update(controller, observation(frame=2, received=2.0, depth=8.0))
+    integral = controller._vx_integral
+    repeated = update(controller, observation(frame=2, received=2.0, depth=8.0), now=2.1)
+    assert repeated.vx_measured_m_s == first.vx_measured_m_s
+    assert controller._vx_integral == integral
 
 
-def test_output_limit_is_correction_not_absolute_pwm():
-    controller = GlideController(FakeParameters())
-
-    assert controller.make_channels(-150)[RCChannel.THROTTLE] == 1510
-    assert controller.make_channels(150)[RCChannel.THROTTLE] == 1810
-    assert controller.make_channels(-1000)[RCChannel.THROTTLE] == RC_MIN
-    assert controller.make_channels(1000)[RCChannel.THROTTLE] == RC_MAX
-
-
-def test_glide_keeps_level_angle_mode_armed():
-    channels = GlideController(FakeParameters()).make_channels()
-
-    assert channels[RCChannel.ROLL] == RC_MID
-    assert channels[RCChannel.PITCH] == RC_MID
-    assert channels[RCChannel.YAW] == RC_MID
-    assert channels[RCChannel.ARM] == RC_MAX
-    assert channels[RCChannel.ANGLE] == RC_MAX
+def test_three_sample_median_then_ema_rejects_depth_velocity_spike():
+    controller = GlideController(Params())
+    update(controller, observation(1, 1.0, 10.0))
+    update(controller, observation(2, 2.0, 9.0))       # raw 1
+    update(controller, observation(3, 3.0, 1.0))       # raw 8
+    result = update(controller, observation(4, 4.0, 0.5))  # raw .5, median 1
+    assert result.vx_measured_m_s < 2.0
 
 
-def test_landing_requires_fresh_low_speed_and_confirmation_time(monkeypatch):
-    clock = make_clock(monkeypatch)
-    controller = GlideController(FakeParameters())
-    controller.reset(0.1, altitude_sample_time_s=0.0)
-
-    clock[0] = 0.05
-    first = controller.update(0.05, 0.0, altitude_sample_time_s=0.05)
-    assert first[RCChannel.ARM] == RC_MAX
-    assert not controller.landed
-
-    clock[0] = 1.1
-    landed = controller.update(0.05, 0.0, altitude_sample_time_s=1.1)
-    assert landed[RCChannel.ARM] == RC_MIN
-    assert landed[RCChannel.THROTTLE] == RC_MIN
-    assert controller.consume_landed_event()
-    assert not controller.consume_landed_event()
+def test_vertical_request_correction_and_vario_timestamp_gate():
+    controller = GlideController(Params(), max_vertical_speed_m_s=3.0)
+    first = update(controller, observation(ey=0.25, vy=2.9), vario_time=1.0)
+    assert first.vy_desired_m_s == 3.0
+    assert first.throttle_correction_rc == 0.0
+    second = update(controller, observation(2, 2.0, 9.0, ey=0.25, vy=2.9),
+                    vario=0.0, vario_time=2.0)
+    assert second.throttle_correction_rc > 0.0
+    held = update(controller, observation(2, 2.0, 9.0, ey=0.25, vy=2.9),
+                  vario=-3.0, vario_time=2.0, now=2.1)
+    assert held.throttle_correction_rc == second.throttle_correction_rc
 
 
-def test_live_parameter_updates_apply():
-    controller = GlideController(FakeParameters())
+def test_yaw_deadband_direction_and_limit():
+    controller = GlideController(Params(), center_deadband=0.05)
+    assert update(controller, observation(ex=0.04)).yaw_rate_dps == 0.0
+    assert update(controller, observation(2, 2.0, 9.0, ex=0.25)).yaw_rate_dps > 0.0
+    saturated = update(controller, observation(3, 3.0, 8.0, ex=1.0))
+    assert saturated.yaw_rate_dps <= 20.0
 
-    controller.on_parameter_changed(ParameterKey.GLIDE_DESC_RATE, 0.8)
-    controller.on_parameter_changed(ParameterKey.GLIDE_VEL_KP, 120.0)
-    controller.on_parameter_changed(ParameterKey.GLIDE_FLARE_RATE, 0.2)
-    controller.on_parameter_changed(ParameterKey.GLIDE_OUT_LIMIT, 100.0)
-    controller.on_parameter_changed(ParameterKey.HOV_BASELINE, 1700)
 
-    assert controller._descent_rate_m_s == 0.8
-    assert controller._kp == 120.0
-    assert controller._flare_rate_m_s == 0.2
-    assert controller._output_limit == 100.0
-    assert controller.make_channels(-100)[RCChannel.THROTTLE] == 1600
+def test_invalid_or_stale_input_returns_neutral_hover_and_resets():
+    controller = GlideController(Params())
+    update(controller, observation())
+    invalid = update(controller, replace(observation(), valid=False, reason="lost"))
+    assert not invalid.valid and invalid.reason == "lost"
+    assert invalid.channels[RCChannel.PITCH] == RC_MID
+    assert invalid.channels[RCChannel.YAW] == RC_MID
+    assert invalid.channels[RCChannel.THROTTLE] == 1660
+    assert invalid.channels[RCChannel.ARM] == RC_MAX
+    stale = update(controller, observation(), vario_time=0.0, now=1.0)
+    assert not stale.valid and stale.reason == "vertical speed stale"
+
+
+def test_reset_clears_all_control_history():
+    controller = GlideController(Params())
+    update(controller, observation(1, 1.0, 10.0))
+    update(controller, observation(2, 2.0, 8.0))
+    controller.reset()
+    assert controller._vx_measured is None
+    assert controller._vx_integral == 0.0
+    assert controller._vy_integral == 0.0
+
+
+def test_pitch_and_throttle_outputs_are_bounded():
+    params = Params()
+    params.values[ParameterKey.GLIDE_VX_KP] = 100.0
+    params.values[ParameterKey.GLIDE_VY_KP] = 1000.0
+    controller = GlideController(params)
+    update(controller, observation(1, 1.0, 10.0))
+    result = update(controller, observation(2, 2.0, 10.0), vario=-10.0)
+    assert abs(result.pitch_command_deg) <= 25.0
+    assert abs(result.throttle_correction_rc) <= 100.0
+    assert result.pitch_saturated
+    assert result.throttle_saturated
+
+
+def test_pi_anti_windup_rejects_integral_that_deepens_saturation():
+    output, integral, saturated = GlideController._pi(
+        10.0, 1.0, 0.0, -5.0, 5.0,
+        output_sign=1.0, kp=10.0, ki=1.0,
+    )
+    assert output == 5.0
+    assert integral == 0.0
+    assert saturated
+
+
+def test_complete_command_centers_roll_and_enables_angle_mode():
+    result = update(GlideController(Params()), observation())
+    assert result.channels[RCChannel.ROLL] == RC_MID
+    assert result.channels[RCChannel.ARM] == RC_MAX
+    assert result.channels[RCChannel.ANGLE] == RC_MAX
+
+
+def test_angle_mapper_clamps_physical_attitude_and_validates_limit():
+    mapper = BetaflightRcMapper(yaw_rate_full_stick_dps=67.0)
+    assert mapper.angle_to_rc(0.0, angle_limit_deg=60.0) == RC_MID
+    assert mapper.angle_to_rc(60.0, angle_limit_deg=60.0) == 2000
+    assert mapper.angle_to_rc(-120.0, angle_limit_deg=60.0) == 1000
+    with pytest.raises(ValueError, match="angle_limit_deg"):
+        mapper.angle_to_rc(1.0, angle_limit_deg=0.0)

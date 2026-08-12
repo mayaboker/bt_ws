@@ -55,6 +55,8 @@ Completion gate: deterministic controller tests demonstrate bounded RC output,
 timestamp-gated filter and PI updates, centering-dependent forward speed, and
 safe handling of invalid observations.
 
+Design: [milestone 2 — isolated TRACK controller](glide_slant_milestone_2_track_controller.md)
+
 ### 3. Flight phases and application integration
 
 Add controller-owned ACQUIRE, TRACK, COMMIT, COMMIT_TIMEOUT, and ABORTED phases.

@@ -309,10 +309,8 @@ class Robot_StateMachine:
         return  ok
 
     def enter_glide_from_alt_hold(self, event):
-        return all([
-            self.ctx.armed,
-            self.ctx.joy_glide_request,
-        ])
+        """Milestone 2 safety gate: TRACK has no phase/abort integration yet."""
+        return False
 
     def enter_idle_from_glide(self, event):
         return self.ctx.glide_landed
