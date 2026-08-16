@@ -418,7 +418,6 @@ class GlideController:
         )
 
         ey = self._deadband(float(observation.ey))
-        print(observation.vy_geometry_m_s)
         vy_desired = self._clamp(
             float(observation.vy_geometry_m_s) + self._center_ky * ey,
             -self._max_vertical_speed,
