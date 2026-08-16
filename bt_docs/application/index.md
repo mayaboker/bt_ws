@@ -80,3 +80,6 @@ Send ARM sequence
 
 Manual mode pass through joystick request , 
 
+TODO: what about acro
+TODO: what about payload
+

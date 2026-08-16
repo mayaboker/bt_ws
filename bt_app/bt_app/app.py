@@ -31,7 +31,7 @@ from bt_app.errors import AppExitCode, AppStartupError
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.msp import MspTransportDependencyError
 from bt_app.mavlink_wrapper import MavlinkService
-from bt_app.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
+from bt_app.bt_app.diagnostics.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
 from bt_app.control.tracker_request import TrackerRequestPublisher
 from bt_app.control.land_detector import LandDetector
 from bt_app.control.visual_range import CameraIntrinsics, VisualRangeEstimator

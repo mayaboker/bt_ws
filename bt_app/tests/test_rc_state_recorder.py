@@ -2,7 +2,7 @@ import csv
 import time
 
 from bt_app.common import RobotState
-from bt_app.rc_state_recorder import CSV_HEADER, NullRcStateRecorder, RcStateRecorder
+from bt_app.bt_app.diagnostics.rc_state_recorder import CSV_HEADER, NullRcStateRecorder, RcStateRecorder
 
 
 def read_rows(path):
