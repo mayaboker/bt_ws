@@ -104,16 +104,19 @@ class App:
         self.controllers = {}
         self.__validate_startup_config()
         try:
-            self.__params = self.__load_parameters()
+            self.__params = self._init_parameters()
             self._tracker_manager = TrackerManager()
             self.gst_bridge = self._init_gst_bridge()
+            # TODO: move it to tracker manager and bridge
             self.tracker_request_publisher = self.__load_tracker_request_publisher()
+
             self._tracker_session_active = False
             self._tracker_start_pending = False
             self._tracker_requires_disabled = False
             self._tracker_next_adjust_at = 0.0
             self._tracker_enabled_at = float("inf")
             self._tracker_last_lateral_command: tuple[int, int] | None = None
+
             self.ctx.alt_setpoint = self.__params.get(ParameterKey.TAKEOFF_ALT)
             self.manual_land_detector = self.__load_manual_land_detector()
             parameter_event = getattr(self.__params, "on_parameter_changed", None)
@@ -249,9 +252,9 @@ class App:
             )
 
 
-    def __load_parameters(self):
+    def _init_parameters(self):
         """
-        init parametrs
+        init parameters service
         """
         p_path = pathlib.Path(self.config.config_name)
         if not p_path.is_absolute():
@@ -335,6 +338,9 @@ class App:
         return str(exc) or exc.__class__.__name__
 
     def __load_rc_recorder(self):
+        """
+        
+        """
         if not self.config.rc_record_enabled:
             return NullRcStateRecorder()
 
@@ -347,6 +353,9 @@ class App:
         return recorder
 
     def _init_gst_bridge(self):
+        """
+        Start the communication bridge to gstreamer process
+        """
         if not self.config.visual_observer_enabled:
             return None
         from bt_app.comm.gst_bridge import GST_Bridge
@@ -1127,10 +1136,14 @@ class App:
         return rc
 
     def _manual_handler(self):
+        """
+        Read the joystick RC channels and return them directly, with AUX1/AUX2 forced high if armed.
+        TODO: what about acro mode? should we allow acro mode in manual? should we allow acro mode in failsafe? should we allow acro mode in glide? should we allow acro mode in tracking?
+        TODO: waht about payload control
+        """
         channels = self._last_rc_channel
-        if self.ctx.armed:
-            channels[AETR1234.AUX1] = RC_MAX
-            channels[AETR1234.AUX2] = RC_MAX
+        channels[AETR1234.AUX1] = channels[InternalJoy.ARM]
+        channels[AETR1234.AUX2] = RC_MAX
         return channels
 
     def _notification_center(self):
@@ -1373,11 +1386,16 @@ class App:
     #TODO: move to arm controller 
 
     def _make_disarm_channels(self) -> list[int]:
+        """
+        use by IDLE mode
+        Return a safe RC channel set that disarms the vehicle 
+        and disables all
+        """
         channels = [RC_MIN] * NO_RC_CHANNELS
         channels[RCChannel.ROLL] = RC_MID
         channels[RCChannel.PITCH] = RC_MID
         channels[RCChannel.THROTTLE] = RC_MIN
-        channels[RCChannel.YAW] = RC_MID
+        channels[RCChannel.YAW] = RC_MID #TODO: check if we need to set yaw to mid or min
         channels[RCChannel.ARM] = RC_MIN
         channels[RCChannel.ANGLE] = RC_MAX
         return channels

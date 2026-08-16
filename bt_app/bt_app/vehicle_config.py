@@ -18,16 +18,22 @@ class VehicleConfig():
     drone_eth_host: str = field(default="127.0.0.1")
     drone_eth_port: int = field(default=5761)
     drone_serial_port: str = field(default="/dev/ttyUSB0")
+    # gcs
     gcs_ip: str = field(default="127.0.0.1")
     gcs_port: int = field(default=14550)
+    # rc diagnostic
     rc_record_enabled: bool = field(default=False)
     rc_record_path: str = field(default="logs/rc_state.csv")
     rc_record_flush_interval_s: float = field(default=1.0)
     rc_record_queue_size: int = field(default=1000)
+    # parameters file
     config_name: str = field(default="parameters.yaml")
+    # application logging
     log_level: str = field(default="INFO")
+    # visual
     visual_observer_enabled: bool = field(default=False)
     visual_zmq_endpoint: str = field(default="tcp://127.0.0.1:5556")
+
     visual_image_width: int = field(default=640)
     visual_image_height: int = field(default=480)
     visual_camera_fx_px: float = field(default=320.0)
@@ -54,6 +60,7 @@ class VehicleConfig():
     glide_lock_frame_count: int = field(default=2)
     glide_commit_depth_m: float = field(default=1.0)
     glide_commit_timeout_s: float = field(default=2.0)
+    # glide diagnostic
     glide_log_enabled: bool = field(default=True)
     glide_log_path: str = field(default="logs/glide_control.csv")
     glide_log_flush_interval_s: float = field(default=1.0)

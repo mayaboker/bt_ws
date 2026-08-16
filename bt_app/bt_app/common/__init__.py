@@ -40,6 +40,7 @@ class InternalJoy(IntEnum):
     AUTO_TAKE_OFF = auto() # SD(6)
     ENABLER = auto() # SF(7)
     TRACKER_MODE = auto() # SB(8)
+    PAYLOAD = auto() # SC(9)
 
 class AETR1234(IntEnum):
     """

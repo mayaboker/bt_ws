@@ -1,3 +1,42 @@
+"""Asynchronous CSV recorder for outgoing RC state and channel snapshots.
+
+``RcStateRecorder`` is intended for flight diagnostics.  ``record`` performs
+only validation and a non-blocking queue write; a daemon writer thread writes
+rows and flushes them periodically, so the control loop is not delayed by
+filesystem I/O.  Each row contains a monotonic timestamp, the
+``RobotState`` name, and the eight RC channel values (``ch1`` through
+``ch8``).
+
+The recorder owns the file between :meth:`start` and :meth:`stop`.  It creates
+the parent directory and writes the CSV header when the file is new or empty.
+Samples submitted before ``start`` or after ``stop`` are ignored.  If the
+bounded queue is full, or a sample has the wrong channel count, the sample is
+dropped and ``dropped_samples`` is incremented.  Use ``NullRcStateRecorder``
+when recording is disabled; it has the same lifecycle API and performs no I/O.
+
+Typical usage::
+
+    from bt_app.common import RobotState
+    from bt_app.rc_state_recorder import RcStateRecorder
+
+    recorder = RcStateRecorder(
+        "logs/rc_state.csv",
+        flush_interval_s=0.5,
+        queue_size=1000,
+    )
+    recorder.start()
+    try:
+        recorder.record(RobotState.GLIDE, [1500, 1500, 1660, 1500,
+                                           1500, 1500, 1500, 2000])
+    finally:
+        recorder.stop()  # drains queued samples before closing the file
+
+The resulting CSV has this shape::
+
+    time_monotonic_ns,state,ch1,ch2,ch3,ch4,ch5,ch6,ch7,ch8
+    1234567890,GLIDE,1500,1500,1660,1500,1500,1500,1500,2000
+"""
+
 from __future__ import annotations
 
 import csv
