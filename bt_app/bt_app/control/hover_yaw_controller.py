@@ -45,6 +45,7 @@ class HoverYawController:
             yaw_rate_full_stick_dps=self.yaw_stick_range,
         )
         self._setup()
+        self._banner()
 
     def _setup(self):
         self.alt_pid = PID(
@@ -53,12 +54,9 @@ class HoverYawController:
             kd=0.0,
             output_limits=self.params.get(ParameterKey.HOV_OUT_LIMIT),
         )
-        
-        log.info("HoverYawController initialized with PID: \n" \
-                "Kp={}, Ki={}, Kd={}, ", 
-                 self.alt_pid.kp, 
-                 self.alt_pid.ki, 
-                 self.alt_pid.kd)
+
+    def _banner(self):
+        log.info("HoverYawController loaded")
 
     @property
     def setpoint(self) -> float:

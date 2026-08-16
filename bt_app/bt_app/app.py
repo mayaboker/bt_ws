@@ -31,7 +31,7 @@ from bt_app.errors import AppExitCode, AppStartupError
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.msp import MspTransportDependencyError
 from bt_app.mavlink_wrapper import MavlinkService
-from bt_app.bt_app.diagnostics.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
+from bt_app.diagnostics.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
 from bt_app.control.tracker_request import TrackerRequestPublisher
 from bt_app.control.land_detector import LandDetector
 from bt_app.control.visual_range import CameraIntrinsics, VisualRangeEstimator
@@ -55,7 +55,8 @@ from bt_app.msp.bt_v2 import (
 )
 from bt_app.common import (
     AETR1234,
-    InternalJoy)
+    InternalJoy,
+    InternalJoystick)
 from bt_app.parameters import Parameters
 from loguru import logger as log
 import time
@@ -134,7 +135,7 @@ class App:
             self._glide_last_accepted_frame_id: int | None = None
             self._glide_last_accepted_timestamp_ns: int | None = None
             self._glide_cached_observation: GlideObservation | None = None
-            self._last_rc_channel = [RC_MIN] * (int(InternalJoy.TRACKER_MODE) + 1)
+            self._last_rc_channel = [RC_MIN] * len(InternalJoy)
             self.__load_drone_interface()
             self._visual_range_estimator = self._load_range_visual_estimator()
             self._glide_velocity_estimator = GlideVelocityEstimator(
@@ -261,7 +262,6 @@ class App:
             p_path = pathlib.Path.cwd().joinpath(p_path)
         if not p_path.exists():
             raise AppStartupError(f"Parameters config not found: {p_path}")
-        log.info("load parameters from: {}", p_path)
         try:
             return Parameters(yaml_path=p_path)
         except Exception as exc:
@@ -540,7 +540,7 @@ class App:
         """
         load controllers
         each controller implement update method (signature don't force)
-        - joystick zmq adapter
+        - joystick mavlink adapter
         - failsafe
         - arm
         - takeoff
@@ -570,7 +570,6 @@ class App:
             raise AppStartupError(
                 f"Unable to start joystick MAVLink listener: {exc}"
             ) from exc
-        log.info(f"------------------------- {config}")
 
         #endregion
 
@@ -615,11 +614,7 @@ class App:
             MavSeverity.INFO,
         )
 
-        if all([previous_state == RobotState.MANUAL,
-                new_state == RobotState.FAILSAFE]):
-            # set manual_request to false, fail safe return to hold
-            # we need  toggle return to manual
-            self.ctx.joy_manual_request = False
+
         
     def _handle_before_state_changed(self, prev, next):
         
@@ -648,7 +643,6 @@ class App:
                 self.controllers[RobotState.TAKEOFF].reset()
                 self.ctx.armed_allowed = False
                 self.ctx.joy_arm_requested = False
-                self.ctx.joy_takeoff_request = False
                 self.ctx.armed = False
                 self.ctx.joy_glide_request = False
                 self.ctx.glide_landed = False
@@ -727,18 +721,14 @@ class App:
         """
         handle interrupt that register as joy action
         """
-        prev_channels = list(self._last_rc_channel)
-        channels = list(event.channels)
-        required = int(InternalJoy.TRACKER_MODE) + 1
-        if len(prev_channels) < required:
-            prev_channels.extend([RC_MIN] * (required - len(prev_channels)))
-        if len(channels) < required:
-            channels.extend([RC_MIN] * (required - len(channels)))
+        
+        prev_channels: InternalJoystick = self._last_rc_channel
+        channels = InternalJoystick(*event.channels)
+
         self._last_rc_channel = channels
-        self.ctx.request_rc = self._last_rc_channel
+        self.ctx.request_rc = channels
+
         # if name == JoyInterrupt.TAKEOFF_REQUEST:
-        self.ctx.joy_takeoff_request = self._last_rc_channel[InternalJoy.AUTO_TAKE_OFF] == RC_MAX
-        self.ctx.joy_manual_request = self._last_rc_channel[InternalJoy.MANUAL] == RC_MIN
         previous_mode = self.ctx.auto_mode_type
         try:
             requested_mode = AutoModeType(
@@ -796,13 +786,10 @@ class App:
     
     def _enter_joystick_failsafe(self) -> None:
         """Clear stale joystick intent and request application failsafe."""
-        safe_channels = DEFAULT_RC_CHANNELS.copy()
-        self._last_rc_channel = safe_channels.copy()
-        self.ctx.request_rc = safe_channels
+        self._last_rc_channel = InternalJoystick()
+        self.ctx.request_rc = InternalJoystick()
         self.ctx.joy_fail_safe = True
-        self.ctx.joy_takeoff_request = False
         self.ctx.joy_glide_request = False
-        self.ctx.joy_manual_request = False
         self.ctx.joy_arm_requested = False
         self.ctx.armed_allowed = False
         self.ctx.arm_switch = False
@@ -1141,14 +1128,16 @@ class App:
         TODO: what about acro mode? should we allow acro mode in manual? should we allow acro mode in failsafe? should we allow acro mode in glide? should we allow acro mode in tracking?
         TODO: waht about payload control
         """
-        channels = self._last_rc_channel
-        channels[AETR1234.AUX1] = channels[InternalJoy.ARM]
+        channels = list(self._last_rc_channel)
+        channels[AETR1234.AUX1] = self._last_rc_channel.ARM
         channels[AETR1234.AUX2] = RC_MAX
         return channels
 
     def _notification_center(self):
         """
-        TODO: think about queue and other service handle it, for know we  only user scheduler submit it like queue"""
+        TODO: Move to controllers
+        """
+
         self._update_manual_land_detector()
         if self.ctx.state == RobotState.ARM:
             if self.ctx.arming_disable_flags:
@@ -1160,7 +1149,7 @@ class App:
     def _manual_land_detection_requested(self) -> bool:
         return (
             self.ctx.state == RobotState.MANUAL
-            and not self.ctx.joy_manual_request
+            and not self.ctx.request_rc.is_manual()
             and self.ctx.request_rc[AETR1234.THROTTLE] < 1050
         )
 
@@ -1481,6 +1470,7 @@ class App:
                 self.robot_sm.resolve()
                 # get rc data from the right controller
                 rc_channels = self._resolve_rc()
+                
                 # validate rc channel
                 self.ctx.sent_rc = self._sanitize_rc_channels(rc_channels)
                 if self._stop_event.is_set():

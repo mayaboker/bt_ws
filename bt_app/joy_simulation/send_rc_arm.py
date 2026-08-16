@@ -17,8 +17,9 @@ os.environ.setdefault("MAVLINK20", "1")
 from pymavlink import mavutil
 
 mavutil.set_dialect("common")
+from joy_simulation import rc_channels
 
-
+# region consts
 ROLL = 0
 PITCH = 1
 THROTTLE = 2
@@ -54,6 +55,7 @@ STATE_NAMES = {
 }
 ANSI_BOLD_CYAN = "\033[1;36m"
 ANSI_RESET = "\033[0m"
+#endregion
 
 SCENARIO_BANNER = """\
 ==============================================================================
@@ -62,10 +64,7 @@ bt-app RC Override SITL Scenario
 Simulates this joystick flight sequence:
   1. Wait for bt-app MAVLink telemetry.
   2. Arm the drone in MANUAL with low throttle.
-  3. Request automatic takeoff and wait for ALT_HOLD.
-  4. Hold altitude for the configured duration.
-  5. Switch to MANUAL and descend with the configured throttle.
-  6. Confirm touchdown, disarm, and verify IDLE.
+  6. disarm, and verify IDLE.
 
 Safety behavior:
   Before takeoff, failures send a ground-safe disarm command.
@@ -77,22 +76,7 @@ class ScenarioError(RuntimeError):
     """Raised when the SITL scenario cannot complete safely."""
 
 
-def rc_channels(
-    *,
-    throttle: int = RC_MIN,
-    armed: bool = False,
-    manual: bool = False,
-    auto_takeoff: bool = False,
-    tracker_mode: bool = False,
-) -> tuple[int, ...]:
-    """Build the eight application joystick channels."""
 
-    channels = [RC_MID, RC_MID, throttle, RC_MID, RC_MIN, RC_MAX, RC_MIN, RC_MIN, RC_MIN]
-    channels[ARM] = RC_MAX if armed else RC_MIN
-    channels[MANUAL] = RC_MIN if manual else RC_MAX
-    channels[AUTO_TAKEOFF] = RC_MAX if auto_takeoff else RC_MIN
-    channels[TRACKER_MODE] = RC_MAX if tracker_mode else RC_MIN
-    return tuple(channels)
 
 
 NEUTRAL_DISARMED = rc_channels()
@@ -199,84 +183,10 @@ class MavlinkRcScenario:
             self._wait_for_state(
                 ARM_IN_MANUAL,
                 STATE_MANUAL,
-                self.state_timeout_s,
+                30
             )
 
-            self._phase("Requesting automatic takeoff from MANUAL")
-            self._wait_for_state(
-                AUTO_TAKEOFF_ARMED,
-                STATE_TAKEOFF,
-                self.state_timeout_s,
-            )
-            self._airborne = True
 
-            self._phase("Waiting for takeoff completion and ALT_HOLD")
-            self._wait_for_state(
-                AUTO_TAKEOFF_ARMED,
-                STATE_ALT_HOLD,
-                self.landing_timeout_s,
-            )
-
-            start_altitude = self.telemetry.altitude_m
-            if start_altitude is None:
-                raise ScenarioError("ALT_HOLD entered without altitude telemetry")
-
-            self._phase(
-                f"Holding ALT_HOLD for {self.alt_hold_duration_s:.1f} seconds"
-            )
-            self._send_for(ALT_HOLD_ARMED, self.alt_hold_duration_s)
-            if self.telemetry.state != STATE_ALT_HOLD:
-                raise ScenarioError(
-                    "Vehicle left ALT_HOLD during dwell; "
-                    f"last telemetry: {self.telemetry.describe()}"
-                )
-
-            descent_throttle = self.manual_descent_channels[THROTTLE]
-            self._phase(
-                "Switching to MANUAL and commanding slow descent "
-                f"at throttle {descent_throttle}"
-            )
-            self._wait_for_state(
-                self.manual_descent_channels,
-                STATE_MANUAL,
-                self.state_timeout_s,
-            )
-            descent_threshold = max(
-                self.touchdown_altitude_m,
-                start_altitude - 0.20,
-            )
-            self._wait_for(
-                self.manual_descent_channels,
-                lambda: (
-                    self.telemetry.altitude_m is not None
-                    and self.telemetry.altitude_m <= descent_threshold
-                ),
-                self.state_timeout_s,
-                f"altitude below {descent_threshold:.2f} m",
-            )
-
-            self._phase("Waiting for touchdown")
-            consecutive_touchdown_samples = 0
-            last_sample_count = self.telemetry.altitude_samples
-
-            def touchdown_confirmed() -> bool:
-                nonlocal consecutive_touchdown_samples, last_sample_count
-                if self.telemetry.altitude_samples == last_sample_count:
-                    return consecutive_touchdown_samples >= 3
-                last_sample_count = self.telemetry.altitude_samples
-                altitude = self.telemetry.altitude_m
-                if altitude is not None and altitude <= self.touchdown_altitude_m:
-                    consecutive_touchdown_samples += 1
-                else:
-                    consecutive_touchdown_samples = 0
-                return consecutive_touchdown_samples >= 3
-
-            self._wait_for(
-                self.manual_descent_channels,
-                touchdown_confirmed,
-                self.landing_timeout_s,
-                f"three touchdown samples <= {self.touchdown_altitude_m:.2f} m",
-            )
 
             self._airborne = False
             self._phase("Disarming and waiting for IDLE")

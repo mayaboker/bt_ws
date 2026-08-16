@@ -1,7 +1,11 @@
 from enum import IntEnum, auto, StrEnum
 from bt_app.common.event import Event
 from bt_app.common.mavlink import MavSeverity
-
+from bt_app.msp.bt_v2 import (
+    RC_MAX,
+    RC_MID,
+    RC_MIN
+)
 TREE_TICK_INTERVAL_S = 0.1
 FREQ_HZ = 50.0
 GAZEBO_CAMERA_TOPIC = "/camera"
@@ -26,6 +30,40 @@ class JoyInterrupt(StrEnum):
     AUTO_REQUEST = "auto_request"
     ENABLER_REQUEST = "enabler_request"
 
+from typing import NamedTuple
+
+class InternalJoystick(NamedTuple):
+    ROLL: int = RC_MIN
+    PITCH: int = RC_MID
+    THROTTLE: int = RC_MIN
+    YAW: int = RC_MID
+    ARM: int = RC_MIN
+    MANUAL: int = RC_MIN
+    AUTO_TAKE_OFF: int = RC_MIN
+    ENABLER: int = RC_MIN
+    TRACKER_MODE: int = RC_MIN
+    PAYLOAD: int = RC_MIN
+    NOT_USED_1: int = RC_MIN
+    NOT_USED_2: int = RC_MIN
+    NOT_USED_3: int = RC_MIN
+    NOT_USED_4: int = RC_MIN
+    NOT_USED_5: int = RC_MIN
+    NOT_USED_6: int = RC_MIN
+    NOT_USED_7: int = RC_MIN
+    NOT_USED_8: int = RC_MIN
+
+    def is_manual(self) -> bool:
+        return self.MANUAL == RC_MIN
+
+    def is_auto_takeoff(self) -> bool:
+        return self.AUTO_TAKE_OFF == RC_MAX
+    
+    def is_safe_for_arm(self) -> bool:
+        return all([
+            self.MANUAL == RC_MIN,
+            self.TRACKER_MODE == RC_MIN,
+            self.PAYLOAD == RC_MIN
+        ])
 
 class InternalJoy(IntEnum):
     """
@@ -54,9 +92,7 @@ class AETR1234(IntEnum):
     AUX2 = auto()
     AUX3 = auto()
     AUX4 = auto()
-    AUX5 = auto()
-    AUX6 = auto()
-    AUX7 = auto()
+    
 
 class RobotState(IntEnum):
     IDLE = 0

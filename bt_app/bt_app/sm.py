@@ -4,7 +4,16 @@ from transitions import Machine
 from bt_app.common import Event
 from bt_app.vehicle_config import VehicleConfig
 from bt_app.context import Context
-from bt_app.common import AETR1234, AutoModeType
+from bt_app.common import (
+    AETR1234,
+    InternalJoy, 
+    AutoModeType
+    )
+from bt_app.msp.bt_v2 import (
+    RC_MAX,
+    RC_MID,
+    RC_MIN,
+)
 
 def _coerce_robot_state(state) -> RobotState:
     if isinstance(state, RobotState):
@@ -238,7 +247,7 @@ class Robot_StateMachine:
         close manual request, throttle low, without ---- confirmed landed to enter idle
         """
         ok = all([
-            self.ctx.joy_manual_request,
+            self.ctx.request_rc.is_manual(),
             not self.ctx.arm_switch,
             self.ctx.is_low_throttle()
             # TODO: is it more safety
@@ -272,7 +281,7 @@ class Robot_StateMachine:
     def enter_manual_from_alt_hold(self, event):
         ok = all([
             self.ctx.armed,
-            self.ctx.joy_manual_request
+            self.ctx.request_rc.is_manual()
         ])
         return  ok
     
@@ -288,10 +297,16 @@ class Robot_StateMachine:
         joy_arm_requested: true if joy request arm combination, reset when disarmed or arm failed
         self.ctx.armable: true if drone can be armed
         SA or SD: true if joy request arm combination
+        joystick need to be in safe state all the channels except ARM need to be in safe position
+
         """
-        sa_or_sd = self.ctx.joy_takeoff_request or self.ctx.joy_manual_request
+        manual_or_takeoff = any([
+            self.ctx.request_rc.is_auto_takeoff(),
+            self.ctx.request_rc.is_manual()
+        ])
         ok = all([
-            sa_or_sd,
+            manual_or_takeoff,
+            self.ctx.request_rc.is_safe_for_arm(),
             self.ctx.armable,
             not self.ctx.armed,
             self.ctx.joy_arm_requested
@@ -304,7 +319,7 @@ class Robot_StateMachine:
         """
         ok = all([
             self.ctx.armed,
-            self.ctx.joy_takeoff_request,
+            self.ctx.request_rc.is_auto_takeoff(),
             self.ctx.drone_alt < self.ctx.alt_setpoint
         ])
         return  ok
@@ -348,8 +363,8 @@ class Robot_StateMachine:
         # TODO: Add on air
         ok = all([
             not self.ctx.joy_fail_safe,
-            not self.ctx.joy_manual_request,
-            not self.ctx.joy_takeoff_request
+            not self.ctx.request_rc.is_manual(),
+            not self.ctx.request_rc.is_auto_takeoff()
         ])
 
         return ok
@@ -361,29 +376,29 @@ class Robot_StateMachine:
         """
         ok = all([
             self.ctx.armed,
-            self.ctx.joy_manual_request,
-            not self.ctx.joy_takeoff_request
+            self.ctx.request_rc.is_manual(),
+            not self.ctx.request_rc.is_auto_takeoff()
         ])
         return ok
     
     def enter_manual_mode_from_arm(self, event):
         ok = all([
             self.ctx.armed,
-            self.ctx.joy_manual_request
+            self.ctx.request_rc.is_manual()
         ])
         return ok
 
     def enter_hover_from_manual(self, event):
         ok = all([
             self.ctx.request_rc[AETR1234.THROTTLE] > 1050,
-            not self.ctx.joy_manual_request,
+            not self.ctx.request_rc.is_manual(),
             self.ctx.armed
         ])
         return ok
     
     def enter_manual_mode_from_hover(self, event):
         ok = all([
-            self.ctx.joy_manual_request,
+            self.ctx.request_rc.is_manual(),
             self.ctx.armed
         ])
         return ok
@@ -400,7 +415,7 @@ class Robot_StateMachine:
         ok = all([
             not self.ctx.auto_mode_enable,
             self.ctx.armed,
-            not self.ctx.joy_manual_request
+            not self.ctx.request_rc.is_manual()
         ])
         return ok
     

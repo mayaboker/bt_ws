@@ -58,6 +58,11 @@ class MavlinkListenerService:
             int, NoCommunicationEvent | CommunicationResumedEvent
         ] | None = None
         self._pending_failure: tuple[int, MavlinkListenerError] | None = None
+        self._banner()
+
+    def _banner(self):
+        log.info(f"MAVLink rc_override Listener: {self.config.connection}")
+
 
     @property
     def failure(self) -> MavlinkListenerError | None:
@@ -119,7 +124,6 @@ class MavlinkListenerService:
             thread.join(timeout)
             raise failure
 
-        log.info("Started MAVLink RC channel override listener")
 
     def stop(self, timeout: float = 2.0) -> None:
         """Stop the listener, closing its connection if receive is blocked."""

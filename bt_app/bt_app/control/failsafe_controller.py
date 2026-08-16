@@ -48,7 +48,9 @@ class FailSafeController:
         self._banner()
 
     def _banner(self):
-        log.info(f"descend after {self.hold_time_s}")
+        log.info("--------- FAILSAFE CONTROLLER configuration start-----------")
+        log.info(f"descend to land after: {self.hold_time_s} seconds")
+        log.info("--------- FAILSAFE CONTROLLER configuration end-----------")
 
     def _setup(self):
         self.alt_pid = PID(

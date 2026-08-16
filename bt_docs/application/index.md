@@ -75,6 +75,8 @@ Send ARM sequence
 !!!
     The system set ARM and init in ANGEL mode
 
+#### rc_channel_override
+The controller open mavlink udp socket and listen to rc_channel_override message
 
 #### Manual
 
