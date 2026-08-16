@@ -18,6 +18,11 @@ from pymavlink import mavutil
 
 mavutil.set_dialect("common")
 
+try:
+    from joy_simulation.mavlink_rc_scenario import MavlinkRcScenarioBase
+except ModuleNotFoundError:  # direct script execution
+    from mavlink_rc_scenario import MavlinkRcScenarioBase  # type: ignore[no-redef]
+
 
 ROLL = 0
 PITCH = 1
