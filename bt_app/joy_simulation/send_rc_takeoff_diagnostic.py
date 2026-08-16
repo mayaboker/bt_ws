@@ -1,612 +1,186 @@
 #!/usr/bin/env python3
-"""Run an automatic takeoff and record synchronized diagnostic telemetry."""
+"""Automatic TAKEOFF, ALT_HOLD dwell, manual descent, and disarm scenario."""
 
 from __future__ import annotations
 
 import argparse
-import csv
-from datetime import datetime
-import math
-from pathlib import Path
-import struct
+import os
 import sys
-import time
-from typing import Any, Sequence
+from typing import Sequence
 
-from pymavlink import mavutil
+os.environ.setdefault("MAVLINK20", "1")
 
-from send_rc import (
-    ALT_HOLD_ARMED,
-    APP_COMPONENT_ID,
-    APP_SYSTEM_ID,
-    ARM_IN_MANUAL,
-    AUTO_TAKEOFF_ARMED,
-    MANUAL_DISARMED,
-    NEUTRAL_DISARMED,
-    STATE_ALT_HOLD,
-    STATE_IDLE,
-    STATE_MANUAL,
-    STATE_NAMES,
-    STATE_TAKEOFF,
-    THROTTLE,
-    MavlinkRcScenario,
-    ScenarioError,
-    Telemetry,
-    build_parser as build_base_parser,
-)
+try:
+    from joy_simulation.mavlink_rc_scenario import (
+        ALT_HOLD_ARMED,
+        ARM_IN_MANUAL,
+        AUTO_TAKEOFF_ARMED,
+        MANUAL_DISARMED,
+        NEUTRAL_DISARMED,
+        STATE_ALT_HOLD,
+        STATE_IDLE,
+        STATE_MANUAL,
+        STATE_TAKEOFF,
+        MavlinkRcScenarioBase,
+        ScenarioError,
+        Telemetry,
+        rc_channels,
+    )
+except ModuleNotFoundError:  # direct script execution
+    from mavlink_rc_scenario import (  # type: ignore[no-redef]
+        ALT_HOLD_ARMED,
+        ARM_IN_MANUAL,
+        AUTO_TAKEOFF_ARMED,
+        MANUAL_DISARMED,
+        NEUTRAL_DISARMED,
+        STATE_ALT_HOLD,
+        STATE_IDLE,
+        STATE_MANUAL,
+        STATE_TAKEOFF,
+        MavlinkRcScenarioBase,
+        ScenarioError,
+        Telemetry,
+        rc_channels,
+    )
 
-
-CHANNEL_STATUS_MESSAGE_TYPE = 1
-CHANNEL_STATUS_VERSION = 1
-CHANNEL_STATUS_FORMAT = "<BBBH8H"
-CHANNEL_STATUS_SIZE = struct.calcsize(CHANNEL_STATUS_FORMAT)
-GLIDE_PHASE_NAMES = {
-    0: "idle", 1: "acquire", 2: "track", 3: "commit",
-    4: "aborted", 5: "commit_timeout",
-}
-OBSERVATION_REASON_NAMES = {
-    0: None,
-    1: "no tracker result",
-    2: "target not found",
-    3: "visual observation stale",
-    4: "invalid receipt timestamp",
-    5: "non-monotonic visual frame",
-    6: "non-positive bounding box",
-    7: "bounding box clipped by image edge",
-    8: "width/height depth disagreement",
-    9: "non-finite depth",
-    10: "visual estimator unavailable",
-    99: "other",
-}
-PARAMETERS = (
-    "TAKEOFF_ALT",
-    "TAKEOFF_RATE",
-    "ALT_KP",
-    "ALT_KI",
-    "ALT_KD",
-    "ALT_OUT_LIMIT",
-    "HOV_BASELINE",
-)
-
-
-def decode_parameter_value(message: Any) -> float | int:
-    """Decode the bytewise value carried by a MAVLink ``PARAM_VALUE``."""
-
-    parameter_type = int(message.param_type)
-    wire_value = float(message.param_value)
-    if parameter_type == mavutil.mavlink.MAV_PARAM_TYPE_REAL32:
-        return wire_value
-
-    raw = struct.pack("<f", wire_value)
-    if parameter_type == mavutil.mavlink.MAV_PARAM_TYPE_INT32:
-        return struct.unpack("<i", raw)[0]
-    if parameter_type == mavutil.mavlink.MAV_PARAM_TYPE_UINT8:
-        value = struct.unpack("<I", raw)[0]
-        if value > 0xFF:
-            raise ValueError(f"invalid MAV_PARAM_TYPE_UINT8 value {value}")
-        return value
-    raise ValueError(f"unsupported MAVLink parameter type {parameter_type}")
 
 SCENARIO_BANNER = """\
 ==============================================================================
-bt-app Takeoff Controller Diagnostic Scenario
+bt-app Automatic TAKEOFF / ALT_HOLD Scenario
 ==============================================================================
-Simulates this joystick flight sequence:
-  1. Wait for bt-app telemetry and read the active takeoff parameters.
-  2. Arm in MANUAL and request automatic takeoff.
-  3. Record TAKEOFF and the transition into ALT_HOLD.
-  4. Remain in ALT_HOLD so the post-transition response is visible.
-  5. Switch to MANUAL, descend, disarm, and verify IDLE.
-
-CSV data includes altitude, derived vertical speed, attitude, requested joystick
-channels, and bt-app's actual controller output channels. The internal PI terms
-are not available on MAVLink and are therefore not recorded as measured data.
-
-Safety behavior:
-  Before takeoff, failures send a ground-safe disarm command.
-  While airborne, failures stop RC traffic so bt-app failsafe can recover.
+Flight flow:
+  1. Arm in MANUAL with low throttle.
+  2. Request automatic TAKEOFF.
+  3. Wait for TAKEOFF and ALT_HOLD.
+  4. Hold ALT_HOLD for 10 seconds.
+  5. Switch to MANUAL and descend.
+  6. Confirm touchdown and disarm.
 =============================================================================="""
 
+ALT_HOLD_DURATION_S = 10.0
+STATE_TIMEOUT_S = 20.0
+LANDING_TIMEOUT_S = 60.0
+TOUCHDOWN_ALTITUDE_M = 0.15
+DESCENT_THROTTLE = 1600
 
-class DiagnosticTelemetry(Telemetry):
-    """Telemetry required to evaluate the takeoff and handoff response."""
+
+class TakeoffScenario(MavlinkRcScenarioBase):
+    """Simple automatic TAKEOFF scenario with fixed flight defaults."""
+
+    FIELDNAMES: tuple[str, ...] = ()
 
     def __init__(self) -> None:
-        super().__init__()
-        self.vertical_speed_m_s: float | None = None
-        self.roll_deg: float | None = None
-        self.pitch_deg: float | None = None
-        self.yaw_deg: float | None = None
-        self.output_state: int | None = None
-        self.output_channels: tuple[int, ...] | None = None
-        self.altitude_setpoint_m: float | None = None
-        self.vertical_speed_setpoint_m_s: float | None = None
-        self.target_distance_m: float | None = None
-        self.visual_found: bool | None = None
-        self.visual_locked: bool | None = None
-        self.visual_frame_id: int | None = None
-        self.visual_age_s: float | None = None
-        self.visual_error_x: float | None = None
-        self.visual_error_y: float | None = None
-        self.observation_valid: bool | None = None
-        self.observation_reason_code: int | None = None
-        self.acquisition_count: int | None = None
-        self.glide_phase_code: int | None = None
-
-    def consume(self, message: Any) -> bool:
-        changed = super().consume(message)
-        message_type = message.get_type()
-
-        if (
-            int(message.get_srcSystem()) != APP_SYSTEM_ID
-            or int(message.get_srcComponent()) != APP_COMPONENT_ID
-        ):
-            return changed
-
-        if message_type == "GLOBAL_POSITION_INT":
-            # MAVLink vz is positive down; bt-app diagnostics use positive up.
-            self.vertical_speed_m_s = -float(message.vz) / 100.0
-        elif message_type == "ATTITUDE":
-            self.roll_deg = math.degrees(float(message.roll))
-            self.pitch_deg = math.degrees(float(message.pitch))
-            self.yaw_deg = math.degrees(float(message.yaw)) % 360.0
-        elif message_type == "NAMED_VALUE_FLOAT":
-            name = message.name
-            if isinstance(name, bytes):
-                name = name.split(b"\0", 1)[0].decode("ascii", errors="replace")
-            else:
-                name = str(name).split("\0", 1)[0]
-            if name == "alt_sp":
-                self.altitude_setpoint_m = float(message.value)
-            elif name == "vs_sp":
-                self.vertical_speed_setpoint_m_s = float(message.value)
-            elif name == "tgt_dist":
-                value = float(message.value)
-                self.target_distance_m = value if math.isfinite(value) else None
-            elif name == "vis_found":
-                self.visual_found = bool(round(float(message.value)))
-            elif name == "vis_locked":
-                self.visual_locked = bool(round(float(message.value)))
-            elif name == "vis_frame":
-                value = float(message.value)
-                self.visual_frame_id = int(value) if math.isfinite(value) else None
-            elif name == "vis_age":
-                value = float(message.value)
-                self.visual_age_s = value if math.isfinite(value) else None
-            elif name == "vis_ex":
-                value = float(message.value)
-                self.visual_error_x = value if math.isfinite(value) else None
-            elif name == "vis_ey":
-                value = float(message.value)
-                self.visual_error_y = value if math.isfinite(value) else None
-            elif name == "obs_valid":
-                self.observation_valid = bool(round(float(message.value)))
-            elif name == "obs_reason":
-                self.observation_reason_code = int(round(float(message.value)))
-            elif name == "acq_count":
-                self.acquisition_count = int(round(float(message.value)))
-            elif name == "gld_phase":
-                self.glide_phase_code = int(round(float(message.value)))
-        elif message_type == "RC_CHANNELS":
-            channel_count = min(8, int(message.chancount))
-            channels = tuple(
-                int(getattr(message, f"chan{index}_raw"))
-                for index in range(1, channel_count + 1)
-            )
-            if channel_count == 8:
-                self.output_state = self.state
-                self.output_channels = channels
-        elif (
-            message_type == "V2_EXTENSION"
-            and int(message.message_type) == CHANNEL_STATUS_MESSAGE_TYPE
-        ):
-            values = struct.unpack(
-                CHANNEL_STATUS_FORMAT,
-                bytes(message.payload[:CHANNEL_STATUS_SIZE]),
-            )
-            version, _command, state, _flags, *channels = values
-            if version == CHANNEL_STATUS_VERSION:
-                self.output_state = int(state)
-                self.output_channels = tuple(int(value) for value in channels)
-        return changed
-
-    def describe(self) -> str:
-        description = super().describe()
-        speed = (
-            "unknown"
-            if self.vertical_speed_m_s is None
-            else f"{self.vertical_speed_m_s:+.2f} m/s"
+        super().__init__(
+            destination=("127.0.0.1", 14560),
+            listen=("0.0.0.0", 14550),
+            rate_hz=50.0,
+            state_timeout_s=STATE_TIMEOUT_S,
+            landing_timeout_s=LANDING_TIMEOUT_S,
+            touchdown_altitude_m=TOUCHDOWN_ALTITUDE_M,
         )
-        throttle = (
-            "unknown"
-            if self.output_channels is None
-            else str(self.output_channels[THROTTLE])
+        self.manual_descent_channels = rc_channels(
+            armed=True,
+            manual=True,
+            throttle=DESCENT_THROTTLE,
         )
-        return f"{description} vertical_speed={speed} output_throttle={throttle}"
 
-
-class TakeoffDiagnosticScenario(MavlinkRcScenario):
-    """Automatic takeoff scenario with CSV snapshots at controller-output rate."""
-
-    PARAMETERS = PARAMETERS
-
-    FIELDNAMES = (
-        "local_time",
-        "elapsed_s",
-        "sample_source",
-        "phase",
-        "state",
-        "state_id",
-        "armed",
-        "altitude_setpoint_m",
-        "altitude_m",
-        "vertical_speed_m_s",
-        "vertical_speed_setpoint_m_s",
-        "vertical_speed_error_m_s",
-        "roll_deg",
-        "pitch_deg",
-        "yaw_deg",
-        "joystick_throttle_pwm",
-        "output_throttle_pwm",
-        "output_correction_pwm",
-        "output_saturated",
-        "output_roll_pwm",
-        "output_pitch_pwm",
-        "output_yaw_pwm",
-        "target_distance_m",
-        "visual_found",
-        "visual_locked",
-        "visual_frame_id",
-        "visual_age_s",
-        "visual_error_x",
-        "visual_error_y",
-        "observation_valid",
-        "observation_reason_code",
-        "observation_reason",
-        "acquisition_count",
-        "glide_phase_code",
-        "glide_phase",
-        *PARAMETERS,
-    )
-
-    def __init__(
-        self,
-        *,
-        output_path: Path,
-        parameter_destination: tuple[str, int],
-        parameter_timeout_s: float,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(**kwargs)
-        self.telemetry = DiagnosticTelemetry()
-        self.output_path = output_path
-        self.parameter_destination = parameter_destination
-        self.parameter_timeout_s = parameter_timeout_s
-        self.parameter_values: dict[str, float | int] = {}
-        self._requested_channels: tuple[int, ...] = tuple(NEUTRAL_DISARMED)
-        self._phase_name = "initializing"
-        self._start_s = time.monotonic()
-        self._csv_file: Any = None
-        self._csv_writer: csv.DictWriter | None = None
+    @staticmethod
+    def _print_banner() -> None:
+        print(SCENARIO_BANNER, flush=True)
 
     def run(self) -> None:
         self._print_banner()
-        self._open_recording()
         self._open()
         try:
-            self._set_phase("Waiting for bt-app telemetry")
+            self._phase("Waiting for bt-app telemetry")
             self._wait_for(
                 NEUTRAL_DISARMED,
                 lambda: self.telemetry.state is not None,
                 self.state_timeout_s,
                 "application heartbeat",
             )
-            self._read_takeoff_parameters()
 
-            self._set_phase("Arming in MANUAL mode")
+            self._phase("Arming in MANUAL mode")
             self._wait_for_state(ARM_IN_MANUAL, STATE_MANUAL, self.state_timeout_s)
 
-            self._set_phase("Requesting automatic takeoff from MANUAL")
-            self._wait_for_state(
-                AUTO_TAKEOFF_ARMED,
-                STATE_TAKEOFF,
-                self.state_timeout_s,
-            )
+            self._phase("Requesting automatic TAKEOFF")
+            self._wait_for_state(AUTO_TAKEOFF_ARMED, STATE_TAKEOFF, self.state_timeout_s)
             self._airborne = True
 
-            self._set_phase("Recording TAKEOFF until ALT_HOLD")
-            self._wait_for_state(
-                AUTO_TAKEOFF_ARMED,
-                STATE_ALT_HOLD,
-                self.landing_timeout_s,
-            )
+            self._phase("Waiting for automatic TAKEOFF to enter ALT_HOLD")
+            self._wait_for_state(AUTO_TAKEOFF_ARMED, STATE_ALT_HOLD, self.landing_timeout_s)
 
-            self._set_phase(
-                f"Recording ALT_HOLD response for {self.alt_hold_duration_s:.1f} seconds"
-            )
-            self._send_for(ALT_HOLD_ARMED, self.alt_hold_duration_s)
+            self._phase(f"Holding ALT_HOLD for {ALT_HOLD_DURATION_S:.1f} seconds")
+            self._send_for(ALT_HOLD_ARMED, ALT_HOLD_DURATION_S)
             if self.telemetry.state != STATE_ALT_HOLD:
                 raise ScenarioError(
-                    "Vehicle left ALT_HOLD during diagnostic dwell; "
+                    "Vehicle left ALT_HOLD during dwell; "
                     f"last telemetry: {self.telemetry.describe()}"
                 )
 
-            self._set_phase("Switching to MANUAL for landing")
+            self._phase(f"Switching to MANUAL descent at throttle {DESCENT_THROTTLE}")
             self._wait_for_state(
                 self.manual_descent_channels,
                 STATE_MANUAL,
                 self.state_timeout_s,
             )
-            self._land_and_disarm()
+            self._wait_for_touchdown()
+
+            self._airborne = False
+            self._phase("Disarming and waiting for IDLE")
+            self._wait_for(
+                MANUAL_DISARMED,
+                lambda: self.telemetry.state == STATE_IDLE and not self.telemetry.armed,
+                self.state_timeout_s,
+                "IDLE with armed flag cleared",
+            )
+            self._send_for(MANUAL_DISARMED, 0.5)
             self._completed = True
-            self._set_phase(f"Scenario completed; CSV saved to {self.output_path}")
+            self._phase("Scenario completed successfully")
         finally:
             self._cleanup()
-            self._close_recording()
 
-    def _land_and_disarm(self) -> None:
-        self._set_phase("Waiting for touchdown")
-        consecutive_samples = 0
+    def _wait_for_touchdown(self) -> None:
+        self._phase("Waiting for touchdown")
+        consecutive = 0
         last_sample_count = self.telemetry.altitude_samples
 
-        def touchdown() -> bool:
-            nonlocal consecutive_samples, last_sample_count
+        def touchdown_confirmed() -> bool:
+            nonlocal consecutive, last_sample_count
             if self.telemetry.altitude_samples == last_sample_count:
-                return consecutive_samples >= 3
+                return consecutive >= 3
             last_sample_count = self.telemetry.altitude_samples
-            altitude = self.telemetry.altitude_m
-            if altitude is not None and altitude <= self.touchdown_altitude_m:
-                consecutive_samples += 1
+            if (
+                self.telemetry.altitude_m is not None
+                and self.telemetry.altitude_m <= self.touchdown_altitude_m
+            ):
+                consecutive += 1
             else:
-                consecutive_samples = 0
-            return consecutive_samples >= 3
+                consecutive = 0
+            return consecutive >= 3
 
         self._wait_for(
             self.manual_descent_channels,
-            touchdown,
+            touchdown_confirmed,
             self.landing_timeout_s,
             f"three touchdown samples <= {self.touchdown_altitude_m:.2f} m",
         )
-        self._airborne = False
-        self._set_phase("Disarming and waiting for IDLE")
-        self._wait_for(
-            MANUAL_DISARMED,
-            lambda: self.telemetry.state == STATE_IDLE and not self.telemetry.armed,
-            self.state_timeout_s,
-            "IDLE with armed flag cleared",
-        )
-        self._send_for(MANUAL_DISARMED, 0.5)
-
-    def _read_takeoff_parameters(self) -> None:
-        self._set_phase("Reading active takeoff parameters")
-        pending = set(self.PARAMETERS)
-        deadline = time.monotonic() + self.parameter_timeout_s
-        next_request_s = 0.0
-        while pending and time.monotonic() < deadline:
-            now_s = time.monotonic()
-            self._send_rc(NEUTRAL_DISARMED)
-            if now_s >= next_request_s:
-                for name in sorted(pending):
-                    message = self._encoder.param_request_read_encode(
-                        APP_SYSTEM_ID,
-                        APP_COMPONENT_ID,
-                        name.encode("ascii"),
-                        -1,
-                    )
-                    if self._socket is not None:
-                        self._socket.sendto(
-                            message.pack(self._encoder), self.parameter_destination
-                        )
-                next_request_s = now_s + 0.5
-            self._receive_pending()
-            pending.difference_update(self.parameter_values)
-            time.sleep(min(0.01, self.period_s))
-        if pending:
-            raise ScenarioError(
-                "Timed out reading takeoff parameters: " + ", ".join(sorted(pending))
-            )
-        values = " ".join(
-            f"{name}={self.parameter_values[name]:g}" for name in self.PARAMETERS
-        )
-        self._phase(f"Active parameters: {values}")
-
-    def _send_rc(self, channels: Sequence[int]) -> None:
-        self._requested_channels = tuple(int(value) for value in channels)
-        super()._send_rc(channels)
-
-    def _receive_pending(self) -> None:
-        if self._socket is None:
-            return
-        while True:
-            try:
-                payload, _address = self._socket.recvfrom(4096)
-            except BlockingIOError:
-                return
-            for byte in payload:
-                message = self._parser.parse_char(bytes([byte]))
-                if message is None:
-                    continue
-                if (
-                    int(message.get_srcSystem()) == APP_SYSTEM_ID
-                    and int(message.get_srcComponent()) == APP_COMPONENT_ID
-                    and message.get_type() == "PARAM_VALUE"
-                ):
-                    name = message.param_id
-                    if isinstance(name, bytes):
-                        name = name.split(b"\0", 1)[0].decode("ascii")
-                    else:
-                        name = str(name).split("\0", 1)[0]
-                    try:
-                        value = decode_parameter_value(message)
-                    except ValueError as exc:
-                        self._phase(f"Ignoring parameter {name}: {exc}")
-                    else:
-                        self.parameter_values[name] = value
-
-                previous_state = self.telemetry.state
-                self.telemetry.consume(message)
-                state_changed = self.telemetry.state != previous_state
-                if state_changed:
-                    self._phase(self.telemetry.describe(), color="\033[1;36m")
-                if message.get_type() in ("GLOBAL_POSITION_INT", "RC_CHANNELS"):
-                    self._write_snapshot(message.get_type())
-                elif (
-                    message.get_type() == "V2_EXTENSION"
-                    and int(message.message_type) == CHANNEL_STATUS_MESSAGE_TYPE
-                ):
-                    self._write_snapshot("V2_CHANNEL_STATUS")
-
-    def _write_snapshot(self, sample_source: str = "test") -> None:
-        if self._csv_writer is None:
-            return
-        output = self.telemetry.output_channels
-        baseline = self.parameter_values.get("HOV_BASELINE")
-        correction = (
-            None
-            if baseline is None or output is None
-            else output[THROTTLE] - baseline
-        )
-        if "GLIDE_VY_OUT" in self.PARAMETERS:
-            limit_name = "GLIDE_VY_OUT"
-        elif "GLIDE_OUT_LIMIT" in self.PARAMETERS:
-            limit_name = "GLIDE_OUT_LIMIT"
-        else:
-            limit_name = "ALT_OUT_LIMIT"
-        limit = self.parameter_values.get(limit_name)
-        saturated = (
-            correction is not None
-            and limit is not None
-            and abs(correction) >= limit - 0.5
-        )
-        state_id = self.telemetry.state
-        row: dict[str, Any] = {
-            "local_time": datetime.now().astimezone().isoformat(timespec="milliseconds"),
-            "elapsed_s": f"{time.monotonic() - self._start_s:.6f}",
-            "sample_source": sample_source,
-            "phase": self._phase_name,
-            "state": STATE_NAMES.get(state_id, state_id),
-            "state_id": state_id,
-            "armed": int(self.telemetry.armed),
-            "altitude_setpoint_m": self.telemetry.altitude_setpoint_m,
-            "altitude_m": self.telemetry.altitude_m,
-            "vertical_speed_m_s": self.telemetry.vertical_speed_m_s,
-            "vertical_speed_setpoint_m_s": self.telemetry.vertical_speed_setpoint_m_s,
-            "vertical_speed_error_m_s": (
-                None
-                if self.telemetry.vertical_speed_setpoint_m_s is None
-                or self.telemetry.vertical_speed_m_s is None
-                else self.telemetry.vertical_speed_setpoint_m_s
-                - self.telemetry.vertical_speed_m_s
-            ),
-            "roll_deg": self.telemetry.roll_deg,
-            "pitch_deg": self.telemetry.pitch_deg,
-            "yaw_deg": self.telemetry.yaw_deg,
-            "joystick_throttle_pwm": self._requested_channels[THROTTLE],
-            "output_throttle_pwm": None if output is None else output[THROTTLE],
-            "output_correction_pwm": correction,
-            "output_saturated": int(saturated),
-            "output_roll_pwm": None if output is None else output[0],
-            "output_pitch_pwm": None if output is None else output[1],
-            "output_yaw_pwm": None if output is None else output[3],
-            "target_distance_m": self.telemetry.target_distance_m,
-            "visual_found": self.telemetry.visual_found,
-            "visual_locked": self.telemetry.visual_locked,
-            "visual_frame_id": self.telemetry.visual_frame_id,
-            "visual_age_s": self.telemetry.visual_age_s,
-            "visual_error_x": self.telemetry.visual_error_x,
-            "visual_error_y": self.telemetry.visual_error_y,
-            "observation_valid": self.telemetry.observation_valid,
-            "observation_reason_code": self.telemetry.observation_reason_code,
-            "observation_reason": OBSERVATION_REASON_NAMES.get(
-                self.telemetry.observation_reason_code, "unknown"
-            ),
-            "acquisition_count": self.telemetry.acquisition_count,
-            "glide_phase_code": self.telemetry.glide_phase_code,
-            "glide_phase": GLIDE_PHASE_NAMES.get(
-                self.telemetry.glide_phase_code, "unknown"
-            ),
-        }
-        row.update({name: self.parameter_values.get(name) for name in self.PARAMETERS})
-        self._csv_writer.writerow(row)
-        self._csv_file.flush()
-
-    def _open_recording(self) -> None:
-        self.output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._csv_file = self.output_path.open("w", newline="", encoding="utf-8")
-        self._csv_writer = csv.DictWriter(self._csv_file, fieldnames=self.FIELDNAMES)
-        self._csv_writer.writeheader()
-        self._csv_file.flush()
-
-    def _close_recording(self) -> None:
-        if self._csv_file is not None:
-            self._csv_file.close()
-            self._csv_file = None
-            self._csv_writer = None
-
-    def _set_phase(self, message: str) -> None:
-        self._phase_name = message
-        self._phase(message)
-
-    def _print_banner(self) -> None:
-        print(SCENARIO_BANNER, flush=True)
-        print(f"CSV output: {self.output_path.resolve()}", flush=True)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = build_base_parser()
-    parser.description = SCENARIO_BANNER
-    parser.set_defaults(alt_hold_duration=15.0, descent_throttle=1600)
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=Path("logs/takeoff_diagnostic.csv"),
-        help="CSV destination (default: logs/takeoff_diagnostic.csv)",
-    )
-    parser.add_argument(
-        "--parameter-port",
-        type=int,
-        default=14551,
-        help="bt-app MAVLink telemetry/parameter service UDP port",
-    )
-    parser.add_argument(
-        "--parameter-timeout",
-        type=float,
-        default=8.0,
-        help="seconds allowed to read all takeoff parameters",
-    )
-    return parser
+# Compatibility names for scenario modules that still import the old symbols.
+TakeoffDiagnosticScenario = TakeoffScenario
+DiagnosticTelemetry = Telemetry
+PARAMETERS: tuple[str, ...] = ()
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    if args.rate_hz <= 0:
-        raise SystemExit("--rate-hz must be greater than zero")
-    if args.state_timeout <= 0 or args.landing_timeout <= 0:
-        raise SystemExit("timeouts must be greater than zero")
-    if args.parameter_timeout <= 0:
-        raise SystemExit("--parameter-timeout must be greater than zero")
-    if args.alt_hold_duration < 0:
-        raise SystemExit("--alt-hold-duration cannot be negative")
-    if args.touchdown_altitude < 0:
-        raise SystemExit("--touchdown-altitude cannot be negative")
-    if not 1000 <= args.descent_throttle <= 1650:
-        raise SystemExit("--descent-throttle must be between 1000 and 1650")
+def build_base_parser() -> argparse.ArgumentParser:
+    """Return a compatibility parser; flight settings remain fixed in code."""
+    return argparse.ArgumentParser(description=SCENARIO_BANNER)
 
-    scenario = TakeoffDiagnosticScenario(
-        destination=(args.destination_host, args.destination_port),
-        listen=(args.listen_host, args.listen_port),
-        rate_hz=args.rate_hz,
-        state_timeout_s=args.state_timeout,
-        landing_timeout_s=args.landing_timeout,
-        touchdown_altitude_m=args.touchdown_altitude,
-        alt_hold_duration_s=args.alt_hold_duration,
-        descent_throttle=args.descent_throttle,
-        output_path=args.output,
-        parameter_destination=(args.destination_host, args.parameter_port),
-        parameter_timeout_s=args.parameter_timeout,
-    )
+
+def main() -> int:
     try:
-        scenario.run()
+        TakeoffScenario().run()
     except KeyboardInterrupt:
         print("Interrupted", file=sys.stderr)
         return 130
