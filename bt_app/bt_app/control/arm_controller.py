@@ -1,7 +1,7 @@
 """
 implement MSP arm sequence
-TODO: the conroller exit by statemachine when armed, add keep alive and exit to error when not armed for few seconds
 """
+#region imports
 import time
 from bt_app.msp.bt_v2 import (
     RC_MAX,
@@ -9,6 +9,7 @@ from bt_app.msp.bt_v2 import (
     RC_MID, 
     RCChannel_alias as RCChannel)
 from loguru import logger as log
+#endregion
 
 DISABLED_HOLD_TIME = 1.0
 ARM_HOLD_TIME = 2.0
@@ -32,7 +33,7 @@ class ARMController:
         self.__time = time.monotonic()
         self._armed_process_done = False
     
-    def update(self, ):
+    def update(self):
         delta = time.monotonic() - self.__time
         if delta < DISABLED_HOLD_TIME:
             return self.make_channels(throttle=RC_MIN, arm=RC_MIN)

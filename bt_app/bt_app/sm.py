@@ -45,7 +45,7 @@ class Robot_StateMachine:
             RobotState.IDLE,
             RobotState.ARM,
             before=lambda x: self.on_before_state_changed.emit(RobotState.IDLE, RobotState.ARM),
-            conditions=[self.enter_arm]
+            conditions=[self.enter_arm_from_idle]
         )
 
         # from idle to manual
@@ -283,10 +283,11 @@ class Robot_StateMachine:
     #     ])
     #     return  ok
     
-    def enter_arm(self, event):
+    def enter_arm_from_idle(self, event):
         """
         joy_arm_requested: true if joy request arm combination, reset when disarmed or arm failed
         self.ctx.armable: true if drone can be armed
+        SA or SD: true if joy request arm combination
         """
         sa_or_sd = self.ctx.joy_takeoff_request or self.ctx.joy_manual_request
         ok = all([
