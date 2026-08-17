@@ -9,7 +9,6 @@ from bt_gst.bridge.zmq_models import (
     TrackStopRequest,
 )
 
-
 RED_DETECTION_META_NAME = "GstRedDetectionMeta"
 GST_CLOCK_TIME_NONE = (1 << 64) - 1
 
@@ -53,7 +52,7 @@ class CursorRoi:
 
 
 @dataclass
-class TrackerCursorState:
+class DetectionCursorState:
     frame_width: int
     frame_height: int
     initial_size: int = 30

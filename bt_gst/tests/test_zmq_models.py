@@ -5,14 +5,11 @@ from bt_gst.bridge.zmq_models import (
     MESSAGE_TYPE_FIELD,
     RedDetectionMessage,
     TrackAdjustmentRequest,
-    TrackerDataMessage,
-    TrackerDebugMessage,
     TrackResizeRequest,
     TrackStartRequest,
     TrackStopRequest,
     decode_request,
     decode_telemetry_message,
-    decode_tracker_message,
     encode_message,
 )
 
@@ -28,29 +25,6 @@ from bt_gst.bridge.zmq_models import (
 )
 def test_track_request_round_trip(message) -> None:
     assert decode_request(encode_message(message)) == message
-
-
-@pytest.mark.parametrize(
-    "message",
-    [
-        TrackerDataMessage(
-            frame_id=7,
-            timestamp=123.5,
-            dx=1,
-            dy=-2,
-            score=0.75,
-            status=1,
-        ),
-        TrackerDebugMessage(
-            frame_number=8,
-            status=1,
-            active_feature_count=3,
-            features_json='[{"x":1.0,"y":2.0}]',
-        ),
-    ],
-)
-def test_tracker_message_round_trip(message) -> None:
-    assert decode_tracker_message(encode_message(message)) == message
 
 
 @pytest.mark.parametrize("timestamp_ns", [123456789, None])
@@ -119,3 +93,10 @@ def test_decode_request_rejects_unknown_type() -> None:
 
     with pytest.raises(ValueError, match="unsupported request message type"):
         decode_request(payload)
+
+
+def test_decode_telemetry_rejects_removed_tracker_type() -> None:
+    payload = msgpack.packb({"type": "tracker-data"}, use_bin_type=True)
+
+    with pytest.raises(ValueError, match="unsupported telemetry message type"):
+        decode_telemetry_message(payload)

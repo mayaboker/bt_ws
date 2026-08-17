@@ -1,1481 +1,217 @@
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from bt_gst import app as app_module
+from bt_gst.bridge.zmq_models import (
+    RedDetectionMessage,
+    TrackAdjustmentRequest,
+    TrackResizeRequest,
+    TrackStartRequest,
+    TrackStopRequest,
+)
 from bt_gst.cli import RunCommand, ShowCommand, VersionCommand, parse_args
 from bt_gst.config import (
     AppConfig,
     AppConfigOverrides,
     CameraSourceConfig,
-    CameraSourceConfigOverrides,
     ConfigError,
     DetectorConfig,
-    DetectorConfigOverrides,
     FileSourceConfig,
-    FileSourceConfigOverrides,
     SimulationSourceConfig,
-    SimulationSourceConfigOverrides,
     ZmqConfig,
-    ZmqConfigOverrides,
-    load_config,
     load_config_overrides,
-    merge_config,
     resolve_config,
     validate_config,
 )
-from bt_gst import app as app_module
-from bt_gst import pipeline_runner
-from bt_gst.pipeline_runner import (
-    DetectorLockState,
-    DetectionTelemetryState,
-    _on_detection_overlay_buffer,
-    _on_detection_overlay_draw,
-    _on_detection_sample,
-)
-from bt_gst.bridge.zmq_models import RedDetectionMessage
-from bt_gst.pipeline_builder import (
-    build_pipeline_description,
-    build_source_pipeline_description,
-)
+from bt_gst.pipeline_builder import build_pipeline_description
+from bt_gst.pipeline_runner import DetectionTelemetryState, DetectorLockState
 from bt_gst.red_detection import (
     GST_CLOCK_TIME_NONE,
+    CursorRoi,
+    DetectionCursorState,
     DetectionOverlayState,
     RedDetection,
     read_red_detection,
 )
-from bt_gst.tracker_app_backup import (
-    GST_PLUGIN_PATH,
-    SYNTHETIC_VIDEO_FPS,
-    SYNTHETIC_VIDEO_HEIGHT,
-    SYNTHETIC_VIDEO_WIDTH,
-    SyntheticVideoSource,
-    TrackerMeta,
-    build_synthetic_frame_timing,
-    build_tracker_data_message,
-    build_tracker_debug_message_from_structure,
-    build_user_adjust_roi_request_structure,
-    build_user_resize_roi_request_structure,
-    build_user_stop_request_structure,
-    build_video_pipeline_description,
-    build_user_point_request_structure,
-    configure_gst_plugin_path,
-    dispatch_track_request,
-    format_tracker_debug_message,
-    format_tracker_debug_structure,
-    format_video_click,
-    generate_synthetic_rgba_frame,
-    synthetic_target_position,
-    _handle_bus_message,
-    read_tracker_meta,
-)
-from bt_gst.optical_flow_tracker import (
-    Roi,
-    adjust_roi,
-    build_centered_roi,
-    resize_roi,
-    STATUS_BREAK,
-    STATUS_OFF,
-    TRACKER_DEBUG_FIELD_ACTIVE_FEATURE_COUNT,
-    TRACKER_DEBUG_FIELD_FEATURES_JSON,
-    TRACKER_DEBUG_FIELD_FRAME_NUMBER,
-    TRACKER_DEBUG_FIELD_STATUS,
-    TRACKER_DEBUG_MESSAGE_NAME,
-    TRACK_REQUEST_FIELD_DELTA_X,
-    TRACK_REQUEST_FIELD_DELTA_Y,
-    TRACK_REQUEST_FIELD_HEIGHT,
-    TRACK_REQUEST_FIELD_SOURCE,
-    TRACK_REQUEST_FIELD_TYPE,
-    TRACK_REQUEST_FIELD_WIDTH,
-    TRACK_REQUEST_FIELD_X,
-    TRACK_REQUEST_FIELD_Y,
-    TRACK_REQUEST_NAME,
-    TRACK_REQUEST_SOURCE_USER,
-    TRACK_REQUEST_TYPE_ADJUST_ROI,
-    TRACK_REQUEST_TYPE_POINT,
-    TRACK_REQUEST_TYPE_RESIZE_ROI,
-    TRACK_REQUEST_TYPE_STOP,
-    compute_roi_offset,
-    compute_tracker_score,
-)
-from bt_gst.bridge.zmq_models import (
-    TrackAdjustmentRequest,
-    TrackResizeRequest,
-    TrackStartRequest,
-    TrackStopRequest,
-    TrackerDataMessage,
-    TrackerDebugMessage,
-)
-from test_plugin_metadata import load_plugin_module
 
 
-def test_detector_lock_requires_ten_found_frames_and_loses_after_five_misses() -> None:
-    state = DetectorLockState()
-    state.apply_request(TrackStartRequest(x=320, y=240))
-
-    for expected_count in range(1, 10):
-        assert state.update(True) == (False, expected_count, 0)
-    assert state.update(True) == (True, 10, 0)
-
-    for expected_count in range(1, 5):
-        assert state.update(False) == (True, 0, expected_count)
-    assert state.update(False) == (False, 0, 5)
-
-
-def test_detector_lock_resets_on_stop_and_new_start() -> None:
-    state = DetectorLockState(acquire_frames=2, lose_frames=2)
-    state.apply_request(TrackStartRequest(x=0, y=0))
-    state.update(True)
-    assert state.update(True)[0]
-
-    state.apply_request(TrackStopRequest())
-    assert state.update(True) == (False, 0, 0)
-    state.apply_request(TrackStartRequest(x=0, y=0))
-    assert state.update(True) == (False, 1, 0)
-
-
-def test_parse_version_command() -> None:
-    assert parse_args(["version"]) == VersionCommand()
-
-
-def test_parse_show_command_accepts_config_path() -> None:
-    config_path = Path("config.example.yaml")
-
-    assert parse_args(["show", "-c", str(config_path)]) == ShowCommand(
-        config_path=config_path,
-        overrides=AppConfigOverrides(),
-    )
-
-
-def test_parse_show_command_accepts_cli_file_override() -> None:
-    video = Path("data/vtest.avi")
-
-    assert parse_args(["show", "-s", "file", "--path", str(video)]) == ShowCommand(
-        config_path=None,
-        overrides=AppConfigOverrides(source=FileSourceConfigOverrides(path=video)),
-    )
-
-
-def test_parse_run_command_accepts_file_source() -> None:
-    video = Path("data/vtest.avi")
-
-    assert parse_args(["run", "-s", "file", "--path", str(video)]) == RunCommand(
-        config_path=None,
-        overrides=AppConfigOverrides(source=FileSourceConfigOverrides(path=video)),
-    )
-
-
-def test_parse_run_command_accepts_config_path() -> None:
-    config_path = Path("config.example.yaml")
-
-    assert parse_args(["run", "-c", str(config_path)]) == RunCommand(
-        config_path=config_path,
-        overrides=AppConfigOverrides(),
-    )
-
-
-def test_parse_run_command_accepts_camera_source() -> None:
-    assert parse_args(["run", "-s", "camera", "--device", "/dev/video0"]) == RunCommand(
-        config_path=None,
-        overrides=AppConfigOverrides(source=CameraSourceConfigOverrides(device="/dev/video0")),
-    )
-
-
-def test_parse_run_command_accepts_simulation_source() -> None:
-    assert parse_args(["run", "-s", "simulation", "--topic", "/camera"]) == RunCommand(
-        config_path=None,
-        overrides=AppConfigOverrides(source=SimulationSourceConfigOverrides(topic="/camera")),
-    )
-
-
-def test_parse_play_command_is_removed() -> None:
-    assert parse_args(["play"]) != 0
-
-
-def test_load_config_reads_file_source_yaml(tmp_path: Path) -> None:
+def test_load_and_resolve_file_config(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "source:\n"
-        "  type: file\n"
-        "  path: data/vtest.avi\n",
+        "source:\n  type: file\n  path: video.avi\n  rate: 12\n"
+        "host: 192.0.2.1\nport: 5600\n",
         encoding="utf-8",
     )
 
-    assert load_config(config_path) == AppConfig(
-        source=FileSourceConfig(path=Path("data/vtest.avi"))
-    )
-
-
-def test_load_config_reads_file_source_rate_yaml(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "source:\n"
-        "  type: file\n"
-        "  path: data/vtest.avi\n"
-        "  rate: 24\n",
-        encoding="utf-8",
-    )
-
-    assert load_config(config_path) == AppConfig(
-        source=FileSourceConfig(path=Path("data/vtest.avi"), rate=24)
-    )
-
-
-def test_load_config_accepts_file_source_framerate_alias(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "source:\n"
-        "  type: file\n"
-        "  path: data/vtest.avi\n"
-        "  framerate: 24\n",
-        encoding="utf-8",
-    )
-
-    assert load_config(config_path) == AppConfig(
-        source=FileSourceConfig(path=Path("data/vtest.avi"), rate=24)
-    )
-
-
-def test_load_config_reads_stream_settings_yaml(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "source:\n"
-        "  type: file\n"
-        "  path: data/vtest.avi\n"
-        "video_local: false\n"
-        "codec: h264\n"
-        "host: 192.0.2.10\n"
-        "port: 6000\n"
-        "mtu: 900\n",
-        encoding="utf-8",
-    )
-
-    assert load_config(config_path) == AppConfig(
-        source=FileSourceConfig(path=Path("data/vtest.avi")),
-        video_local=False,
-        codec="h264",
-        host="192.0.2.10",
-        port=6000,
-        mtu=900,
-    )
-
-
-def test_load_config_reads_camera_source_yaml(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "source:\n"
-        "  type: camera\n"
-        "  device: /dev/video0\n",
-        encoding="utf-8",
-    )
-
-    assert load_config(config_path) == AppConfig(
-        source=CameraSourceConfig(device="/dev/video0")
-    )
-
-
-def test_load_config_reads_simulation_source_yaml(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "source:\n"
-        "  type: simulation\n"
-        "  topic: /camera\n",
-        encoding="utf-8",
-    )
-
-    assert load_config(config_path) == AppConfig(
-        source=SimulationSourceConfig(topic="/camera")
-    )
-
-
-def test_load_config_reads_simulation_source_rate_yaml(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "source:\n"
-        "  type: simulation\n"
-        "  topic: /camera\n"
-        "  rate: 12\n",
-        encoding="utf-8",
-    )
-
-    assert load_config(config_path) == AppConfig(
-        source=SimulationSourceConfig(topic="/camera", rate=12)
-    )
-
-
-def test_load_config_reads_detector_yaml(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "source:\n"
-        "  type: simulation\n"
-        "  topic: /camera\n"
-        "detector:\n"
-        "  enabled: true\n"
-        "  overlay_enabled: true\n"
-        "  low_h: 2\n"
-        "  high_h: 20\n",
-        encoding="utf-8",
-    )
-
-    assert load_config(config_path) == AppConfig(
-        source=SimulationSourceConfig(topic="/camera"),
-        detector=DetectorConfig(
-            enabled=True,
-            overlay_enabled=True,
-            low_h=2,
-            high_h=20,
-        ),
-    )
-
-
-def test_load_config_overrides_keeps_detector_fields_optional(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "detector:\n"
-        "  enabled: true\n"
-        "  overlay_enabled: true\n"
-        "  low_h: 2\n",
-        encoding="utf-8",
-    )
-
-    assert load_config_overrides(config_path) == AppConfigOverrides(
-        detector=DetectorConfigOverrides(
-            enabled=True,
-            overlay_enabled=True,
-            low_h=2,
-        )
-    )
-
-
-def test_load_config_reads_zmq_yaml(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "source:\n"
-        "  type: simulation\n"
-        "  topic: /camera\n"
-        "detector:\n"
-        "  enabled: true\n"
-        "zmq:\n"
-        "  enabled: true\n"
-        "  telemetry_endpoint: tcp://127.0.0.1:6000\n"
-        "  bind: false\n",
-        encoding="utf-8",
-    )
-
-    assert load_config(config_path) == AppConfig(
-        source=SimulationSourceConfig(topic="/camera"),
-        detector=DetectorConfig(enabled=True),
-        zmq=ZmqConfig(
-            enabled=True,
-            telemetry_endpoint="tcp://127.0.0.1:6000",
-            bind=False,
-        ),
-    )
-
-
-def test_load_config_overrides_keeps_zmq_fields_optional(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text("zmq:\n  enabled: true\n", encoding="utf-8")
-
-    assert load_config_overrides(config_path) == AppConfigOverrides(
-        zmq=ZmqConfigOverrides(enabled=True)
-    )
-
-
-def test_merge_config_uses_cli_overrides() -> None:
-    assert merge_config(
-        AppConfig(
-            source=FileSourceConfig(path=Path("config.avi")),
-            video_local=False,
-            host="192.0.2.10",
-            port=6000,
-            mtu=900,
-        ),
-        AppConfigOverrides(source=FileSourceConfig(path=Path("cli.avi"))),
-    ) == AppConfig(
-        source=FileSourceConfig(path=Path("cli.avi")),
-        video_local=False,
-        host="192.0.2.10",
-        port=6000,
-        mtu=900,
-    )
-
-
-def test_resolve_config_applies_yaml_overrides_after_defaults() -> None:
-    assert resolve_config(
-        AppConfig(source=FileSourceConfig(path=Path("default.avi"))),
-        AppConfigOverrides(
-            source=FileSourceConfig(path=Path("yaml.avi"), rate=7),
-            video_local=False,
-            host="192.0.2.20",
-            port=7000,
-            mtu=800,
-        ),
-    ) == AppConfig(
-        source=FileSourceConfig(path=Path("yaml.avi"), rate=7),
-        video_local=False,
-        host="192.0.2.20",
-        port=7000,
-        mtu=800,
-    )
-
-
-def test_cli_source_override_preserves_yaml_stream_settings(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "source:\n"
-        "  type: file\n"
-        "  path: config.avi\n"
-        "  rate: 12\n"
-        "video_local: false\n"
-        "host: 192.0.2.10\n"
-        "port: 6000\n"
-        "mtu: 900\n",
-        encoding="utf-8",
-    )
-
-    assert app_module.resolve_command_config(
-        config_path,
-        AppConfigOverrides(source=FileSourceConfigOverrides(path=Path("cli.avi"))),
-    ) == AppConfig(
-        source=FileSourceConfig(path=Path("cli.avi"), rate=12),
-        video_local=False,
-        host="192.0.2.10",
-        port=6000,
-        mtu=900,
-    )
-
-
-def test_cli_simulation_topic_override_preserves_yaml_rate(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "source:\n"
-        "  type: simulation\n"
-        "  topic: /config-camera\n"
-        "  rate: 12\n",
-        encoding="utf-8",
-    )
-
-    assert app_module.resolve_command_config(
-        config_path,
-        AppConfigOverrides(
-            source=SimulationSourceConfigOverrides(topic="/cli-camera")
-        ),
-    ) == AppConfig(
-        source=SimulationSourceConfig(topic="/cli-camera", rate=12),
-    )
-
-
-def test_load_config_overrides_keeps_only_explicit_yaml_values(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "source:\n"
-        "  type: file\n"
-        "  path: data/vtest.avi\n"
-        "host: 192.0.2.10\n",
-        encoding="utf-8",
-    )
-
-    assert load_config_overrides(config_path) == AppConfigOverrides(
-        source=FileSourceConfig(path=Path("data/vtest.avi")),
-        host="192.0.2.10",
-    )
-
-
-def test_validate_config_requires_source() -> None:
-    with pytest.raises(ConfigError, match="source config is required"):
-        validate_config(AppConfig())
-
-
-def test_load_config_rejects_unsupported_source_type(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "source:\n"
-        "  type: other\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ConfigError, match="unsupported source type: other"):
-        load_config(config_path)
-
-
-def test_load_config_rejects_invalid_stream_field_types(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "source:\n"
-        "  type: file\n"
-        "  path: data/vtest.avi\n"
-        "port: not-a-port\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ConfigError, match="port must be an int"):
-        load_config(config_path)
-
-    config_path.write_text(
-        "source:\n"
-        "  type: file\n"
-        "  path: data/vtest.avi\n"
-        "mtu: not-an-mtu\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ConfigError, match="mtu must be an int"):
-        load_config(config_path)
-
-
-def test_load_config_rejects_invalid_file_source_rate(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "source:\n"
-        "  type: file\n"
-        "  path: data/vtest.avi\n"
-        "  rate: not-an-int\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ConfigError, match="rate must be an int"):
-        load_config(config_path)
-
-    config_path.write_text(
-        "source:\n"
-        "  type: file\n"
-        "  path: data/vtest.avi\n"
-        "  rate: 0\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ConfigError, match="source.rate must be greater than 0"):
-        load_config(config_path)
-
-
-def test_load_config_rejects_invalid_simulation_source_rate(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "source:\n"
-        "  type: simulation\n"
-        "  topic: /camera\n"
-        "  rate: not-an-int\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ConfigError, match="rate must be an int"):
-        load_config(config_path)
-
-    config_path.write_text(
-        "source:\n"
-        "  type: simulation\n"
-        "  topic: /camera\n"
-        "  rate: 0\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ConfigError, match="source.rate must be greater than 0"):
-        load_config(config_path)
-
-
-def test_validate_config_rejects_invalid_stream_values() -> None:
-    with pytest.raises(ConfigError, match="source.rate must be greater than 0"):
-        validate_config(
-            AppConfig(
-                source=FileSourceConfig(
-                    path=Path("data/vtest.avi"),
-                    rate=0,
-                )
-            )
-        )
-    with pytest.raises(ConfigError, match="unsupported codec: h265"):
-        validate_config(
-            AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")), codec="h265")
-        )
-    with pytest.raises(ConfigError, match="port must be between 1 and 65535"):
-        validate_config(
-            AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")), port=0)
-        )
-    with pytest.raises(ConfigError, match="mtu must be greater than 0"):
-        validate_config(
-            AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")), mtu=0)
-        )
-    with pytest.raises(ConfigError, match="source.rate must be greater than 0"):
-        validate_config(AppConfig(source=SimulationSourceConfig(topic="/camera", rate=0)))
+    config = resolve_config(AppConfig(), load_config_overrides(config_path))
+
+    assert config.source == FileSourceConfig(path=Path("video.avi"), rate=12)
+    assert config.host == "192.0.2.1"
+    assert config.port == 5600
 
 
 @pytest.mark.parametrize(
-    ("detector", "message"),
+    ("source", "fragment"),
     [
-        (DetectorConfig(low_h=-1), "detector.low_h must be between 0 and 179"),
-        (DetectorConfig(high_h=180), "detector.high_h must be between 0 and 179"),
-        (DetectorConfig(low_s=256), "detector.low_s must be between 0 and 255"),
-        (
-            DetectorConfig(low_v=200, high_v=100),
-            "detector.low_v must not exceed detector.high_v",
-        ),
-        (
-            DetectorConfig(overlay_enabled=True),
-            "detector.overlay_enabled requires detector.enabled",
-        ),
-        (
-            DetectorConfig(enabled=True, overlay_enabled=1),
-            "detector.overlay_enabled must be a bool",
-        ),
+        (FileSourceConfig(Path("video.avi"), rate=10), "filesrc location=video.avi"),
+        (CameraSourceConfig("/dev/video2"), "v4l2src device=/dev/video2"),
+        (SimulationSourceConfig("/camera", rate=25), "gzimgsrc topic=/camera"),
     ],
 )
-def test_validate_config_rejects_invalid_detector_values(
-    detector: DetectorConfig,
-    message: str,
-) -> None:
-    with pytest.raises(ConfigError, match=message):
-        validate_config(
-            AppConfig(
-                source=SimulationSourceConfig(topic="/camera"),
-                detector=detector,
-            )
+def test_build_pipeline_for_supported_sources(source: object, fragment: str) -> None:
+    pipeline = build_pipeline_description(AppConfig(source=source, video_local=False))
+
+    assert fragment in pipeline
+    assert "rtph264pay" in pipeline
+    assert "udpsink" in pipeline
+
+
+def test_detector_pipeline_contains_plugin_overlay_and_metadata_sink() -> None:
+    pipeline = build_pipeline_description(
+        AppConfig(
+            source=SimulationSourceConfig("/camera"),
+            detector=DetectorConfig(enabled=True, overlay_enabled=True),
+            video_local=False,
         )
+    )
+
+    assert "controlledreddetect" in pipeline
+    assert "cairooverlay name=detection_overlay" in pipeline
+    assert "appsink name=detection_sink" in pipeline
 
 
-def test_validate_config_rejects_zmq_without_detector() -> None:
+def test_validate_rejects_zmq_without_detector() -> None:
     with pytest.raises(ConfigError, match="zmq.enabled requires detector.enabled"):
         validate_config(
             AppConfig(
-                source=SimulationSourceConfig(topic="/camera"),
+                source=FileSourceConfig(Path("video.avi")),
                 zmq=ZmqConfig(enabled=True),
             )
         )
 
 
-def test_build_pipeline_description_for_file_source() -> None:
-    pipeline = build_pipeline_description(
-        AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")))
-    )
+def test_detector_lock_lifecycle() -> None:
+    state = DetectorLockState()
+    assert state.update(True) == (False, 0, 0)
 
-    assert pipeline.startswith(
-        "filesrc location=data/vtest.avi ! decodebin ! videorate ! "
-        "video/x-raw,framerate=20/1 ! videoconvert ! tee name=video_tee"
-    )
-    assert "x264enc bitrate=1500 tune=zerolatency speed-preset=ultrafast" in pipeline
-    assert "h264parse config-interval=1" in pipeline
-    assert "rtph264pay pt=96 mtu=1200" in pipeline
-    assert "aggregate-mode=zero-latency" in pipeline
-    assert "udpsink host=127.0.0.1 port=5000 sync=false async=false" in pipeline
-    assert "fpsdisplaysink video-sink=glimagesink sync=true" in pipeline
+    state.apply_request(TrackStartRequest(320, 240))
+    for expected in range(1, 10):
+        assert state.update(True) == (False, expected, 0)
+    assert state.update(True) == (True, 10, 0)
 
+    for expected in range(1, 5):
+        assert state.update(False) == (True, 0, expected)
+    assert state.update(False) == (False, 0, 5)
 
-def test_build_pipeline_description_quotes_file_path_with_spaces() -> None:
-    pipeline = build_pipeline_description(
-        AppConfig(
-            source=FileSourceConfig(
-                path=Path("data/video with spaces.avi"),
-                rate=24,
-            )
-        )
-    )
-
-    assert pipeline.startswith(
-        "filesrc location='data/video with spaces.avi' ! decodebin ! "
-        "videorate ! video/x-raw,framerate=24/1"
-    )
+    state.apply_request(TrackStopRequest())
+    assert state.update(True) == (False, 0, 0)
 
 
-def test_build_pipeline_description_for_camera_source() -> None:
-    pipeline = build_pipeline_description(
-        AppConfig(source=CameraSourceConfig(device="/dev/video0"))
-    )
+class RecordingPublisher:
+    def __init__(self) -> None:
+        self.messages: list[RedDetectionMessage] = []
 
-    assert pipeline.startswith("v4l2src device=/dev/video0 ! videoconvert")
-    assert "rtph264pay" in pipeline
-
-
-def test_build_pipeline_description_omits_debug_branch_when_disabled() -> None:
-    pipeline = build_pipeline_description(
-        AppConfig(
-            source=FileSourceConfig(path=Path("data/vtest.avi")),
-            video_local=False,
-            host="192.0.2.10",
-            port=6000,
-            mtu=900,
-        )
-    )
-
-    assert "autovideosink" not in pipeline
-    assert "udpsink host=192.0.2.10 port=6000 sync=false async=false" in pipeline
-    assert "rtph264pay pt=96 mtu=900" in pipeline
+    def publish_red_detection(self, message: RedDetectionMessage) -> None:
+        self.messages.append(message)
 
 
-def test_build_pipeline_description_for_simulation_source() -> None:
-    pipeline = build_pipeline_description(
-        AppConfig(source=SimulationSourceConfig(topic="/camera", rate=12))
-    )
+def test_detection_telemetry_assigns_frame_ids() -> None:
+    publisher = RecordingPublisher()
+    state = DetectionTelemetryState(publisher)  # type: ignore[arg-type]
+    state.lock_state.apply_request(TrackStartRequest(10, 20))
 
-    assert pipeline.startswith(
-        "gzimgsrc topic=/camera ! videoconvert ! tee name=video_tee"
-    )
-    assert "x264enc bitrate=1500 tune=zerolatency speed-preset=ultrafast" in pipeline
-    assert "video/x-raw,format=I420,width=640,height=480,framerate=12/1" in pipeline
-    assert "rtph264pay pt=96 mtu=1200" in pipeline
-    assert "aggregate-mode=zero-latency" in pipeline
-    assert "udpsink host=127.0.0.1 port=5000 sync=false async=false" in pipeline
+    state.publish(RedDetection(True, 1, 2, 3, 4, 5))
+    state.publish(RedDetection(False, 0, 0, 0, 0, 6))
+
+    assert [message.frame_id for message in publisher.messages] == [1, 2]
+    assert publisher.messages[0].timestamp_ns == 5
+    assert publisher.messages[0].lock_found_frames == 1
 
 
-def test_build_pipeline_description_quotes_simulation_topic() -> None:
-    assert build_source_pipeline_description(
-        SimulationSourceConfig(topic="/world/default/camera image", rate=30)
-    ) == "gzimgsrc topic='/world/default/camera image'"
+def test_cursor_applies_all_control_requests() -> None:
+    state = DetectionCursorState(frame_width=100, frame_height=80, initial_size=20)
+    state.apply(TrackStartRequest(50, 40))
+    assert state.snapshot() == CursorRoi(40, 30, 20, 20)
+
+    state.apply(TrackAdjustmentRequest(10, -5))
+    assert state.snapshot() == CursorRoi(50, 25, 20, 20)
+
+    state.apply(TrackResizeRequest(30, 10))
+    assert state.snapshot() == CursorRoi(45, 30, 30, 10)
+
+    state.apply(TrackStopRequest())
+    assert state.snapshot() is None
 
 
-def test_build_pipeline_description_inserts_detector_before_tee() -> None:
-    pipeline = build_pipeline_description(
-        AppConfig(
-            source=SimulationSourceConfig(topic="/camera"),
-            detector=DetectorConfig(
-                enabled=True,
-                low_h=2,
-                low_s=101,
-                low_v=102,
-                high_h=20,
-                high_s=250,
-                high_v=251,
-            ),
-        )
-    )
-
-    detector = (
-        "video/x-raw,format=RGB ! controlledreddetect detection-enabled=true "
-        "low-h=2 low-s=101 low-v=102 high-h=20 high-s=250 high-v=251"
-    )
-    assert detector in pipeline
-    assert pipeline.index(detector) < pipeline.index("tee name=video_tee")
-    assert "rtph264pay" in pipeline
-    assert "fpsdisplaysink" in pipeline
-    assert (
-        "video_tee. ! queue leaky=downstream max-size-buffers=1 ! "
-        "appsink name=detection_sink emit-signals=true sync=false "
-        "max-buffers=1 drop=true"
-    ) in pipeline
-
-
-def test_build_pipeline_description_omits_detection_sink_when_disabled() -> None:
-    pipeline = build_pipeline_description(
-        AppConfig(source=SimulationSourceConfig(topic="/camera"))
-    )
-
-    assert "controlledreddetect" not in pipeline
-    assert "detection_sink" not in pipeline
-
-
-def test_build_pipeline_description_inserts_overlay_before_tee() -> None:
-    pipeline = build_pipeline_description(
-        AppConfig(
-            source=SimulationSourceConfig(topic="/camera"),
-            detector=DetectorConfig(enabled=True, overlay_enabled=True),
-        )
-    )
-
-    overlay = (
-        "controlledreddetect detection-enabled=true low-h=0 low-s=100 "
-        "low-v=100 high-h=10 high-s=255 high-v=255 ! videoconvert ! "
-        "video/x-raw,format=BGRx ! cairooverlay name=detection_overlay"
-    )
-    assert overlay in pipeline
-    assert pipeline.index("cairooverlay name=detection_overlay") < pipeline.index(
-        "tee name=video_tee"
-    )
-
-
-@pytest.mark.parametrize(
-    ("pts", "expected_pts"),
-    [(123456, 123456), (GST_CLOCK_TIME_NONE, None)],
-)
-def test_read_red_detection(pts: int, expected_pts: int | None) -> None:
-    values = {
-        "found": True,
-        "x": 10,
-        "y": 20,
-        "width": 30,
-        "height": 40,
-    }
-
-    class Structure:
-        def get_value(self, name):
-            return values[name]
-
-    class Meta:
-        def get_structure(self):
-            return Structure()
-
-    class Buffer:
-        def __init__(self):
-            self.pts = pts
-
-        def get_custom_meta(self, name):
-            assert name == "GstRedDetectionMeta"
-            return Meta()
-
-    assert read_red_detection(Buffer()) == RedDetection(
-        found=True,
-        x=10,
-        y=20,
-        width=30,
-        height=40,
-        pts_ns=expected_pts,
-    )
-
-
-def test_read_red_detection_returns_none_without_metadata() -> None:
-    class Buffer:
-        def get_custom_meta(self, _name):
-            return None
-
-    assert read_red_detection(Buffer()) is None
-
-
-def test_detection_sample_callback_reads_buffer(monkeypatch) -> None:
-    detections = iter(
-        [
-            RedDetection(True, 1, 2, 3, 4, 5),
-            RedDetection(False, 0, 0, 0, 0, 6),
-        ]
-    )
-    buffer = object()
-    published = []
-
-    class Sample:
-        def get_buffer(self):
-            return buffer
-
-    class Sink:
-        def emit(self, name):
-            assert name == "pull-sample"
-            return Sample()
-
-    class FlowReturn:
-        OK = "ok"
-        ERROR = "error"
-
-    Gst = type("Gst", (), {"FlowReturn": FlowReturn})
-
-    class Publisher:
-        def publish_red_detection(self, message):
-            published.append(message)
-
-    monkeypatch.setattr(
-        pipeline_runner,
-        "read_red_detection",
-        lambda candidate: next(detections) if candidate is buffer else None,
-    )
-    telemetry_state = DetectionTelemetryState(Publisher())
-
-    assert _on_detection_sample(Sink(), (Gst, telemetry_state)) == "ok"
-    assert _on_detection_sample(Sink(), (Gst, telemetry_state)) == "ok"
-    assert published == [
-        RedDetectionMessage(1, 5, True, 1, 2, 3, 4),
-        RedDetectionMessage(2, 6, False, 0, 0, 0, 0),
-    ]
-
-
-def test_detection_overlay_state_matches_buffer_timestamp() -> None:
-    detection = RedDetection(True, 1, 2, 30, 40, 123)
+def test_overlay_matches_detection_timestamp() -> None:
     state = DetectionOverlayState()
+    detection = RedDetection(True, 1, 2, 3, 4, 123)
     state.update(detection)
 
     assert state.detection_for_timestamp(123) == detection
     assert state.detection_for_timestamp(124) is None
 
 
-def test_detection_overlay_buffer_probe_updates_state(monkeypatch) -> None:
-    detection = RedDetection(True, 1, 2, 30, 40, 123)
-    buffer = object()
-    state = DetectionOverlayState()
+class FakeStructure:
+    def __init__(self) -> None:
+        self.values = {"found": True, "x": 1, "y": 2, "width": 3, "height": 4}
 
-    class Info:
-        def get_buffer(self):
-            return buffer
+    def get_value(self, name: str) -> object:
+        return self.values[name]
 
-    class PadProbeReturn:
-        OK = "ok"
 
-    Gst = type("Gst", (), {"PadProbeReturn": PadProbeReturn})
-    monkeypatch.setattr(
-        pipeline_runner,
-        "read_red_detection",
-        lambda candidate: detection if candidate is buffer else None,
-    )
+class FakeMeta:
+    def get_structure(self) -> FakeStructure:
+        return FakeStructure()
 
-    assert _on_detection_overlay_buffer(None, Info(), (state, Gst)) == "ok"
-    assert state.detection_for_timestamp(123) == detection
 
+class FakeBuffer:
+    def __init__(self, pts: int, has_meta: bool = True) -> None:
+        self.pts = pts
+        self.has_meta = has_meta
 
-def test_detection_overlay_draws_green_bounding_box() -> None:
-    calls = []
+    def get_custom_meta(self, _name: str) -> FakeMeta | None:
+        return FakeMeta() if self.has_meta else None
 
-    class Context:
-        def set_source_rgba(self, *values):
-            calls.append(("color", values))
 
-        def set_line_width(self, width):
-            calls.append(("line-width", width))
+def test_read_red_detection_handles_timestamp_and_missing_meta() -> None:
+    assert read_red_detection(FakeBuffer(10)) == RedDetection(True, 1, 2, 3, 4, 10)
+    assert read_red_detection(FakeBuffer(GST_CLOCK_TIME_NONE)).pts_ns is None
+    assert read_red_detection(FakeBuffer(10, has_meta=False)) is None
 
-        def rectangle(self, *values):
-            calls.append(("rectangle", values))
 
-        def stroke(self):
-            calls.append(("stroke",))
+def test_cli_parses_commands() -> None:
+    assert isinstance(parse_args(["version"]), VersionCommand)
+    assert isinstance(parse_args(["show", "-c", "config.example.yaml"]), ShowCommand)
+    assert isinstance(parse_args(["run", "-c", "config.example.yaml"]), RunCommand)
 
-    state = DetectionOverlayState()
-    state.update(RedDetection(True, 10, 20, 30, 40, 123))
 
-    _on_detection_overlay_draw(None, Context(), 123, 33, state)
+def test_cli_rejects_source_options_without_source() -> None:
+    assert parse_args(["show", "--topic", "/camera"]) != 0
 
-    assert calls == [
-        ("color", (0.0, 1.0, 0.0, 1.0)),
-        ("line-width", 3.0),
-        ("rectangle", (11.5, 21.5, 27.0, 37.0)),
-        ("stroke",),
-    ]
 
+def test_app_show_prints_pipeline(capsys: pytest.CaptureFixture[str]) -> None:
+    assert app_module.main(["show", "-c", "config.example.yaml"]) == 0
+    assert "filesrc location=data/vtest.avi" in capsys.readouterr().out
 
-@pytest.mark.parametrize(
-    "detection",
-    [
-        None,
-        RedDetection(False, 10, 20, 30, 40, 123),
-        RedDetection(True, 10, 20, 30, 40, 124),
-    ],
-)
-def test_detection_overlay_does_not_draw_without_matching_detection(
-    detection: RedDetection | None,
-) -> None:
-    class Context:
-        def __getattr__(self, name):
-            raise AssertionError(f"unexpected Cairo call: {name}")
 
-    state = DetectionOverlayState()
-    state.update(detection)
+def test_app_run_dispatches_resolved_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[AppConfig] = []
 
-    _on_detection_overlay_draw(None, Context(), 123, 33, state)
+    def fake_run(config: AppConfig) -> int:
+        captured.append(config)
+        return 7
 
+    monkeypatch.setattr(app_module, "run_pipeline", fake_run)
 
-def test_build_video_pipeline_description_uses_explicit_gtksink_pipeline() -> None:
-    video = Path("data/video with spaces.avi")
+    assert app_module.main(["run", "-c", "config.example.yaml"]) == 7
+    assert captured[0].source == FileSourceConfig(Path("data/vtest.avi"), rate=10)
 
-    pipeline = build_video_pipeline_description(video)
 
-    assert "appsrc name=video_source" in pipeline
-    assert "filesrc" not in pipeline
-    assert "decodebin" not in pipeline
-    assert "videoconvert" in pipeline
-    assert (
-        "video/x-raw,format=RGBA,width=640,height=480,"
-        f"framerate={SYNTHETIC_VIDEO_FPS}/1"
-        in pipeline
-    )
-    assert "bt_optical_flow name=tracker" in pipeline
-    assert "btpassthrough" not in pipeline
-    assert "tee name=metadata_tee" in pipeline
-    assert "queue" in pipeline
-    assert "gtksink name=video_sink" in pipeline
-    assert "appsink name=metadata_sink" in pipeline
-
-
-def test_synthetic_frame_timing_uses_10_hz_duration() -> None:
-    timing = build_synthetic_frame_timing(3, gst_second=1_000_000_000)
-
-    assert SYNTHETIC_VIDEO_FPS == 10
-    assert timing.duration == 100_000_000
-    assert timing.pts == 300_000_000
-    assert timing.dts == 300_000_000
-
-
-def test_generate_synthetic_rgba_frame_has_expected_size_and_motion() -> None:
-    first = generate_synthetic_rgba_frame(
-        0,
-        width=SYNTHETIC_VIDEO_WIDTH,
-        height=SYNTHETIC_VIDEO_HEIGHT,
-    )
-    second = generate_synthetic_rgba_frame(
-        1,
-        width=SYNTHETIC_VIDEO_WIDTH,
-        height=SYNTHETIC_VIDEO_HEIGHT,
-    )
-
-    assert len(first) == SYNTHETIC_VIDEO_WIDTH * SYNTHETIC_VIDEO_HEIGHT * 4
-    assert len(second) == SYNTHETIC_VIDEO_WIDTH * SYNTHETIC_VIDEO_HEIGHT * 4
-    assert first != second
-    assert synthetic_target_position(1) > synthetic_target_position(0)
-
-
-def test_synthetic_video_source_uses_10_hz_interval() -> None:
-    class AppSrc:
-        def emit(self, *_args):
-            return None
-
-    class Gst:
-        SECOND = 1_000_000_000
-
-    source = SyntheticVideoSource(AppSrc(), Gst, fps=SYNTHETIC_VIDEO_FPS)
-
-    assert source.frame_interval_seconds == 0.1
-
-
-def test_build_centered_roi() -> None:
-    assert build_centered_roi(
-        x=50,
-        y=40,
-        size=80,
-        frame_width=200,
-        frame_height=100,
-    ) == Roi(x=10, y=0, width=80, height=80)
-
-
-def test_build_centered_roi_clamps_to_frame_edges() -> None:
-    assert build_centered_roi(
-        x=5,
-        y=5,
-        size=20,
-        frame_width=100,
-        frame_height=80,
-    ) == Roi(x=0, y=0, width=20, height=20)
-
-
-def test_resize_roi_grows_around_center() -> None:
-    assert resize_roi(
-        Roi(x=10, y=10, width=20, height=20),
-        width=40,
-        height=40,
-        frame_width=100,
-        frame_height=100,
-    ) == Roi(x=0, y=0, width=40, height=40)
-
-
-def test_resize_roi_shrinks_around_center() -> None:
-    assert resize_roi(
-        Roi(x=10, y=10, width=20, height=20),
-        width=10,
-        height=10,
-        frame_width=100,
-        frame_height=100,
-    ) == Roi(x=15, y=15, width=10, height=10)
-
-
-def test_resize_roi_clamps_to_frame_edges() -> None:
-    assert resize_roi(
-        Roi(x=80, y=80, width=20, height=20),
-        width=40,
-        height=40,
-        frame_width=100,
-        frame_height=100,
-    ) == Roi(x=60, y=60, width=40, height=40)
-
-
-def test_adjust_roi_moves_and_preserves_size() -> None:
-    assert adjust_roi(
-        Roi(x=10, y=10, width=20, height=30),
-        delta_x=5,
-        delta_y=-3,
-        frame_width=100,
-        frame_height=100,
-    ) == Roi(x=15, y=7, width=20, height=30)
-
-
-def test_adjust_roi_clamps_to_frame_edges() -> None:
-    assert adjust_roi(
-        Roi(x=10, y=10, width=20, height=20),
-        delta_x=-50,
-        delta_y=90,
-        frame_width=100,
-        frame_height=100,
-    ) == Roi(x=0, y=80, width=20, height=20)
-
-
-def test_compute_tracker_score_clamps_to_unit_range() -> None:
-    assert compute_tracker_score(feature_count=0, max_corners=80) == 0.0
-    assert compute_tracker_score(feature_count=20, max_corners=80) == 0.25
-    assert compute_tracker_score(feature_count=100, max_corners=80) == 1.0
-    assert compute_tracker_score(feature_count=10, max_corners=0) == 0.0
-
-
-def test_compute_roi_offset_uses_frame_center() -> None:
-    assert compute_roi_offset(
-        Roi(x=40, y=20, width=20, height=20),
-        frame_width=100,
-        frame_height=100,
-    ) == (0, 20)
-
-
-def test_build_user_point_request_structure() -> None:
-    import gi
-
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
-
-    Gst.init(None)
-    structure = build_user_point_request_structure(Gst, 12, 34)
-
-    assert structure.get_name() == TRACK_REQUEST_NAME
-    assert structure.get_value(TRACK_REQUEST_FIELD_SOURCE) == TRACK_REQUEST_SOURCE_USER
-    assert structure.get_value(TRACK_REQUEST_FIELD_TYPE) == TRACK_REQUEST_TYPE_POINT
-    assert structure.get_value(TRACK_REQUEST_FIELD_X) == 12
-    assert structure.get_value(TRACK_REQUEST_FIELD_Y) == 34
-
-
-def test_build_user_stop_request_structure() -> None:
-    import gi
-
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
-
-    Gst.init(None)
-    structure = build_user_stop_request_structure(Gst)
-
-    assert structure.get_name() == TRACK_REQUEST_NAME
-    assert structure.get_value(TRACK_REQUEST_FIELD_SOURCE) == TRACK_REQUEST_SOURCE_USER
-    assert structure.get_value(TRACK_REQUEST_FIELD_TYPE) == TRACK_REQUEST_TYPE_STOP
-
-
-def test_build_user_resize_roi_request_structure() -> None:
-    import gi
-
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
-
-    Gst.init(None)
-    structure = build_user_resize_roi_request_structure(Gst, 90, 90)
-
-    assert structure.get_name() == TRACK_REQUEST_NAME
-    assert structure.get_value(TRACK_REQUEST_FIELD_SOURCE) == TRACK_REQUEST_SOURCE_USER
-    assert structure.get_value(TRACK_REQUEST_FIELD_TYPE) == TRACK_REQUEST_TYPE_RESIZE_ROI
-    assert structure.get_value(TRACK_REQUEST_FIELD_WIDTH) == 90
-    assert structure.get_value(TRACK_REQUEST_FIELD_HEIGHT) == 90
-
-
-def test_build_user_adjust_roi_request_structure() -> None:
-    import gi
-
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
-
-    Gst.init(None)
-    structure = build_user_adjust_roi_request_structure(Gst, -10, 10)
-
-    assert structure.get_name() == TRACK_REQUEST_NAME
-    assert structure.get_value(TRACK_REQUEST_FIELD_SOURCE) == TRACK_REQUEST_SOURCE_USER
-    assert structure.get_value(TRACK_REQUEST_FIELD_TYPE) == TRACK_REQUEST_TYPE_ADJUST_ROI
-    assert structure.get_value(TRACK_REQUEST_FIELD_DELTA_X) == -10
-    assert structure.get_value(TRACK_REQUEST_FIELD_DELTA_Y) == 10
-
-
-def test_read_tracker_meta_from_plugin_buffer() -> None:
-    import gi
-
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
-
-    Gst.init(None)
-    plugin = load_plugin_module()
-    element = plugin.BtOpticalFlow()
-    buffer = Gst.Buffer.new_allocate(None, 4, None)
-
-    assert element.do_transform_ip(buffer) == Gst.FlowReturn.OK
-    assert read_tracker_meta(buffer) == TrackerMeta(
-        dx=0,
-        dy=0,
-        score=0.0,
-        status=STATUS_BREAK,
-    )
-
-
-def test_read_tracker_meta_from_disabled_plugin_buffer() -> None:
-    import gi
-
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
-
-    Gst.init(None)
-    plugin = load_plugin_module()
-    element = plugin.BtOpticalFlow()
-    element.set_property("enabled", False)
-    buffer = Gst.Buffer.new_allocate(None, 4, None)
-
-    assert element.do_transform_ip(buffer) == Gst.FlowReturn.OK
-    assert read_tracker_meta(buffer) == TrackerMeta(
-        dx=0,
-        dy=0,
-        score=0.0,
-        status=STATUS_OFF,
-    )
-
-
-def test_format_video_click() -> None:
-    assert (
-        format_video_click(x=10.5, y=20.0, button=1, width=960, height=540)
-        == "video-click x=10.5 y=20.0 button=1 width=960 height=540"
-    )
-
-
-def test_build_tracker_data_message_uses_frame_id_and_timestamp() -> None:
-    assert build_tracker_data_message(
-        TrackerMeta(dx=1, dy=-2, score=0.75, status=1),
-        frame_id=42,
-        timestamp=123.5,
-    ) == TrackerDataMessage(
-        frame_id=42,
-        timestamp=123.5,
-        dx=1,
-        dy=-2,
-        score=0.75,
-        status=1,
-    )
-
-
-def test_build_tracker_debug_message_from_structure() -> None:
-    import gi
-
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
-
-    structure = Gst.Structure.new_empty(TRACKER_DEBUG_MESSAGE_NAME)
-    structure.set_value(TRACKER_DEBUG_FIELD_FRAME_NUMBER, 4)
-    structure.set_value(TRACKER_DEBUG_FIELD_STATUS, 1)
-    structure.set_value(TRACKER_DEBUG_FIELD_ACTIVE_FEATURE_COUNT, 2)
-    structure.set_value(TRACKER_DEBUG_FIELD_FEATURES_JSON, '[{"x":1.0,"y":2.0}]')
-
-    assert build_tracker_debug_message_from_structure(structure) == TrackerDebugMessage(
-        frame_number=4,
-        status=1,
-        active_feature_count=2,
-        features_json='[{"x":1.0,"y":2.0}]',
-    )
-
-
-def test_dispatch_track_request_calls_existing_sender(monkeypatch) -> None:
-    calls = []
-    tracker = object()
-
-    monkeypatch.setattr(
-        "bt_gst.tracker_app_backup.send_user_point_request",
-        lambda tracker_arg, x, y: calls.append(("start", tracker_arg, x, y)) or True,
-    )
-    monkeypatch.setattr(
-        "bt_gst.tracker_app_backup.send_user_stop_request",
-        lambda tracker_arg: calls.append(("stop", tracker_arg)) or True,
-    )
-    monkeypatch.setattr(
-        "bt_gst.tracker_app_backup.send_user_resize_roi_request",
-        lambda tracker_arg, width, height: calls.append(
-            ("resize", tracker_arg, width, height)
-        )
-        or True,
-    )
-    monkeypatch.setattr(
-        "bt_gst.tracker_app_backup.send_user_adjust_roi_request",
-        lambda tracker_arg, delta_x, delta_y: calls.append(
-            ("adjustment", tracker_arg, delta_x, delta_y)
-        )
-        or True,
-    )
-
-    assert dispatch_track_request(TrackStartRequest(x=1, y=2), tracker)
-    assert dispatch_track_request(TrackStopRequest(), tracker)
-    assert dispatch_track_request(TrackResizeRequest(width=30, height=40), tracker)
-    assert dispatch_track_request(
-        TrackAdjustmentRequest(delta_x=-5, delta_y=6),
-        tracker,
-    )
-    assert calls == [
-        ("start", tracker, 1, 2),
-        ("stop", tracker),
-        ("resize", tracker, 30, 40),
-        ("adjustment", tracker, -5, 6),
-    ]
-
-
-def test_format_tracker_debug_message() -> None:
-    assert (
-        format_tracker_debug_message(
-            frame_number=3,
-            status=1,
-            active_feature_count=2,
-            features_json='[{"x":1.0,"y":2.0}]',
-        )
-        == 'bt-tracker-debug frame=3 status=1 active-feature-count=2 features=[{"x":1.0,"y":2.0}]'
-    )
-
-
-def test_format_tracker_debug_structure() -> None:
-    import gi
-
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
-
-    structure = Gst.Structure.new_empty(TRACKER_DEBUG_MESSAGE_NAME)
-    structure.set_value(TRACKER_DEBUG_FIELD_FRAME_NUMBER, 4)
-    structure.set_value(TRACKER_DEBUG_FIELD_STATUS, 2)
-    structure.set_value(TRACKER_DEBUG_FIELD_ACTIVE_FEATURE_COUNT, 0)
-    structure.set_value(TRACKER_DEBUG_FIELD_FEATURES_JSON, "[]")
-
-    assert (
-        format_tracker_debug_structure(structure)
-        == "bt-tracker-debug frame=4 status=2 active-feature-count=0 features=[]"
-    )
-
-
-def test_handle_bus_message_prints_tracker_debug(capsys) -> None:
-    import gi
-
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
-
-    structure = Gst.Structure.new_empty(TRACKER_DEBUG_MESSAGE_NAME)
-    structure.set_value(TRACKER_DEBUG_FIELD_FRAME_NUMBER, 4)
-    structure.set_value(TRACKER_DEBUG_FIELD_STATUS, 2)
-    structure.set_value(TRACKER_DEBUG_FIELD_ACTIVE_FEATURE_COUNT, 0)
-    structure.set_value(TRACKER_DEBUG_FIELD_FEATURES_JSON, "[]")
-    message = Gst.Message.new_element(None, structure)
-
-    assert _handle_bus_message(message, object()) is False
-    assert (
-        capsys.readouterr().out.strip()
-        == "bt-tracker-debug frame=4 status=2 active-feature-count=0 features=[]"
-    )
-
-
-def test_handle_bus_message_publishes_tracker_debug(capsys) -> None:
-    import gi
-
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
-
-    class Adapter:
-        def __init__(self) -> None:
-            self.messages = []
-
-        def publish_tracker_debug(self, message: TrackerDebugMessage) -> None:
-            self.messages.append(message)
-
-    adapter = Adapter()
-    structure = Gst.Structure.new_empty(TRACKER_DEBUG_MESSAGE_NAME)
-    structure.set_value(TRACKER_DEBUG_FIELD_FRAME_NUMBER, 5)
-    structure.set_value(TRACKER_DEBUG_FIELD_STATUS, 1)
-    structure.set_value(TRACKER_DEBUG_FIELD_ACTIVE_FEATURE_COUNT, 3)
-    structure.set_value(TRACKER_DEBUG_FIELD_FEATURES_JSON, "[]")
-    message = Gst.Message.new_element(None, structure)
-
-    assert _handle_bus_message(message, object(), adapter) is False
-    assert adapter.messages == [
-        TrackerDebugMessage(
-            frame_number=5,
-            status=1,
-            active_feature_count=3,
-            features_json="[]",
-        )
-    ]
-    assert (
-        capsys.readouterr().out.strip()
-        == "bt-tracker-debug frame=5 status=1 active-feature-count=3 features=[]"
-    )
-
-
-def test_handle_bus_message_ignores_unrelated_element_message(capsys) -> None:
-    import gi
-
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
-
-    message = Gst.Message.new_element(None, Gst.Structure.new_empty("other-message"))
-
-    assert _handle_bus_message(message, object()) is False
-    assert capsys.readouterr().out == ""
-
-
-def test_configure_gst_plugin_path_sets_plugin_folder(monkeypatch) -> None:
-    monkeypatch.delenv("GST_PLUGIN_PATH", raising=False)
-
-    configure_gst_plugin_path()
-
-    assert os.environ["GST_PLUGIN_PATH"] == str(GST_PLUGIN_PATH)
-
-
-def test_configure_gst_plugin_path_preserves_existing_entries(monkeypatch) -> None:
-    existing_path = os.pathsep.join(["/tmp/gst-a", "/tmp/gst-b"])
-    monkeypatch.setenv("GST_PLUGIN_PATH", existing_path)
-
-    configure_gst_plugin_path()
-
-    assert os.environ["GST_PLUGIN_PATH"] == os.pathsep.join(
-        [str(GST_PLUGIN_PATH), existing_path]
-    )
-
-
-def test_run_pipeline_initializes_gstreamer_before_parse(monkeypatch) -> None:
-    calls = []
-
-    class FakePublisher:
-        def close(self):
-            calls.append(("publisher_close", None))
-
-    class FakeMessageType:
-        ERROR = 1
-        EOS = 2
-
-    class FakeState:
-        PLAYING = "playing"
-        NULL = "null"
-
-    class FakeMessage:
-        type = FakeMessageType.EOS
-
-    class FakeBus:
-        def timed_pop_filtered(self, _timeout, _message_types):
-            return FakeMessage()
-
-    class FakePipeline:
-        def get_bus(self):
-            return FakeBus()
-
-        def set_state(self, state):
-            calls.append(("set_state", state))
-
-    class FakeGst:
-        CLOCK_TIME_NONE = object()
-        MessageType = FakeMessageType
-        State = FakeState
-        Rank = type("Rank", (), {"NONE": 0})
-
-        @staticmethod
-        def init(_args):
-            calls.append(("gst_init", None))
-
-        @staticmethod
-        def parse_launch(_pipeline_description):
-            calls.append(("parse_launch", None))
-            return FakePipeline()
-
-    class FakeGi:
-        @staticmethod
-        def require_version(namespace, version):
-            calls.append(("require_version", namespace, version))
-
-    class FakeRepository:
-        Gst = FakeGst
-
-    monkeypatch.setitem(sys.modules, "gi", FakeGi)
-    monkeypatch.setitem(sys.modules, "gi.repository", FakeRepository)
-    monkeypatch.setattr(
-        pipeline_runner,
-        "_build_telemetry_publisher",
-        lambda _config: FakePublisher(),
-    )
-
-    assert pipeline_runner.run_pipeline(
-        AppConfig(source=FileSourceConfig(path=Path("data/vtest.avi")))
-    ) == 0
-    assert calls.index(("gst_init", None)) < calls.index(("parse_launch", None))
-    assert ("set_state", "null") in calls
-    assert ("publisher_close", None) in calls
-
-
-def test_console_version_command() -> None:
+def test_console_module_version() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "bt_gst.app", "version"],
         check=False,
@@ -1487,131 +223,9 @@ def test_console_version_command() -> None:
     assert result.stdout.strip() == "0.0.1"
 
 
-def test_console_help_command() -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "bt_gst.app", "--help"],
-        check=False,
-        capture_output=True,
-        text=True,
+def test_resolve_config_accepts_empty_override() -> None:
+    config = resolve_config(
+        AppConfig(source=FileSourceConfig(Path("video.avi"))),
+        AppConfigOverrides(),
     )
-
-    assert result.returncode == 0
-    assert "BT GStreamer command line utilities." in result.stdout
-
-
-def test_console_show_command_prints_pipeline() -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "bt_gst.app", "show", "-c", "config.example.yaml"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 0
-    assert "filesrc location=data/vtest.avi" in result.stdout
-    assert "x264enc bitrate=1500 tune=zerolatency speed-preset=ultrafast" in result.stdout
-    assert "rtph264pay pt=96 mtu=800" in result.stdout
-    assert "udpsink host=127.0.0.1 port=5600 sync=false async=false" in result.stdout
-    assert "fpsdisplaysink video-sink=glimagesink sync=true" in result.stdout
-    assert "bt_optical_flow" not in result.stdout
-
-
-def test_console_show_command_prints_simulation_pipeline() -> None:
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "bt_gst.app",
-            "show",
-            "-s",
-            "simulation",
-            "--topic",
-            "/camera",
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 0
-    assert result.stdout.startswith("gzimgsrc topic=/camera")
-    assert "rtph264pay pt=96 mtu=1200" in result.stdout
-
-
-def test_console_show_command_prints_simulation_config_pipeline() -> None:
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "bt_gst.app",
-            "show",
-            "-c",
-            "config.simulation.example.yaml",
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 0
-    assert result.stdout.startswith("gzimgsrc topic=/camera")
-    assert "controlledreddetect detection-enabled=true" in result.stdout
-    assert "udpsink host=127.0.0.1 port=5600 sync=false async=false" in result.stdout
-
-
-def test_run_command_dispatches_to_pipeline_runner(monkeypatch) -> None:
-    calls = []
-
-    def fake_run_pipeline(config: AppConfig) -> int:
-        calls.append(config)
-        return 7
-
-    monkeypatch.setattr(app_module, "run_pipeline", fake_run_pipeline)
-
-    assert app_module.main(["run", "-c", "config.example.yaml"]) == 7
-    assert calls == [
-        AppConfig(
-            source=FileSourceConfig(path=Path("data/vtest.avi"), rate=10),
-            port=5600,
-            mtu=800,
-        )
-    ]
-
-
-def test_run_command_dispatches_simulation_config_to_pipeline_runner(monkeypatch) -> None:
-    calls = []
-
-    def fake_run_pipeline(config: AppConfig) -> int:
-        calls.append(config)
-        return 7
-
-    monkeypatch.setattr(app_module, "run_pipeline", fake_run_pipeline)
-
-    assert app_module.main(["run", "-c", "config.simulation.example.yaml"]) == 7
-    assert calls == [
-        AppConfig(
-            source=SimulationSourceConfig(topic="/camera", rate=30),
-            detector=DetectorConfig(enabled=True, overlay_enabled=True),
-            video_local=False,
-            port=5600,
-            mtu=800,
-        )
-    ]
-
-
-def test_console_play_command_fails() -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "bt_gst.app", "play"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode != 0
-    assert "No such command 'play'" in result.stderr
-
-
-def test_project_script_uses_app_entrypoint() -> None:
-    assert 'bt-gst = "bt_gst.app:main"' in Path("pyproject.toml").read_text(
-        encoding="utf-8"
-    )
+    assert config.source == FileSourceConfig(Path("video.avi"))

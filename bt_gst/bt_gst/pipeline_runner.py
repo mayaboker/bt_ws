@@ -1,12 +1,12 @@
-from dataclasses import dataclass, field
 import threading
+from dataclasses import dataclass, field
 
 from loguru import logger
 
 from bt_gst.bridge.zmq_io import (
-    NullTrackerIoAdapter,
-    TrackerIoAdapter,
-    ZmqTrackerIoAdapter,
+    DetectionIoAdapter,
+    NullDetectionIoAdapter,
+    ZmqDetectionIoAdapter,
 )
 from bt_gst.bridge.zmq_models import (
     RedDetectionMessage,
@@ -14,11 +14,11 @@ from bt_gst.bridge.zmq_models import (
     TrackStopRequest,
 )
 from bt_gst.config import AppConfig
-from bt_gst.pipeline_builder import PipelineBuildError, build_pipeline_description
+from bt_gst.pipeline_builder import build_pipeline_description
 from bt_gst.red_detection import (
+    DetectionCursorState,
     DetectionOverlayState,
     RedDetection,
-    TrackerCursorState,
     read_red_detection,
 )
 
@@ -77,7 +77,7 @@ class DetectorLockState:
 
 @dataclass
 class DetectionTelemetryState:
-    publisher: TrackerIoAdapter
+    publisher: DetectionIoAdapter
     lock_state: DetectorLockState = field(default_factory=DetectorLockState)
     next_frame_id: int = 1
     last_locked: bool = False
@@ -112,10 +112,7 @@ class DetectionTelemetryState:
 
 
 def run_pipeline(config: AppConfig) -> int:
-    try:
-        pipeline_description = build_pipeline_description(config)
-    except PipelineBuildError:
-        raise
+    pipeline_description = build_pipeline_description(config)
     pipeline_runner_logger.info(
         "starting GStreamer pipeline pipeline={}", pipeline_description
     )
@@ -137,17 +134,17 @@ def run_pipeline(config: AppConfig) -> int:
         raise PipelineRunError(f"GStreamer pipeline could not be parsed: {exc}") from exc
 
     try:
-        tracker_io = _build_telemetry_publisher(config)
+        detection_io = _build_detection_io(config)
     except PipelineRunError:
         pipeline.set_state(Gst.State.NULL)
         raise
     try:
         cursor_state = (
-            TrackerCursorState(frame_width=640, frame_height=480)
+            DetectionCursorState(frame_width=640, frame_height=480)
             if config.zmq.enabled
             else None
         )
-        detection_telemetry_state = DetectionTelemetryState(tracker_io)
+        detection_telemetry_state = DetectionTelemetryState(detection_io)
         if config.detector.enabled:
             detection_sink = pipeline.get_by_name("detection_sink")
             if detection_sink is None:
@@ -187,7 +184,7 @@ def run_pipeline(config: AppConfig) -> int:
         try:
             while True:
                 if cursor_state is not None:
-                    for request in tracker_io.poll_requests():
+                    for request in detection_io.poll_requests():
                         cursor_state.apply(request)
                         detection_telemetry_state.lock_state.apply_request(request)
                 message = bus.timed_pop_filtered(
@@ -213,21 +210,21 @@ def run_pipeline(config: AppConfig) -> int:
             return 0
     finally:
         pipeline.set_state(Gst.State.NULL)
-        tracker_io.close()
+        detection_io.close()
         pipeline_runner_logger.debug("GStreamer pipeline entered NULL")
 
 
-def _build_telemetry_publisher(config: AppConfig) -> TrackerIoAdapter:
+def _build_detection_io(config: AppConfig) -> DetectionIoAdapter:
     if not config.zmq.enabled:
-        return NullTrackerIoAdapter()
+        return NullDetectionIoAdapter()
     try:
-        return ZmqTrackerIoAdapter(
+        return ZmqDetectionIoAdapter(
             request_endpoint=config.zmq.request_endpoint,
             telemetry_endpoint=config.zmq.telemetry_endpoint,
             bind=config.zmq.bind,
         )
     except Exception as exc:
-        raise PipelineRunError(f"ZMQ tracker bridge could not start: {exc}") from exc
+        raise PipelineRunError(f"ZMQ detector bridge could not start: {exc}") from exc
 
 
 def _on_detection_sample(
@@ -299,7 +296,7 @@ def _on_tracker_cursor_draw(
     context: object,
     _timestamp: int,
     _duration: int,
-    state: TrackerCursorState,
+    state: DetectionCursorState,
 ) -> None:
     roi = state.snapshot()
     if roi is None:

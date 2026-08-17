@@ -1,4 +1,4 @@
-"""ZMQ adapter for tracker requests and telemetry."""
+"""ZMQ adapter for detector control requests and telemetry."""
 
 from typing import Protocol
 
@@ -6,10 +6,8 @@ from loguru import logger
 
 from bt_gst.bridge.zmq_models import (
     RedDetectionMessage,
-    TrackRequest,
     TelemetryMessage,
-    TrackerDataMessage,
-    TrackerDebugMessage,
+    TrackRequest,
     decode_request,
     encode_message,
 )
@@ -18,18 +16,9 @@ DEFAULT_REQUEST_ENDPOINT = "tcp://127.0.0.1:5555"
 DEFAULT_TELEMETRY_ENDPOINT = "tcp://127.0.0.1:5556"
 
 
-class TrackerIoAdapter(Protocol):
+class DetectionIoAdapter(Protocol):
     def poll_requests(self) -> list[TrackRequest]:
         """Return all pending valid requests in receive order."""
-
-    def poll_latest_request(self) -> TrackRequest | None:
-        """Return the newest pending request, dropping older pending requests."""
-
-    def publish_tracker_data(self, message: TrackerDataMessage) -> None:
-        """Publish tracker metadata without blocking."""
-
-    def publish_tracker_debug(self, message: TrackerDebugMessage) -> None:
-        """Publish tracker debug data without blocking."""
 
     def publish_red_detection(self, message: RedDetectionMessage) -> None:
         """Publish red-detection metadata without blocking."""
@@ -38,18 +27,9 @@ class TrackerIoAdapter(Protocol):
         """Release transport resources."""
 
 
-class NullTrackerIoAdapter:
+class NullDetectionIoAdapter:
     def poll_requests(self) -> list[TrackRequest]:
         return []
-
-    def poll_latest_request(self) -> TrackRequest | None:
-        return None
-
-    def publish_tracker_data(self, message: TrackerDataMessage) -> None:
-        return
-
-    def publish_tracker_debug(self, message: TrackerDebugMessage) -> None:
-        return
 
     def publish_red_detection(self, message: RedDetectionMessage) -> None:
         return
@@ -58,7 +38,7 @@ class NullTrackerIoAdapter:
         return
 
 
-class ZmqTrackerIoAdapter:
+class ZmqDetectionIoAdapter:
     def __init__(
         self,
         request_endpoint: str = DEFAULT_REQUEST_ENDPOINT,
@@ -93,10 +73,6 @@ class ZmqTrackerIoAdapter:
                 self._context.term()
             raise
 
-    def poll_latest_request(self) -> TrackRequest | None:
-        requests = self.poll_requests()
-        return requests[-1] if requests else None
-
     def poll_requests(self) -> list[TrackRequest]:
         requests = []
         while True:
@@ -110,12 +86,6 @@ class ZmqTrackerIoAdapter:
             except (KeyError, TypeError, ValueError, self._zmq.ZMQError) as exc:
                 logger.warning("ignored invalid tracker request reason={}", exc)
 
-    def publish_tracker_data(self, message: TrackerDataMessage) -> None:
-        self._telemetry_publisher.publish_tracker_data(message)
-
-    def publish_tracker_debug(self, message: TrackerDebugMessage) -> None:
-        self._telemetry_publisher.publish_tracker_debug(message)
-
     def publish_red_detection(self, message: RedDetectionMessage) -> None:
         self._telemetry_publisher.publish_red_detection(message)
 
@@ -124,34 +94,6 @@ class ZmqTrackerIoAdapter:
         self._telemetry_publisher.close()
         if self._owns_context:
             self._context.term()
-
-class TelemetryPublisher(Protocol):
-    def publish_tracker_data(self, message: TrackerDataMessage) -> None:
-        """Publish tracker metadata without blocking."""
-
-    def publish_tracker_debug(self, message: TrackerDebugMessage) -> None:
-        """Publish tracker debug data without blocking."""
-
-    def publish_red_detection(self, message: RedDetectionMessage) -> None:
-        """Publish red-detection metadata without blocking."""
-
-    def close(self) -> None:
-        """Release transport resources."""
-
-
-class NullTelemetryPublisher:
-    def publish_tracker_data(self, message: TrackerDataMessage) -> None:
-        return
-
-    def publish_tracker_debug(self, message: TrackerDebugMessage) -> None:
-        return
-
-    def publish_red_detection(self, message: RedDetectionMessage) -> None:
-        return
-
-    def close(self) -> None:
-        return
-
 
 class ZmqTelemetryPublisher:
     def __init__(
@@ -179,12 +121,6 @@ class ZmqTelemetryPublisher:
             if self._owns_context:
                 self._context.term()
             raise
-
-    def publish_tracker_data(self, message: TrackerDataMessage) -> None:
-        self._publish(message)
-
-    def publish_tracker_debug(self, message: TrackerDebugMessage) -> None:
-        self._publish(message)
 
     def publish_red_detection(self, message: RedDetectionMessage) -> None:
         self._publish(message)

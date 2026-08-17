@@ -2,8 +2,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeAlias
 
-from loguru import logger
 import yaml
+from loguru import logger
 
 config_logger = logger.bind(component="bt_gst.config")
 
@@ -21,10 +21,6 @@ class FileSourceConfig:
     path: Path
     rate: int = DEFAULT_FILE_RATE
     type: str = "file"
-
-    @property
-    def framerate(self) -> int:
-        return self.rate
 
 
 @dataclass(frozen=True)
@@ -141,10 +137,6 @@ class AppConfigOverrides:
     mtu: int | None = None
 
 
-def load_config(path: Path) -> AppConfig:
-    return resolve_config(AppConfig(), load_config_overrides(path))
-
-
 def load_config_overrides(path: Path) -> AppConfigOverrides:
     config_logger.trace("loading config path={}", path)
     try:
@@ -164,10 +156,6 @@ def load_config_overrides(path: Path) -> AppConfigOverrides:
         raise ConfigError("config root must be a mapping")
 
     return app_config_overrides_from_mapping(raw_config)
-
-
-def app_config_from_mapping(raw_config: dict[str, Any]) -> AppConfig:
-    return resolve_config(AppConfig(), app_config_overrides_from_mapping(raw_config))
 
 
 def app_config_overrides_from_mapping(raw_config: dict[str, Any]) -> AppConfigOverrides:
@@ -320,34 +308,6 @@ def _resolve_zmq_config(
         ),
         bind=override.bind if override.bind is not None else current.bind,
     )
-
-
-def merge_config(
-    base: AppConfig | None,
-    overrides: AppConfigOverrides | AppConfig,
-) -> AppConfig:
-    config_logger.trace("merging config base={!r} overrides={!r}", base, overrides)
-    if isinstance(overrides, AppConfig):
-        overrides = AppConfigOverrides(
-            source=overrides.source,
-            detector=DetectorConfigOverrides(
-                enabled=overrides.detector.enabled,
-                overlay_enabled=overrides.detector.overlay_enabled,
-                low_h=overrides.detector.low_h,
-                low_s=overrides.detector.low_s,
-                low_v=overrides.detector.low_v,
-                high_h=overrides.detector.high_h,
-                high_s=overrides.detector.high_s,
-                high_v=overrides.detector.high_v,
-            ),
-            zmq=ZmqConfigOverrides(
-                enabled=overrides.zmq.enabled,
-                request_endpoint=overrides.zmq.request_endpoint,
-                telemetry_endpoint=overrides.zmq.telemetry_endpoint,
-                bind=overrides.zmq.bind,
-            ),
-        )
-    return resolve_config(base or AppConfig(), overrides)
 
 
 def _resolve_source_config(
@@ -511,11 +471,6 @@ def _optional_file_rate(raw_source: dict[str, Any]) -> int:
         if rate is None:
             raise ConfigError("source.rate must be an int")
         return rate
-    if "framerate" in raw_source:
-        rate = _optional_int(raw_source, "framerate")
-        if rate is None:
-            raise ConfigError("source.framerate must be an int")
-        return rate
     return DEFAULT_FILE_RATE
 
 
@@ -524,10 +479,5 @@ def _optional_simulation_rate(raw_source: dict[str, Any]) -> int:
         rate = _optional_int(raw_source, "rate")
         if rate is None:
             raise ConfigError("source.rate must be an int")
-        return rate
-    if "framerate" in raw_source:
-        rate = _optional_int(raw_source, "framerate")
-        if rate is None:
-            raise ConfigError("source.framerate must be an int")
         return rate
     return DEFAULT_SIMULATION_RATE

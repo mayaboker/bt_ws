@@ -11,8 +11,6 @@ TYPE_TRACK_START = "start"
 TYPE_TRACK_STOP = "stop"
 TYPE_TRACK_RESIZE = "resize"
 TYPE_TRACK_ADJUSTMENT = "adjustment"
-TYPE_TRACKER_DATA = "tracker-data"
-TYPE_TRACKER_DEBUG = "tracker-debug"
 TYPE_RED_DETECTION = "red-detection"
 
 
@@ -43,26 +41,6 @@ class TrackAdjustmentRequest:
 
 
 @dataclass(frozen=True)
-class TrackerDataMessage:
-    frame_id: int
-    timestamp: float
-    dx: int
-    dy: int
-    score: float
-    status: int
-    type: str = field(default=TYPE_TRACKER_DATA, init=False)
-
-
-@dataclass(frozen=True)
-class TrackerDebugMessage:
-    frame_number: int
-    status: int
-    active_feature_count: int
-    features_json: str
-    type: str = field(default=TYPE_TRACKER_DEBUG, init=False)
-
-
-@dataclass(frozen=True)
 class RedDetectionMessage:
     frame_id: int
     timestamp_ns: int | None
@@ -80,8 +58,7 @@ class RedDetectionMessage:
 TrackRequest: TypeAlias = (
     TrackStartRequest | TrackStopRequest | TrackResizeRequest | TrackAdjustmentRequest
 )
-TrackerMessage: TypeAlias = TrackerDataMessage | TrackerDebugMessage
-TelemetryMessage: TypeAlias = TrackerMessage | RedDetectionMessage
+TelemetryMessage: TypeAlias = RedDetectionMessage
 TransportMessage: TypeAlias = TrackRequest | TelemetryMessage
 
 
@@ -92,7 +69,7 @@ def encode_message(message: TransportMessage) -> bytes:
 def decode_request(payload: bytes) -> TrackRequest:
     data = msgpack.unpackb(payload, raw=False, strict_map_key=False)
     if not isinstance(data, dict):
-        raise ValueError("messagepack payload must decode to a map")
+        raise TypeError("messagepack payload must decode to a map")
 
     message_type = data.get(MESSAGE_TYPE_FIELD)
     if message_type == TYPE_TRACK_START:
@@ -112,25 +89,9 @@ def decode_request(payload: bytes) -> TrackRequest:
 def decode_telemetry_message(payload: bytes) -> TelemetryMessage:
     data = msgpack.unpackb(payload, raw=False, strict_map_key=False)
     if not isinstance(data, dict):
-        raise ValueError("messagepack payload must decode to a map")
+        raise TypeError("messagepack payload must decode to a map")
 
     message_type = data.get(MESSAGE_TYPE_FIELD)
-    if message_type == TYPE_TRACKER_DATA:
-        return TrackerDataMessage(
-            frame_id=int(data["frame_id"]),
-            timestamp=float(data["timestamp"]),
-            dx=int(data["dx"]),
-            dy=int(data["dy"]),
-            score=float(data["score"]),
-            status=int(data["status"]),
-        )
-    if message_type == TYPE_TRACKER_DEBUG:
-        return TrackerDebugMessage(
-            frame_number=int(data["frame_number"]),
-            status=int(data["status"]),
-            active_feature_count=int(data["active_feature_count"]),
-            features_json=str(data["features_json"]),
-        )
     if message_type == TYPE_RED_DETECTION:
         timestamp_ns = data["timestamp_ns"]
         return RedDetectionMessage(
@@ -146,10 +107,3 @@ def decode_telemetry_message(payload: bytes) -> TelemetryMessage:
             lock_missing_frames=int(data.get("lock_missing_frames", 0)),
         )
     raise ValueError(f"unsupported telemetry message type: {message_type!r}")
-
-
-def decode_tracker_message(payload: bytes) -> TrackerMessage:
-    message = decode_telemetry_message(payload)
-    if isinstance(message, RedDetectionMessage):
-        raise ValueError(f"unsupported tracker message type: {message.type!r}")
-    return message

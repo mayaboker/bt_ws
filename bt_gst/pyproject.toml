@@ -9,17 +9,12 @@ description = "GStreamer utilities for the BT workspace"
 requires-python = ">=3.10"
 dependencies = [
     "click",
-    "fastapi",
     "loguru",
     "msgpack",
-    "numpy>=1.24,<1.28",
-    "opencv-python-headless>=4.6",
     "pycairo>=1.25",
     "PyGObject>=3.48",
     "PyYAML>=6.0",
-    "uvicorn",
     "pyzmq",
-    "bt-joy",
 ]
 
 [project.optional-dependencies]
@@ -35,8 +30,6 @@ bt-gst = "bt_gst.app:main"
 where = ["."]
 include = ["bt_gst*"]
 
-[tool.setuptools.package-data]
-bt_gst = ["static/*.html"]
-
-[tool.uv.sources]
-bt-joy = { path = "../../bt_joy/dist/bt_joy-0.1.1.dev0-py3-none-any.whl" }
+[tool.ruff.lint]
+# Ruff treats Loguru's brace-style calls as stdlib logging calls.
+ignore = ["PLE1205"]

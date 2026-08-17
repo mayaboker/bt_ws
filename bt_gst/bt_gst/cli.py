@@ -1,7 +1,8 @@
+import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-import sys
-from typing import Sequence, TypeAlias
+from typing import TypeAlias
 
 import click
 from loguru import logger
@@ -13,7 +14,6 @@ from bt_gst.config import (
     SimulationSourceConfigOverrides,
 )
 
-DEFAULT_VIDEO = Path(__file__).resolve().parents[1] / "data" / "vtest.avi"
 cli_logger = logger.bind(component="bt_gst.cli")
 LOG_LEVELS = ("TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
