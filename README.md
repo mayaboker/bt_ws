@@ -41,3 +41,42 @@ You’re right: the Betaflight doc explicitly says to disable “Motor PWM speed
   this->SendState(_ecm);
 
   And make ReceiveMotorCommand() use a very small or zero timeout every tick. 9003 FDM output should not depend on receiving a fresh 9002 motor packet every update.
+
+## Listen to bt-gst detector results
+
+`bt_gst/scripts/listen_zmq.py` is a small diagnostic subscriber for the tracker
+results published by `bt_gst`. It connects to the ZMQ PUB endpoint, decodes each
+`bt_msgs.TrackerResultMessage`, and prints its detector frame ID and GStreamer
+presentation timestamp.
+
+Start the GStreamer pipeline in one terminal:
+
+```bash
+./bt_bringup/launch/run_gst.sh
+```
+
+From the workspace root, start the listener in another terminal:
+
+```bash
+bt_gst/.venv/bin/python bt_gst/scripts/listen_zmq.py
+```
+
+The default endpoint is `tcp://127.0.0.1:5556`. To connect to another endpoint:
+
+```bash
+bt_gst/.venv/bin/python bt_gst/scripts/listen_zmq.py \
+  --endpoint tcp://127.0.0.1:6000
+```
+
+Example output:
+
+```text
+Listening for bt-gst tracker results on tcp://127.0.0.1:5556
+frame_id=42 timestamp=123456789
+frame_id=43 timestamp=156790122
+```
+
+`timestamp` is the video buffer's GStreamer PTS in nanoseconds. It is printed as
+`None` when the source does not provide a valid PTS. Frame ID gaps are expected
+when the publisher's rate limiter replaces an older pending result with a newer
+one. Press Ctrl+C to stop the listener.
