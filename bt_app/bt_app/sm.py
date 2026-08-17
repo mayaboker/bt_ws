@@ -248,7 +248,7 @@ class Robot_StateMachine:
         """
         ok = all([
             self.ctx.request_rc.is_manual(),
-            not self.ctx.arm_switch,
+            not self.ctx.request_rc.is_arm(),
             self.ctx.is_low_throttle()
             # TODO: is it more safety
             # self.ctx.manual_land_confirmed,

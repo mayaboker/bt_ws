@@ -768,13 +768,13 @@ class App:
             self._handle_tracker_enabler(now)
         self._send_tracker_adjustment(now)
         
-        self.ctx.arm_switch = self._last_rc_channel[InternalJoy.ARM] == RC_MAX
+        
         throttle_for_arm = self._last_rc_channel[InternalJoy.THROTTLE] < 1050
         # if all([roll_for_arm, pitch_for_arm]):#, roll_for_arm, pitch_for_arm]):
-        if all([throttle_for_arm, self.ctx.arm_switch]):
+        if all([throttle_for_arm, channels.is_arm()]):
             # log.warning("Joystick arm request detected")
             self.ctx.armed_allowed = True
-        elif all([not self.ctx.arm_switch, throttle_for_arm]):
+        elif all([not channels.is_arm(), throttle_for_arm]):
             # log.warning("Joystick disarm request detected")
             self.ctx.armed_allowed = False
 
@@ -792,7 +792,6 @@ class App:
         self.ctx.joy_glide_request = False
         self.ctx.joy_arm_requested = False
         self.ctx.armed_allowed = False
-        self.ctx.arm_switch = False
         self.ctx.auto_mode_enable = False
         self._tracker_enabled_at = float("inf")
         self._tracker_last_lateral_command = None

@@ -52,6 +52,10 @@ class InternalJoystick(NamedTuple):
     NOT_USED_7: int = RC_MIN
     NOT_USED_8: int = RC_MIN
 
+
+    def is_arm(self) -> bool:
+        return self.ARM == RC_MAX
+    
     def is_manual(self) -> bool:
         return self.MANUAL == RC_MIN
 
