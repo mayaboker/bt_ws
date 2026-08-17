@@ -5,33 +5,35 @@ from pathlib import Path
 import pytest
 
 from bt_gst import app as app_module
-from bt_gst.bridge.zmq_models import (
-    RedDetectionMessage,
-)
 from bt_gst.cli import RunCommand, ShowCommand, VersionCommand, parse_args
 from bt_gst.config import (
     AppConfig,
     AppConfigOverrides,
     CameraSourceConfig,
-    ConfigError,
     DetectorConfig,
     FileSourceConfig,
     SimulationSourceConfig,
-    ZmqConfig,
     load_config_overrides,
     resolve_config,
-    validate_config,
 )
 from bt_gst.pipeline_builder import build_pipeline_description
-from bt_gst.pipeline_runner import DetectionTelemetryState, DetectorLockState
+from bt_gst.pipeline_runner import _on_detection_overlay_draw
 from bt_gst.red_detection import (
     GST_CLOCK_TIME_NONE,
-    CursorRoi,
-    DetectionCursorState,
     DetectionOverlayState,
     RedDetection,
     read_red_detection,
 )
+
+
+@pytest.fixture
+def file_config_path(tmp_path: Path) -> Path:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n  type: file\n  path: video.avi\n  rate: 10\n",
+        encoding="utf-8",
+    )
+    return config_path
 
 
 def test_load_and_resolve_file_config(tmp_path: Path) -> None:
@@ -65,7 +67,7 @@ def test_build_pipeline_for_supported_sources(source: object, fragment: str) -> 
     assert "udpsink" in pipeline
 
 
-def test_detector_pipeline_contains_plugin_overlay_and_metadata_sink() -> None:
+def test_detector_pipeline_contains_plugin_and_overlay_without_appsink() -> None:
     pipeline = build_pipeline_description(
         AppConfig(
             source=SimulationSourceConfig("/camera"),
@@ -76,70 +78,7 @@ def test_detector_pipeline_contains_plugin_overlay_and_metadata_sink() -> None:
 
     assert "controlledreddetect" in pipeline
     assert "cairooverlay name=detection_overlay" in pipeline
-    assert "appsink name=detection_sink" in pipeline
-
-
-def test_validate_rejects_zmq_without_detector() -> None:
-    with pytest.raises(ConfigError, match="zmq.enabled requires detector.enabled"):
-        validate_config(
-            AppConfig(
-                source=FileSourceConfig(Path("video.avi")),
-                zmq=ZmqConfig(enabled=True),
-            )
-        )
-
-
-def test_detector_lock_lifecycle() -> None:
-    state = DetectorLockState()
-    assert state.update(True) == (False, 0, 0)
-
-    state.apply_request({"type": "start", "x": 320, "y": 240})
-    for expected in range(1, 10):
-        assert state.update(True) == (False, expected, 0)
-    assert state.update(True) == (True, 10, 0)
-
-    for expected in range(1, 5):
-        assert state.update(False) == (True, 0, expected)
-    assert state.update(False) == (False, 0, 5)
-
-    state.apply_request({"type": "stop"})
-    assert state.update(True) == (False, 0, 0)
-
-
-class RecordingPublisher:
-    def __init__(self) -> None:
-        self.messages: list[RedDetectionMessage] = []
-
-    def publish_red_detection(self, message: RedDetectionMessage) -> None:
-        self.messages.append(message)
-
-
-def test_detection_telemetry_assigns_frame_ids() -> None:
-    publisher = RecordingPublisher()
-    state = DetectionTelemetryState(publisher)  # type: ignore[arg-type]
-    state.lock_state.apply_request({"type": "start", "x": 10, "y": 20})
-
-    state.publish(RedDetection(True, 1, 2, 3, 4, 5))
-    state.publish(RedDetection(False, 0, 0, 0, 0, 6))
-
-    assert [message.frame_id for message in publisher.messages] == [1, 2]
-    assert publisher.messages[0].timestamp_ns == 5
-    assert publisher.messages[0].lock_found_frames == 1
-
-
-def test_cursor_applies_all_control_requests() -> None:
-    state = DetectionCursorState(frame_width=100, frame_height=80, initial_size=20)
-    state.apply({"type": "start", "x": 50, "y": 40})
-    assert state.snapshot() == CursorRoi(40, 30, 20, 20)
-
-    state.apply({"type": "adjustment", "delta_x": 10, "delta_y": -5})
-    assert state.snapshot() == CursorRoi(50, 25, 20, 20)
-
-    state.apply({"type": "resize", "width": 30, "height": 10})
-    assert state.snapshot() == CursorRoi(45, 30, 30, 10)
-
-    state.apply({"type": "stop"})
-    assert state.snapshot() is None
+    assert "appsink" not in pipeline
 
 
 def test_overlay_matches_detection_timestamp() -> None:
@@ -149,6 +88,35 @@ def test_overlay_matches_detection_timestamp() -> None:
 
     assert state.detection_for_timestamp(123) == detection
     assert state.detection_for_timestamp(124) is None
+
+
+class RecordingDrawContext:
+    def __init__(self) -> None:
+        self.rectangle_args: tuple[float, float, float, float] | None = None
+        self.stroke_called = False
+
+    def set_source_rgba(self, *_rgba: float) -> None:
+        return
+
+    def set_line_width(self, _width: float) -> None:
+        return
+
+    def rectangle(self, *args: float) -> None:
+        self.rectangle_args = args
+
+    def stroke(self) -> None:
+        self.stroke_called = True
+
+
+def test_detection_overlay_draws_matching_detection() -> None:
+    state = DetectionOverlayState()
+    state.update(RedDetection(True, 10, 20, 30, 40, 123))
+    context = RecordingDrawContext()
+
+    _on_detection_overlay_draw(None, context, 123, 0, state)
+
+    assert context.rectangle_args == (11.5, 21.5, 27.0, 37.0)
+    assert context.stroke_called
 
 
 class FakeStructure:
@@ -179,22 +147,28 @@ def test_read_red_detection_handles_timestamp_and_missing_meta() -> None:
     assert read_red_detection(FakeBuffer(10, has_meta=False)) is None
 
 
-def test_cli_parses_commands() -> None:
+def test_cli_parses_commands(file_config_path: Path) -> None:
     assert isinstance(parse_args(["version"]), VersionCommand)
-    assert isinstance(parse_args(["show", "-c", "config.example.yaml"]), ShowCommand)
-    assert isinstance(parse_args(["run", "-c", "config.example.yaml"]), RunCommand)
+    assert isinstance(parse_args(["show", "-c", str(file_config_path)]), ShowCommand)
+    assert isinstance(parse_args(["run", "-c", str(file_config_path)]), RunCommand)
 
 
 def test_cli_rejects_source_options_without_source() -> None:
     assert parse_args(["show", "--topic", "/camera"]) != 0
 
 
-def test_app_show_prints_pipeline(capsys: pytest.CaptureFixture[str]) -> None:
-    assert app_module.main(["show", "-c", "config.example.yaml"]) == 0
-    assert "filesrc location=data/vtest.avi" in capsys.readouterr().out
+def test_app_show_prints_pipeline(
+    file_config_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert app_module.main(["show", "-c", str(file_config_path)]) == 0
+    assert "filesrc location=video.avi" in capsys.readouterr().out
 
 
-def test_app_run_dispatches_resolved_config(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_app_run_dispatches_resolved_config(
+    file_config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: list[AppConfig] = []
 
     def fake_run(config: AppConfig) -> int:
@@ -203,8 +177,8 @@ def test_app_run_dispatches_resolved_config(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(app_module, "run_pipeline", fake_run)
 
-    assert app_module.main(["run", "-c", "config.example.yaml"]) == 7
-    assert captured[0].source == FileSourceConfig(Path("data/vtest.avi"), rate=10)
+    assert app_module.main(["run", "-c", str(file_config_path)]) == 7
+    assert captured[0].source == FileSourceConfig(Path("video.avi"), rate=10)
 
 
 def test_console_module_version() -> None:

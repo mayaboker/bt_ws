@@ -35,9 +35,6 @@ def build_pipeline_description(config: AppConfig) -> str:
     debug_branch = build_debug_branch_description(config)
     if debug_branch:
         parts.append(debug_branch)
-    detection_branch = build_detection_branch_description(config)
-    if detection_branch:
-        parts.append(detection_branch)
     return " ".join(parts)
 
 
@@ -104,16 +101,6 @@ def build_debug_branch_description(config: AppConfig) -> str:
     if not config.video_local:
         return ""
     return "video_tee. ! queue ! videoconvert ! fpsdisplaysink video-sink=glimagesink sync=true"
-
-
-def build_detection_branch_description(config: AppConfig) -> str:
-    if not config.detector.enabled:
-        return ""
-    return (
-        "video_tee. ! queue leaky=downstream max-size-buffers=1 ! "
-        "appsink name=detection_sink emit-signals=true sync=false "
-        "max-buffers=1 drop=true"
-    )
 
 
 def _quote_path(path: Path) -> str:

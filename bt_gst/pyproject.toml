@@ -10,11 +10,9 @@ requires-python = ">=3.10"
 dependencies = [
     "click",
     "loguru",
-    "msgpack",
     "pycairo>=1.25",
     "PyGObject>=3.48",
     "PyYAML>=6.0",
-    "pyzmq",
 ]
 
 [project.optional-dependencies]
