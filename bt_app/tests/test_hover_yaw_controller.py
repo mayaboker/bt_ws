@@ -1,8 +1,8 @@
 from bt_app.app import App
 from bt_app.common import AETR1234, MavSeverity, RobotState
 from bt_app.context import Context
-from bt_app.control import hover_yaw_controller as hover_module
-from bt_app.control.hover_yaw_controller import HoverYawController
+from bt_app.bt_app.control import alt_hold as hover_module
+from bt_app.bt_app.control.alt_hold import AltHoldController
 from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RC_MIN, RCChannel_alias as RCChannel
 from bt_app.parameters.generated import ParameterKey
 
@@ -49,7 +49,7 @@ def controller_with_times(monkeypatch, times):
         return last["value"]
 
     monkeypatch.setattr(hover_module.time, "monotonic", monotonic)
-    return HoverYawController(FakeParameters())
+    return AltHoldController(FakeParameters())
 
 
 def test_reset_setpoint_clamps_to_min_altitude(monkeypatch):

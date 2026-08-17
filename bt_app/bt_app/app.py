@@ -20,7 +20,7 @@ from bt_app.control import (
     GlidePhase,
     TakeoffController,
     ARMController,
-    HoverYawController,
+    AltHoldController,
     MavlinkListenerError,
     MavlinkListenerService
 )
@@ -598,7 +598,7 @@ class App:
         self.controllers[RobotState.ARM] = ARMController(self.__params)
 
         # search controller
-        self.controllers[RobotState.ALT_HOLD] = HoverYawController(self.__params)
+        self.controllers[RobotState.ALT_HOLD] = AltHoldController(self.__params)
 
         # visual controller
 

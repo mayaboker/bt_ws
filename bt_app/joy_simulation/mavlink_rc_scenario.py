@@ -7,7 +7,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Sequence
 
-from pymavlink import mavutil
+from pymavlink.dialects.v20 import ardupilotmega as mavlink_dialect
 
 from bt_app.common import InternalJoy
 
@@ -28,9 +28,9 @@ RC_MID = 1500
 RC_MAX = 2000
 
 APP_SYSTEM_ID = 1
-APP_COMPONENT_ID = mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1
+APP_COMPONENT_ID = mavlink_dialect.MAV_COMP_ID_AUTOPILOT1
 JOYSTICK_SYSTEM_ID = 255
-JOYSTICK_COMPONENT_ID = mavutil.mavlink.MAV_COMP_ID_MISSIONPLANNER
+JOYSTICK_COMPONENT_ID = mavlink_dialect.MAV_COMP_ID_MISSIONPLANNER
 TARGET_SYSTEM_ID = 254
 TARGET_COMPONENT_ID = 0
 
@@ -47,6 +47,7 @@ STATE_NAMES = {
     STATE_GLIDE: "GLIDE",
 }
 ANSI_BOLD_CYAN = "\033[1;36m"
+ANSI_BOLD_YELLOW = "\033[1;33m"
 ANSI_RESET = "\033[0m"
 
 def rc_channels(
@@ -58,7 +59,7 @@ def rc_channels(
     tracker_mode: bool = False,
     payload: bool = False
 ) -> tuple[int, ...]:
-    """Build the eight application joystick channels."""
+    """Build the application joystick channels (up to MAVLink's 18 fields)."""
 
     channels = [RC_MIN] * len(InternalJoy)
     channels[InternalJoy.ROLL] = RC_MID
@@ -115,7 +116,7 @@ class Telemetry:
             new_state = int(message.custom_mode)
             new_armed = bool(
                 int(message.base_mode)
-                & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
+                & mavlink_dialect.MAV_MODE_FLAG_SAFETY_ARMED
             )
             changed = new_state != self.state or new_armed != self.armed
             self.state = new_state
@@ -153,10 +154,10 @@ class MavlinkRcScenarioBase(ABC):
         self.touchdown_altitude_m = touchdown_altitude_m
         self.telemetry = Telemetry()
         self._socket: socket.socket | None = None
-        self._encoder = mavutil.mavlink.MAVLink(
+        self._encoder = mavlink_dialect.MAVLink(
             None, srcSystem=JOYSTICK_SYSTEM_ID, srcComponent=JOYSTICK_COMPONENT_ID
         )
-        self._parser = mavutil.mavlink.MAVLink(None)
+        self._parser = mavlink_dialect.MAVLink(None)
         self._parser.robust_parsing = True
         self._airborne = False
         self._completed = False
@@ -211,6 +212,11 @@ class MavlinkRcScenarioBase(ABC):
     def _send_rc(self, channels: Sequence[int]) -> None:
         if self._socket is None:
             raise ScenarioError("MAVLink socket is not open")
+        if not 8 <= len(channels) <= 18:
+            raise ScenarioError(
+                "RC_CHANNELS_OVERRIDE requires between 8 and 18 channel values; "
+                f"got {len(channels)}"
+            )
         message = self._encoder.rc_channels_override_encode(
             TARGET_SYSTEM_ID, TARGET_COMPONENT_ID, *channels
         )
@@ -262,6 +268,6 @@ class MavlinkRcScenarioBase(ABC):
     @staticmethod
     def _phase(message: str, color: str | None = None) -> None:
         line = f"{time.strftime('%H:%M:%S')} - {message}"
-        if color:
-            line = f"{color}{line}{ANSI_RESET}"
+        color = color or ANSI_BOLD_YELLOW
+        line = f"{color}{line}{ANSI_RESET}"
         print(line, flush=True)

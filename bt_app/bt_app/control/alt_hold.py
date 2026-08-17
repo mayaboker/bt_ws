@@ -15,7 +15,7 @@ from bt_app.common import NO_RC_CHANNELS
 from bt_app.parameters import Parameters
 from bt_app.parameters.generated import ParameterKey
 
-class HoverYawController:
+class AltHoldController:
     """Hold altitude and command a slow constant yaw maneuver."""
 
     def __init__(self, params: Parameters):
@@ -56,7 +56,7 @@ class HoverYawController:
         )
 
     def _banner(self):
-        log.info("HoverYawController loaded")
+        log.info("AltHoldController loaded")
 
     @property
     def setpoint(self) -> float:

@@ -10,26 +10,15 @@ from typing import Sequence
 
 os.environ.setdefault("MAVLINK20", "1")
 
-try:
-    from joy_simulation.mavlink_rc_scenario import (
-        ARM_IN_MANUAL,
-        MANUAL_DISARMED,
-        NEUTRAL_DISARMED,
-        STATE_IDLE,
-        STATE_MANUAL,
-        MavlinkRcScenarioBase,
-        ScenarioError,
-    )
-except ModuleNotFoundError:  # direct ``python joy_simulation/send_rc_arm.py``
-    from mavlink_rc_scenario import (  # type: ignore[no-redef]
-        ARM_IN_MANUAL,
-        MANUAL_DISARMED,
-        NEUTRAL_DISARMED,
-        STATE_IDLE,
-        STATE_MANUAL,
-        MavlinkRcScenarioBase,
-        ScenarioError,
-    )
+from joy_simulation.mavlink_rc_scenario import (
+    ARM_IN_MANUAL,
+    MANUAL_DISARMED,
+    NEUTRAL_DISARMED,
+    STATE_IDLE,
+    STATE_MANUAL,
+    MavlinkRcScenarioBase,
+    ScenarioError,
+)
 
 
 SCENARIO_BANNER = """\

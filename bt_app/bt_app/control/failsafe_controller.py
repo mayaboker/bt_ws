@@ -126,7 +126,7 @@ class FailSafeController:
             return
         if now - self._phase_started_s < float(self.hold_time_s):
             return
-        log.info("--------- enter descend to land phase -----------")
+        log.warning("--------- enter descend to land phase -----------")
         self.phase = FailSafePhase.DESCEND
         self._phase_started_s = now
         self._descent_started_event = True
