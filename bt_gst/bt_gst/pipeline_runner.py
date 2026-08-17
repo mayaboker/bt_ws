@@ -1,11 +1,17 @@
+from collections.abc import Iterator
+from itertools import count
+
+from bt_msgs import TrackerResultMessage
 from loguru import logger
 
 from bt_gst.config import AppConfig
 from bt_gst.pipeline_builder import build_pipeline_description
 from bt_gst.red_detection import (
+    GST_CLOCK_TIME_NONE,
     DetectionOverlayState,
     read_red_detection,
 )
+from bt_gst.zmq_publisher import ZmqFramePublisher, ZmqPublisherError
 
 pipeline_runner_logger = logger.bind(component="bt_gst.pipeline_runner")
 
@@ -36,25 +42,43 @@ def run_pipeline(config: AppConfig) -> int:
     except Exception as exc:
         raise PipelineRunError(f"GStreamer pipeline could not be parsed: {exc}") from exc
 
+    publisher = None
     try:
+        if config.zmq.enabled:
+            publisher = ZmqFramePublisher(
+                config.zmq.endpoint,
+                bind=config.zmq.bind,
+                max_rate_hz=config.zmq.max_rate_hz,
+            )
+            try:
+                publisher.start()
+            except ZmqPublisherError as exc:
+                raise PipelineRunError(str(exc)) from exc
+
+        overlay_state = None
         if config.detector.overlay_enabled:
             detection_overlay = pipeline.get_by_name("detection_overlay")
             if detection_overlay is None:
                 raise PipelineRunError(
                     "GStreamer element 'detection_overlay' was not found"
                 )
-            overlay_sink_pad = detection_overlay.get_static_pad("sink")
-            if overlay_sink_pad is None:
-                raise PipelineRunError(
-                    "GStreamer element 'detection_overlay' has no sink pad"
-                )
             overlay_state = DetectionOverlayState()
-            overlay_sink_pad.add_probe(
-                Gst.PadProbeType.BUFFER,
-                _on_detection_overlay_buffer,
-                (overlay_state, Gst),
-            )
+
             detection_overlay.connect("draw", _on_detection_overlay_draw, overlay_state)
+
+        frame_ids = count(1) if publisher is not None else None
+        if config.detector.enabled and (overlay_state is not None or publisher is not None):
+            red_detector = pipeline.get_by_name("red_detector")
+            if red_detector is None:
+                raise PipelineRunError("GStreamer element 'red_detector' was not found")
+            detector_src_pad = red_detector.get_static_pad("src")
+            if detector_src_pad is None:
+                raise PipelineRunError("GStreamer element 'red_detector' has no src pad")
+            detector_src_pad.add_probe(
+                Gst.PadProbeType.BUFFER,
+                _on_detector_buffer,
+                (overlay_state, publisher, frame_ids, Gst),
+            )
 
         bus = pipeline.get_bus()
         pipeline.set_state(Gst.State.PLAYING)
@@ -84,17 +108,36 @@ def run_pipeline(config: AppConfig) -> int:
             return 0
     finally:
         pipeline.set_state(Gst.State.NULL)
+        if publisher is not None:
+            try:
+                publisher.stop()
+            except ZmqPublisherError as exc:
+                pipeline_runner_logger.warning("ZMQ publisher shutdown failed error={}", exc)
         pipeline_runner_logger.debug("GStreamer pipeline entered NULL")
 
 
-def _on_detection_overlay_buffer(
+def _on_detector_buffer(
     _pad: object,
     info: object,
-    callback_data: tuple[DetectionOverlayState, object],
+    callback_data: tuple[
+        DetectionOverlayState | None,
+        ZmqFramePublisher | None,
+        Iterator[int] | None,
+        object,
+    ],
 ) -> object:
-    state, gst = callback_data
+    overlay_state, publisher, frame_ids, gst = callback_data
     buffer = info.get_buffer()
-    state.update(read_red_detection(buffer) if buffer is not None else None)
+    if overlay_state is not None:
+        overlay_state.update(read_red_detection(buffer) if buffer is not None else None)
+    if publisher is not None and frame_ids is not None and buffer is not None:
+        pts = int(buffer.pts)
+        publisher.publish(
+            TrackerResultMessage(
+                frame_id=next(frame_ids),
+                timestamp=None if pts == GST_CLOCK_TIME_NONE else pts,
+            )
+        )
     return gst.PadProbeReturn.OK
 
 

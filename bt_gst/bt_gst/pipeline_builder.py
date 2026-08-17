@@ -55,7 +55,8 @@ def build_processing_pipeline_description(detector: DetectorConfig) -> str:
     if not detector.enabled:
         return "! videoconvert"
     detector_description = (
-        "! videoconvert ! video/x-raw,format=RGB ! controlledreddetect "
+        "! videoconvert ! video/x-raw,format=RGB ! "
+        "controlledreddetect name=red_detector "
         f"detection-enabled=true low-h={detector.low_h} low-s={detector.low_s} "
         f"low-v={detector.low_v} high-h={detector.high_h} "
         f"high-s={detector.high_s} high-v={detector.high_v}"

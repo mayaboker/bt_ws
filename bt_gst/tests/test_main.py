@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from bt_msgs import TrackerResultMessage
 
 from bt_gst import app as app_module
 from bt_gst.cli import RunCommand, ShowCommand, VersionCommand, parse_args
@@ -10,14 +11,17 @@ from bt_gst.config import (
     AppConfig,
     AppConfigOverrides,
     CameraSourceConfig,
+    ConfigError,
     DetectorConfig,
     FileSourceConfig,
     SimulationSourceConfig,
+    ZmqConfig,
     load_config_overrides,
     resolve_config,
+    validate_config,
 )
 from bt_gst.pipeline_builder import build_pipeline_description
-from bt_gst.pipeline_runner import _on_detection_overlay_draw
+from bt_gst.pipeline_runner import _on_detection_overlay_draw, _on_detector_buffer
 from bt_gst.red_detection import (
     GST_CLOCK_TIME_NONE,
     DetectionOverlayState,
@@ -76,9 +80,42 @@ def test_detector_pipeline_contains_plugin_and_overlay_without_appsink() -> None
         )
     )
 
-    assert "controlledreddetect" in pipeline
+    assert "controlledreddetect name=red_detector" in pipeline
     assert "cairooverlay name=detection_overlay" in pipeline
     assert "appsink" not in pipeline
+
+
+def test_loads_and_resolves_zmq_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n  type: file\n  path: video.avi\n"
+        "detector:\n  enabled: true\n"
+        "zmq:\n"
+        "  enabled: true\n"
+        "  endpoint: tcp://127.0.0.1:6000\n"
+        "  bind: false\n"
+        "  max_rate_hz: 12\n",
+        encoding="utf-8",
+    )
+
+    config = resolve_config(AppConfig(), load_config_overrides(config_path))
+
+    assert config.zmq == ZmqConfig(
+        enabled=True,
+        endpoint="tcp://127.0.0.1:6000",
+        bind=False,
+        max_rate_hz=12,
+    )
+
+
+def test_zmq_requires_enabled_detector() -> None:
+    with pytest.raises(ConfigError, match="requires detector.enabled"):
+        validate_config(
+            AppConfig(
+                source=FileSourceConfig(Path("video.avi")),
+                zmq=ZmqConfig(enabled=True),
+            )
+        )
 
 
 def test_overlay_matches_detection_timestamp() -> None:
@@ -145,6 +182,65 @@ def test_read_red_detection_handles_timestamp_and_missing_meta() -> None:
     assert read_red_detection(FakeBuffer(10)) == RedDetection(True, 1, 2, 3, 4, 10)
     assert read_red_detection(FakeBuffer(GST_CLOCK_TIME_NONE)).pts_ns is None
     assert read_red_detection(FakeBuffer(10, has_meta=False)) is None
+
+
+class FakeProbeInfo:
+    def __init__(self, buffer: FakeBuffer) -> None:
+        self.buffer = buffer
+
+    def get_buffer(self) -> FakeBuffer:
+        return self.buffer
+
+
+class FakePublisher:
+    def __init__(self) -> None:
+        self.messages: list[TrackerResultMessage] = []
+
+    def publish(self, message: TrackerResultMessage) -> None:
+        self.messages.append(message)
+
+
+class FakeGst:
+    class PadProbeReturn:
+        OK = object()
+
+
+def test_detector_probe_updates_overlay_and_only_notifies_publisher() -> None:
+    overlay_state = DetectionOverlayState()
+    publisher = FakePublisher()
+
+    result = _on_detector_buffer(
+        None,
+        FakeProbeInfo(FakeBuffer(123)),
+        (overlay_state, publisher, iter(range(1, 100)), FakeGst),
+    )
+
+    assert overlay_state.detection_for_timestamp(123) == RedDetection(
+        True, 1, 2, 3, 4, 123
+    )
+    assert publisher.messages == [TrackerResultMessage(frame_id=1, timestamp=123)]
+    assert result is FakeGst.PadProbeReturn.OK
+
+
+def test_detector_probe_publishes_sequential_frame_messages() -> None:
+    publisher = FakePublisher()
+    frame_ids = iter(range(1, 100))
+
+    _on_detector_buffer(
+        None,
+        FakeProbeInfo(FakeBuffer(100)),
+        (None, publisher, frame_ids, FakeGst),
+    )
+    _on_detector_buffer(
+        None,
+        FakeProbeInfo(FakeBuffer(GST_CLOCK_TIME_NONE)),
+        (None, publisher, frame_ids, FakeGst),
+    )
+
+    assert publisher.messages == [
+        TrackerResultMessage(frame_id=1, timestamp=100),
+        TrackerResultMessage(frame_id=2, timestamp=None),
+    ]
 
 
 def test_cli_parses_commands(file_config_path: Path) -> None:

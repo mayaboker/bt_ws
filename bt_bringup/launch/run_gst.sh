@@ -7,6 +7,7 @@ WORKSPACE_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 : "${GZIMGSRC_PLUGIN_DIR:=/home/user/projects/gz_betaflight_bridge/gst/gst_gzimgsrc/build}"
 : "${DETECTOR_PLUGIN_DIR:=${WORKSPACE_ROOT}/bt_gst/plugins/gst_detector/build}"
 : "${GST_CONFIG:=${SCRIPT_DIR}/gst.yaml}"
+: "${BT_GST_PYTHON:=${WORKSPACE_ROOT}/bt_gst/.venv/bin/python}"
 GZ_IMAGE_TOPIC="${GZ_IMAGE_TOPIC:-/X3/front_camera/image}"
 
 for plugin in \
@@ -24,17 +25,35 @@ if [[ ! -f "${GST_CONFIG}" ]]; then
   exit 1
 fi
 
+if [[ ! -x "${BT_GST_PYTHON}" ]]; then
+  echo "Missing bt-gst Python environment: ${BT_GST_PYTHON}" >&2
+  echo "Run: cd ${WORKSPACE_ROOT}/bt_gst && uv sync --extra dev" >&2
+  exit 1
+fi
+
+if ! (
+  cd "${WORKSPACE_ROOT}/bt_gst"
+  "${BT_GST_PYTHON}" -c \
+    'from bt_msgs import TrackerResultMessage; import bt_gst.app' 2>/dev/null
+)
+then
+  echo "The bt-gst Python environment is missing bt-gst or bt-msgs." >&2
+  echo "Run: cd ${WORKSPACE_ROOT}/bt_gst && uv sync --extra dev" >&2
+  exit 1
+fi
+
 export GST_PLUGIN_PATH="${GZIMGSRC_PLUGIN_DIR}:${DETECTOR_PLUGIN_DIR}${GST_PLUGIN_PATH:+:${GST_PLUGIN_PATH}}"
 
 echo "GST_PLUGIN_PATH=${GST_PLUGIN_PATH}"
 echo "Gazebo image topic=${GZ_IMAGE_TOPIC}"
 echo "bt-gst config=${GST_CONFIG}"
+echo "bt-gst python=${BT_GST_PYTHON}"
 
 gst-inspect-1.0 gzimgsrc >/dev/null
 gst-inspect-1.0 controlledreddetect >/dev/null
 
 cd "${WORKSPACE_ROOT}/bt_gst"
-exec "${WORKSPACE_ROOT}/venv/bin/python" -m bt_gst.app \
+exec "${BT_GST_PYTHON}" -m bt_gst.app \
   --log-level INFO \
   run \
   --config "${GST_CONFIG}" \

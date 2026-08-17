@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bt-msgs"
+version = "0.1.0"
+description = "Shared messages for the BT workspace"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "msgpack>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

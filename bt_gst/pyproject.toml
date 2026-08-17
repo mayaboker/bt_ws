@@ -8,12 +8,17 @@ version = "0.0.1"
 description = "GStreamer utilities for the BT workspace"
 requires-python = ">=3.10"
 dependencies = [
+    "bt-msgs",
     "click",
     "loguru",
     "pycairo>=1.25",
     "PyGObject>=3.48",
     "PyYAML>=6.0",
+    "pyzmq>=25",
 ]
+
+[tool.uv.sources]
+bt-msgs = { path = "../bt_msgs", editable = true }
 
 [project.optional-dependencies]
 dev = [
