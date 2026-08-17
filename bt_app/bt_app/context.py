@@ -27,8 +27,6 @@ class Context:
     armable: bool = field(default=False)
     # is drone armed update 1hz
     armed: bool = field(default=False)
-    # flag true: if we make the arm sequence
-    armed_allowed: bool = field(default=False)
 
     # joystick network connection lost, if true enter failsafe
     joy_fail_safe: bool = field(default=False)
@@ -89,7 +87,6 @@ class Context:
         self.arming_disable_flags = []
         self.armable = False
         self.armed = False
-        self.armed_allowed = False
         self.joy_fail_safe = False
         self.take_control = False
         self.auto_arm = False

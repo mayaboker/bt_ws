@@ -52,7 +52,9 @@ class InternalJoystick(NamedTuple):
     NOT_USED_7: int = RC_MIN
     NOT_USED_8: int = RC_MIN
 
-
+    def is_arm_throttle_low(self) -> bool:
+        return self.ARM == RC_MAX and self.THROTTLE < 1050
+    
     def is_arm(self) -> bool:
         return self.ARM == RC_MAX
     

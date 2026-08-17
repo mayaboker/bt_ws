@@ -641,7 +641,6 @@ class App:
                 log.warning("reset all controllers")
                 self.controllers[RobotState.ARM].reset()
                 self.controllers[RobotState.TAKEOFF].reset()
-                self.ctx.armed_allowed = False
                 self.ctx.joy_arm_requested = False
                 self.ctx.armed = False
                 self.ctx.joy_glide_request = False
@@ -719,7 +718,7 @@ class App:
     #region joystick handlers
     def __handle_joy_rc(self, event: RcChannelsOverrideEvent):
         """
-        handle interrupt that register as joy action
+        handle joystick RC channels override event
         """
         
         prev_channels: InternalJoystick = self._last_rc_channel
@@ -768,17 +767,7 @@ class App:
             self._handle_tracker_enabler(now)
         self._send_tracker_adjustment(now)
         
-        
-        throttle_for_arm = self._last_rc_channel[InternalJoy.THROTTLE] < 1050
-        # if all([roll_for_arm, pitch_for_arm]):#, roll_for_arm, pitch_for_arm]):
-        if all([throttle_for_arm, channels.is_arm()]):
-            # log.warning("Joystick arm request detected")
-            self.ctx.armed_allowed = True
-        elif all([not channels.is_arm(), throttle_for_arm]):
-            # log.warning("Joystick disarm request detected")
-            self.ctx.armed_allowed = False
-
-        self.ctx.joy_arm_requested = all([throttle_for_arm, self.ctx.armed_allowed])#, roll_for_arm, pitch_for_arm])
+        self.ctx.joy_arm_requested = channels.is_arm_throttle_low()
         # end region
 
         
@@ -791,7 +780,6 @@ class App:
         self.ctx.joy_fail_safe = True
         self.ctx.joy_glide_request = False
         self.ctx.joy_arm_requested = False
-        self.ctx.armed_allowed = False
         self.ctx.auto_mode_enable = False
         self._tracker_enabled_at = float("inf")
         self._tracker_last_lateral_command = None
