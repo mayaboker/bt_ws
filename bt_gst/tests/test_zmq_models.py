@@ -4,10 +4,6 @@ import pytest
 from bt_gst.bridge.zmq_models import (
     MESSAGE_TYPE_FIELD,
     RedDetectionMessage,
-    TrackAdjustmentRequest,
-    TrackResizeRequest,
-    TrackStartRequest,
-    TrackStopRequest,
     decode_request,
     decode_telemetry_message,
     encode_message,
@@ -17,10 +13,10 @@ from bt_gst.bridge.zmq_models import (
 @pytest.mark.parametrize(
     "message",
     [
-        TrackStartRequest(x=10, y=20),
-        TrackStopRequest(),
-        TrackResizeRequest(width=80, height=90),
-        TrackAdjustmentRequest(delta_x=-10, delta_y=10),
+        {"type": "start", "x": 10, "y": 20},
+        {"type": "stop"},
+        {"type": "resize", "width": 80, "height": 90},
+        {"type": "adjustment", "delta_x": -10, "delta_y": 10},
     ],
 )
 def test_track_request_round_trip(message) -> None:
@@ -79,7 +75,7 @@ def test_legacy_red_detection_decodes_as_unlocked() -> None:
 
 def test_encoded_message_contains_stable_type_field() -> None:
     payload = msgpack.unpackb(
-        encode_message(TrackStartRequest(x=1, y=2)),
+        encode_message({"type": "start", "x": 1, "y": 2}),
         raw=False,
     )
 

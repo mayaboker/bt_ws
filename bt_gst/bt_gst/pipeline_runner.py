@@ -9,9 +9,11 @@ from bt_gst.bridge.zmq_io import (
     ZmqDetectionIoAdapter,
 )
 from bt_gst.bridge.zmq_models import (
+    MESSAGE_TYPE_FIELD,
+    TYPE_TRACK_START,
+    TYPE_TRACK_STOP,
     RedDetectionMessage,
-    TrackStartRequest,
-    TrackStopRequest,
+    TrackRequest,
 )
 from bt_gst.config import AppConfig
 from bt_gst.pipeline_builder import build_pipeline_description
@@ -39,14 +41,15 @@ class DetectorLockState:
     _missing_frames: int = 0
     _mutex: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
-    def apply_request(self, request: object) -> None:
+    def apply_request(self, request: TrackRequest) -> None:
         with self._mutex:
-            if isinstance(request, TrackStartRequest):
+            request_type = request.get(MESSAGE_TYPE_FIELD)
+            if request_type == TYPE_TRACK_START:
                 self._active = True
                 self._locked = False
                 self._found_frames = 0
                 self._missing_frames = 0
-            elif isinstance(request, TrackStopRequest):
+            elif request_type == TYPE_TRACK_STOP:
                 self._active = False
                 self._locked = False
                 self._found_frames = 0

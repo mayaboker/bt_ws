@@ -7,10 +7,6 @@ import pytest
 from bt_gst import app as app_module
 from bt_gst.bridge.zmq_models import (
     RedDetectionMessage,
-    TrackAdjustmentRequest,
-    TrackResizeRequest,
-    TrackStartRequest,
-    TrackStopRequest,
 )
 from bt_gst.cli import RunCommand, ShowCommand, VersionCommand, parse_args
 from bt_gst.config import (
@@ -97,7 +93,7 @@ def test_detector_lock_lifecycle() -> None:
     state = DetectorLockState()
     assert state.update(True) == (False, 0, 0)
 
-    state.apply_request(TrackStartRequest(320, 240))
+    state.apply_request({"type": "start", "x": 320, "y": 240})
     for expected in range(1, 10):
         assert state.update(True) == (False, expected, 0)
     assert state.update(True) == (True, 10, 0)
@@ -106,7 +102,7 @@ def test_detector_lock_lifecycle() -> None:
         assert state.update(False) == (True, 0, expected)
     assert state.update(False) == (False, 0, 5)
 
-    state.apply_request(TrackStopRequest())
+    state.apply_request({"type": "stop"})
     assert state.update(True) == (False, 0, 0)
 
 
@@ -121,7 +117,7 @@ class RecordingPublisher:
 def test_detection_telemetry_assigns_frame_ids() -> None:
     publisher = RecordingPublisher()
     state = DetectionTelemetryState(publisher)  # type: ignore[arg-type]
-    state.lock_state.apply_request(TrackStartRequest(10, 20))
+    state.lock_state.apply_request({"type": "start", "x": 10, "y": 20})
 
     state.publish(RedDetection(True, 1, 2, 3, 4, 5))
     state.publish(RedDetection(False, 0, 0, 0, 0, 6))
@@ -133,16 +129,16 @@ def test_detection_telemetry_assigns_frame_ids() -> None:
 
 def test_cursor_applies_all_control_requests() -> None:
     state = DetectionCursorState(frame_width=100, frame_height=80, initial_size=20)
-    state.apply(TrackStartRequest(50, 40))
+    state.apply({"type": "start", "x": 50, "y": 40})
     assert state.snapshot() == CursorRoi(40, 30, 20, 20)
 
-    state.apply(TrackAdjustmentRequest(10, -5))
+    state.apply({"type": "adjustment", "delta_x": 10, "delta_y": -5})
     assert state.snapshot() == CursorRoi(50, 25, 20, 20)
 
-    state.apply(TrackResizeRequest(30, 10))
+    state.apply({"type": "resize", "width": 30, "height": 10})
     assert state.snapshot() == CursorRoi(45, 30, 30, 10)
 
-    state.apply(TrackStopRequest())
+    state.apply({"type": "stop"})
     assert state.snapshot() is None
 
 

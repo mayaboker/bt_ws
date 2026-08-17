@@ -6,8 +6,6 @@ import pytest
 from bt_gst.bridge.zmq_io import ZmqDetectionIoAdapter, ZmqTelemetryPublisher
 from bt_gst.bridge.zmq_models import (
     RedDetectionMessage,
-    TrackResizeRequest,
-    TrackStartRequest,
     decode_telemetry_message,
     encode_message,
 )
@@ -46,8 +44,8 @@ def test_zmq_adapter_receives_requests_in_order() -> None:
     publisher.connect(request_endpoint)
     try:
         expected = [
-            TrackStartRequest(x=1, y=2),
-            TrackResizeRequest(width=30, height=40),
+            {"type": "start", "x": 1, "y": 2},
+            {"type": "resize", "width": 30, "height": 40},
         ]
         requests = []
         deadline = time.time() + 2.0

@@ -2,11 +2,12 @@ from dataclasses import dataclass, field
 from threading import Lock
 
 from bt_gst.bridge.zmq_models import (
-    TrackAdjustmentRequest,
+    MESSAGE_TYPE_FIELD,
+    TYPE_TRACK_ADJUSTMENT,
+    TYPE_TRACK_RESIZE,
+    TYPE_TRACK_START,
+    TYPE_TRACK_STOP,
     TrackRequest,
-    TrackResizeRequest,
-    TrackStartRequest,
-    TrackStopRequest,
 )
 
 RED_DETECTION_META_NAME = "GstRedDetectionMeta"
@@ -61,20 +62,26 @@ class DetectionCursorState:
 
     def apply(self, request: TrackRequest) -> None:
         with self._lock:
-            if isinstance(request, TrackStartRequest):
+            request_type = request.get(MESSAGE_TYPE_FIELD)
+            if request_type == TYPE_TRACK_START:
                 size = min(self.initial_size, self.frame_width, self.frame_height)
-                self._roi = self._centered(request.x, request.y, size, size)
-            elif isinstance(request, TrackStopRequest):
+                self._roi = self._centered(
+                    int(request["x"]),
+                    int(request["y"]),
+                    size,
+                    size,
+                )
+            elif request_type == TYPE_TRACK_STOP:
                 self._roi = None
-            elif isinstance(request, TrackAdjustmentRequest) and self._roi is not None:
+            elif request_type == TYPE_TRACK_ADJUSTMENT and self._roi is not None:
                 self._roi = self._move(
                     self._roi,
-                    request.delta_x,
-                    request.delta_y,
+                    int(request["delta_x"]),
+                    int(request["delta_y"]),
                 )
-            elif isinstance(request, TrackResizeRequest) and self._roi is not None:
-                width = max(1, min(request.width, self.frame_width))
-                height = max(1, min(request.height, self.frame_height))
+            elif request_type == TYPE_TRACK_RESIZE and self._roi is not None:
+                width = max(1, min(int(request["width"]), self.frame_width))
+                height = max(1, min(int(request["height"]), self.frame_height))
                 center_x = self._roi.x + self._roi.width // 2
                 center_y = self._roi.y + self._roi.height // 2
                 self._roi = self._centered(center_x, center_y, width, height)

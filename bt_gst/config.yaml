@@ -1,9 +1,0 @@
-source:
-  type: file
-  path: data/vtest.avi
-  rate: 15
-video_local: true
-codec: h264
-host: 127.0.0.1
-port: 5000
-mtu: 1200

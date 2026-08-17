@@ -1,4 +1,4 @@
-"""MessagePack models for tracker IO transport."""
+"""MessagePack bindings for detector control and telemetry."""
 
 from dataclasses import asdict, dataclass, field
 from typing import TypeAlias
@@ -12,32 +12,6 @@ TYPE_TRACK_STOP = "stop"
 TYPE_TRACK_RESIZE = "resize"
 TYPE_TRACK_ADJUSTMENT = "adjustment"
 TYPE_RED_DETECTION = "red-detection"
-
-
-@dataclass(frozen=True)
-class TrackStartRequest:
-    x: int
-    y: int
-    type: str = field(default=TYPE_TRACK_START, init=False)
-
-
-@dataclass(frozen=True)
-class TrackStopRequest:
-    type: str = field(default=TYPE_TRACK_STOP, init=False)
-
-
-@dataclass(frozen=True)
-class TrackResizeRequest:
-    width: int
-    height: int
-    type: str = field(default=TYPE_TRACK_RESIZE, init=False)
-
-
-@dataclass(frozen=True)
-class TrackAdjustmentRequest:
-    delta_x: int
-    delta_y: int
-    type: str = field(default=TYPE_TRACK_ADJUSTMENT, init=False)
 
 
 @dataclass(frozen=True)
@@ -55,15 +29,14 @@ class RedDetectionMessage:
     type: str = field(default=TYPE_RED_DETECTION, init=False)
 
 
-TrackRequest: TypeAlias = (
-    TrackStartRequest | TrackStopRequest | TrackResizeRequest | TrackAdjustmentRequest
-)
+TrackRequest: TypeAlias = dict[str, int | str]
 TelemetryMessage: TypeAlias = RedDetectionMessage
 TransportMessage: TypeAlias = TrackRequest | TelemetryMessage
 
 
 def encode_message(message: TransportMessage) -> bytes:
-    return msgpack.packb(asdict(message), use_bin_type=True)
+    payload = asdict(message) if isinstance(message, RedDetectionMessage) else message
+    return msgpack.packb(payload, use_bin_type=True)
 
 
 def decode_request(payload: bytes) -> TrackRequest:
@@ -73,16 +46,25 @@ def decode_request(payload: bytes) -> TrackRequest:
 
     message_type = data.get(MESSAGE_TYPE_FIELD)
     if message_type == TYPE_TRACK_START:
-        return TrackStartRequest(x=int(data["x"]), y=int(data["y"]))
+        return {
+            MESSAGE_TYPE_FIELD: TYPE_TRACK_START,
+            "x": int(data["x"]),
+            "y": int(data["y"]),
+        }
     if message_type == TYPE_TRACK_STOP:
-        return TrackStopRequest()
+        return {MESSAGE_TYPE_FIELD: TYPE_TRACK_STOP}
     if message_type == TYPE_TRACK_RESIZE:
-        return TrackResizeRequest(width=int(data["width"]), height=int(data["height"]))
+        return {
+            MESSAGE_TYPE_FIELD: TYPE_TRACK_RESIZE,
+            "width": int(data["width"]),
+            "height": int(data["height"]),
+        }
     if message_type == TYPE_TRACK_ADJUSTMENT:
-        return TrackAdjustmentRequest(
-            delta_x=int(data["delta_x"]),
-            delta_y=int(data["delta_y"]),
-        )
+        return {
+            MESSAGE_TYPE_FIELD: TYPE_TRACK_ADJUSTMENT,
+            "delta_x": int(data["delta_x"]),
+            "delta_y": int(data["delta_y"]),
+        }
     raise ValueError(f"unsupported request message type: {message_type!r}")
 
 
