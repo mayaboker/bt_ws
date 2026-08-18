@@ -446,9 +446,10 @@ class App:
 
     def _manual_handler(self):
         channels = list(self.ctx.request_rc)
-        if self.ctx.armed:
-            channels[AETR1234.AUX1] = RC_MAX
-            channels[AETR1234.AUX2] = RC_MAX
+        #todo: force angel because there is no acro mode in joystick
+        # don't force arm if user not aware 
+        # channels[AETR1234.AUX1] = RC_MAX
+        channels[AETR1234.AUX2] = RC_MAX
         return channels
 
     def _notification_center(self):
