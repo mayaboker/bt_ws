@@ -28,6 +28,13 @@ CSV_HEADER = (
 CHANNEL_COUNT = 8
 
 
+class RcStateRecorderStartupError(RuntimeError):
+    def __init__(self, path: Path, cause: OSError) -> None:
+        self.path = path
+        self.cause = cause
+        super().__init__(f"failed to open RC state recorder at {path}: {cause}")
+
+
 class NullRcStateRecorder:
     def start(self) -> None:
         return
@@ -75,9 +82,8 @@ class RcStateRecorder:
         except OSError as exc:
             self._last_error = exc
             self._enabled = False
-            log.error("Failed to start RC state recorder at {}: {}", self.path, exc)
             self._close_file()
-            return
+            raise RcStateRecorderStartupError(self.path, exc) from exc
 
         self._stop_event.clear()
         self._enabled = True

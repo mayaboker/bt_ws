@@ -61,8 +61,8 @@ stateDiagram-v2
 | `joy_takeoff_request` | Joystick request to enter takeoff flow. | `App.__handle_joy_interrupt` sets it from `AUX4 == RC_MAX`; reset when entering `IDLE`. |
 | `joy_manual_request` | Joystick request to keep or return to manual control. | `App.__handle_joy_interrupt` sets it from `AUX1 == RC_MAX`; cleared on `MANUAL -> FAILSAFE`. |
 | `joy_arm_requested` | Joystick arm-stick combination is active after arm is allowed. | `App._update_state_from_joystick` sets it from throttle low, yaw high, and `armed_allowed`; reset when entering `IDLE`. |
-| `arming_disable_flags` | Betaflight arming-disable reasons. | `App.__update_state` reads `drone_adapter.get_state()["arming_disable_flags"]`. |
-| `armable` | Vehicle can currently arm. | `App.__update_state` reads `drone_adapter.get_state()["armable"]`. |
+| `arming_disable_flags` | Betaflight arming-disable reasons. | `App.__update_state` reads `services.drone.get_state()["arming_disable_flags"]`. |
+| `armable` | Vehicle can currently arm. | `App.__update_state` reads `services.drone.get_state()["armable"]`. |
 | `armed` | Vehicle is armed. | `App.__update_state` reads MSP state and RC arm channel; `App._arm_handler` also sets it from `ARMController.is_arm_done`; reset when entering `IDLE`. |
 | `armed_allowed` | Latch set by joystick arm/disarm stick command. | `App._update_state_from_joystick` sets true on throttle low + yaw high and false on throttle low + yaw low; reset when entering `IDLE`. |
 | `joy_fail_safe` | Joystick link or joystick failsafe state. | `JoyZmqAdapter` emits failsafe events; `App._joystick_fs_enter` sets true and `App.__joystick_fs_exit` sets false. |
@@ -70,10 +70,10 @@ stateDiagram-v2
 | `auto_arm` | Allows automatic arm without joystick AUX1 high. | Defined in `Context`; no active writer found in current app code. |
 | `takeoff_reach` | Takeoff controller has reached/stabilized at target altitude. | `App._takeoff_handler` sets it from `TakeoffController.time_in_alt >= 1`. |
 | `manual_land_confirmed` | Manual landing detector has confirmed landing. | `App._update_manual_land_detector` writes detector result; `App._reset_manual_land_detector` clears it. |
-| `drone_alt` | Current vehicle altitude in meters. | `App.__update_state` reads `drone_adapter.get_altitude()`. |
-| `drone_vertical_speed` | Current vehicle vertical speed in m/s. | `App.__update_state` reads `drone_adapter.dispatcher.last_altitude["vertical_speed_m_s"]`. |
-| `drone_rc` | Last RC channel values read from the vehicle. | `App.__update_state` reads `drone_adapter.get_rc()`. |
+| `drone_alt` | Current vehicle altitude in meters. | `App.__update_state` reads `services.drone.get_altitude()`. |
+| `drone_vertical_speed` | Current vehicle vertical speed in m/s. | `App.__update_state` reads `services.drone.dispatcher.last_altitude["vertical_speed_m_s"]`. |
+| `drone_rc` | Last RC channel values read from the vehicle. | `App.__update_state` reads `services.drone.get_rc()`. |
 | `request_rc` | Last joystick-requested RC channels. | `App._update_state_from_joystick` copies `JoyZmqAdapter.last_rc_channels`. |
 | `sent_rc` | Last sanitized RC channels sent to the vehicle. | `App.run` writes sanitized controller output before `dispatcher.set_rc()`. |
-| `battery_voltage` | Latest battery voltage used for telemetry. | `App.__update_state` reads `drone_adapter.dispatcher.last_battery["voltage_v"]` and applies the current `+20.0` hack. |
+| `battery_voltage` | Latest battery voltage used for telemetry. | `App.__update_state` reads `services.drone.dispatcher.last_battery["voltage_v"]` and applies the current `+20.0` hack. |
 | `alt_setpoint` | Last altitude setpoint reported to GCS. | `App._takeoff_handler` and `App.hover_handler` update it when controller setpoint changes. |

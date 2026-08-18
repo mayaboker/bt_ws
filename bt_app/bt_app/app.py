@@ -6,6 +6,7 @@ Application entry point
 import pathlib
 import signal
 import threading
+from enum import Enum, auto
 
 from bt_app.control import (
     FailSafeController,
@@ -13,18 +14,13 @@ from bt_app.control import (
     ARMController,
     HoverYawController,
     MavlinkListenerError,
-    MavlinkListenerService
 )
 from bt_app.sm import Robot_StateMachine
 from bt_app.context import Context, DEFAULT_RC_CHANNELS
 from bt_app.vehicle_config import DroneSink, VehicleConfig
 from bt_app.errors import AppExitCode, AppStartupError
-from bt_app.msp_adapter import MSPAdapter
-from bt_app.msp import MspTransportDependencyError
-from bt_app.mavlink_wrapper import MavlinkService
-from bt_app.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
+from bt_app.app_services import AppServices
 from bt_app.control.land_detector import LandDetector
-from bt_app.visual_bridge import VisualBridgeManager
 from bt_app.common import (
     NO_RC_CHANNELS, 
     RobotState,
@@ -43,76 +39,87 @@ from bt_app.msp.bt_v2 import (
 from bt_app.common import (
     AETR1234,
     InternalJoy)
-from bt_app.parameters import Parameters
 from loguru import logger as log
 import time
 from bt_app.common.mavlink import NamedValue
 #TODO: remove when rc_channel_control implement adapter
 from bt_joy.server.mavlink import (
     RcChannelsOverrideEvent,
-    MavlinkServerConfig,
     NoCommunicationEvent,
     CommunicationResumedEvent
 )
 #endregion
 
-FCU_CONNECT_ATTEMPTS = 3
-FCU_CONNECT_RETRY_DELAY_S = 1.0
+class AppLifecycle(Enum):
+    NEW = auto()
+    STARTING = auto()
+    RUNNING = auto()
+    STOPPING = auto()
+    STOPPED = auto()
+    FAILED = auto()
 
 
 class App:
     def __init__(self, config: VehicleConfig):
-        """
-        init vehicle context and state machine
-        load controllers
-        """
-        # application configuration
+        """Initialize in-memory application state without starting services."""
         self.config = config
         self._stop_event = threading.Event()
         self._shutdown_signal: int | None = None
         self._last_logged_armable: bool | None = None
-        # hold application state
+        self._lifecycle = AppLifecycle.NEW
         self.ctx = Context()
-
-        # state machine
         self.robot_sm = Robot_StateMachine(self.ctx, self.config)
         self.robot_sm.on_before_state_changed += self._handle_before_state_changed
         self.robot_sm.on_state_changed += self._state_changed_handler
-        # drone interface (msp)
-        self.drone_adapter = None
-        
-        # loaded controllers
         self.controllers = {}
-        self.visual_bridge_manager = None
-        self.__validate_startup_config()
-        try:
-            self.__params = self.__load_parameters()
-            self.visual_bridge_manager = self.__load_visual_bridge_manager()
-            self.ctx.alt_setpoint = self.__params.get(ParameterKey.TAKEOFF_ALT)
-            self.manual_land_detector = self.__load_manual_land_detector()
-            parameter_event = getattr(self.__params, "on_parameter_changed", None)
-            if parameter_event is not None:
-                parameter_event.subscribe(self._on_application_parameter_changed)
-            self._manual_land_detection_started_notified = False
-            self._manual_land_confirmed_notified = False
-            self._last_rc_channel = DEFAULT_RC_CHANNELS.copy()
-            self.__load_drone_interface()
-            self.__load_controllers()
-            self.mavlink_service = MavlinkService(
-                context=self.ctx,
-                parameter_service=getattr(self.__params, "service", None),
-                qopenhd_addr=(self.config.gcs_ip, self.config.gcs_port),
+        self.services: AppServices | None = None
+        self.manual_land_detector = None
+        self._manual_land_detection_started_notified = False
+        self._manual_land_confirmed_notified = False
+        self._last_rc_channel = DEFAULT_RC_CHANNELS.copy()
+
+    def start(self) -> None:
+        if self._lifecycle == AppLifecycle.RUNNING:
+            return
+        if self._lifecycle != AppLifecycle.NEW:
+            raise RuntimeError(
+                f"cannot start application in {self._lifecycle.name} state; "
+                "create a new App instance"
             )
-            self.mavlink_service.start()
-            self.rc_recorder = self.__load_rc_recorder()
-            self.mavlink_service.send_text_to_gcs(
+        self._lifecycle = AppLifecycle.STARTING
+        try:
+            self.__validate_startup_config()
+            self.services = AppServices.build(
+                config=self.config,
+                context=self.ctx,
+                on_rc=self.__handle_joy_rc,
+                on_timeout=self._joystick_fs_enter,
+                on_resume=self.__joystick_fs_exit,
+                on_failure=self._joystick_listener_failed,
+            )
+            self.__init_application_components()
+            self.services.start_all()
+            self._lifecycle = AppLifecycle.RUNNING
+            self.services.mavlink.send_text_to_gcs(
                 "Application started",
                 MavSeverity.INFO,
             )
             self.__banner()
         except BaseException:
-            self._shutdown()
+            if self.services is not None:
+                self.services.stop_all()
+            self._lifecycle = AppLifecycle.FAILED
             raise
+
+    def __init_application_components(self) -> None:
+        services = self._require_services()
+        parameters = services.parameters
+        self.ctx.alt_setpoint = parameters.get(ParameterKey.TAKEOFF_ALT)
+        self.manual_land_detector = self.__load_manual_land_detector()
+        parameters.on_parameter_changed.subscribe(
+            self._on_application_parameter_changed
+        )
+        self.__load_controllers()
 
     def __banner(self):
         log.info("Application Start v{}", __version__)
@@ -121,6 +128,12 @@ class App:
     def __validate_startup_config(self):
         if not self.config.visual_zmq_endpoint:
             raise AppStartupError("Visual ZMQ endpoint must not be empty")
+
+        valid_sinks = {DroneSink.SERIAL.value, DroneSink.ETHERNET.value}
+        if self.config.drone_sink not in valid_sinks:
+            raise AppStartupError(
+                f"Unsupported drone sink: {self.config.drone_sink}"
+            )
 
         if self.config.drone_sink != DroneSink.SERIAL.value:
             return
@@ -133,38 +146,12 @@ class App:
             )
 
 
-    def __load_parameters(self):
-        """
-        init parametrs
-        """
-        p_path = pathlib.Path(self.config.config_name)
-        if not p_path.is_absolute():
-            p_path = pathlib.Path.cwd().joinpath(p_path)
-        if not p_path.exists():
-            raise AppStartupError(f"Parameters config not found: {p_path}")
-        log.info("load parameters from: {}", p_path)
-        try:
-            return Parameters(yaml_path=p_path)
-        except Exception as exc:
-            raise AppStartupError(
-                f"Failed to load parameters from {p_path}: {exc}"
-            ) from exc
-
-    def __load_visual_bridge_manager(self):
-        manager = VisualBridgeManager(self.config.visual_zmq_endpoint)
-        try:
-            manager.start()
-        except RuntimeError as exc:
-            raise AppStartupError(
-                f"Unable to start visual bridge: {exc}"
-            ) from exc
-        return manager
-
     def __load_manual_land_detector(self):
+        parameters = self._require_services().parameters
         return LandDetector(
-            confirm_s=self.__params.get(ParameterKey.MI_LAND_CONFIRM),
-            land_altitude_m=self.__params.get(ParameterKey.FS_LAND_ALT),
-            land_vertical_speed_m_s=self.__params.get(
+            confirm_s=parameters.get(ParameterKey.MI_LAND_CONFIRM),
+            land_altitude_m=parameters.get(ParameterKey.FS_LAND_ALT),
+            land_vertical_speed_m_s=parameters.get(
                 ParameterKey.FS_LAND_VSPEED
             ),
         )
@@ -177,69 +164,6 @@ class App:
         elif name == ParameterKey.FS_LAND_VSPEED:
             self.manual_land_detector.land_vertical_speed_m_s = float(value)
 
-    def __load_drone_interface(self):
-        """Create and start betaflight msp adapter"""
-        self.drone_adapter = MSPAdapter(self.config)
-        transport_name, endpoint = self._fcu_connection_description()
-
-        for attempt in range(1, FCU_CONNECT_ATTEMPTS + 1):
-            try:
-                self.drone_adapter.start()
-                return
-            except OSError as exc:
-                self.drone_adapter.msp.close()
-                reason = self._connection_failure_reason(exc)
-                if attempt == FCU_CONNECT_ATTEMPTS:
-                    raise AppStartupError(
-                        f"Unable to connect to FCU over {transport_name} at "
-                        f"{endpoint} after {FCU_CONNECT_ATTEMPTS} attempts: "
-                        f"{reason}",
-                        exit_code=AppExitCode.FCU_CONNECTION_FAILED,
-                    ) from exc
-                log.warning(
-                    "FCU connection failed transport={} endpoint={} "
-                    "attempt={}/{} reason={}",
-                    transport_name,
-                    endpoint,
-                    attempt,
-                    FCU_CONNECT_ATTEMPTS,
-                    reason,
-                )
-                time.sleep(FCU_CONNECT_RETRY_DELAY_S)
-            except MspTransportDependencyError as exc:
-                raise AppStartupError(
-                    f"Unable to initialize FCU {transport_name} transport at "
-                    f"{endpoint}: {exc}",
-                    exit_code=AppExitCode.FCU_CONNECTION_FAILED,
-                ) from exc
-
-    def _fcu_connection_description(self) -> tuple[str, str]:
-        if self.config.drone_sink == DroneSink.SERIAL.value:
-            return "serial", f"{self.config.drone_serial_port}@115200"
-        return "TCP", f"{self.config.drone_eth_host}:{self.config.drone_eth_port}"
-
-    @staticmethod
-    def _connection_failure_reason(exc: OSError) -> str:
-        if isinstance(exc, ConnectionRefusedError):
-            return "connection refused"
-        if isinstance(exc, TimeoutError):
-            return "connection timed out"
-        if isinstance(exc, PermissionError):
-            return "permission denied"
-        return str(exc) or exc.__class__.__name__
-
-    def __load_rc_recorder(self):
-        if not self.config.rc_record_enabled:
-            return NullRcStateRecorder()
-
-        recorder = RcStateRecorder(
-            self.config.rc_record_path,
-            flush_interval_s=self.config.rc_record_flush_interval_s,
-            queue_size=self.config.rc_record_queue_size,
-        )
-        recorder.start()
-        return recorder
-
     def __load_controllers(self):
         """
         load controllers
@@ -249,53 +173,19 @@ class App:
         - arm
         - takeoff
         """
-        #region joy adapter
-        config = MavlinkServerConfig(
-            connection="udpin:0.0.0.0:14560",
-            source_system=254,
-            source_component=0,
-            heartbeat_rate_hz=1.0,
-            communication_timeout_stage1_s=1.0,
-            communication_timeout_stage2_s=5.0,
-            receive_timeout_s=0.05,
-            channel_count=18,
-        )
-        joy_adapter = MavlinkListenerService(
-            config=config,
-            on_rc=self.__handle_joy_rc,
-            on_timeout=self._joystick_fs_enter,
-            on_resume=self.__joystick_fs_exit,
-            on_failure=self._joystick_listener_failed,
-        )
-        self.controllers[RobotState.MANUAL] = joy_adapter
-        try:
-            joy_adapter.start()
-        except MavlinkListenerError as exc:
-            raise AppStartupError(
-                f"Unable to start joystick MAVLink listener: {exc}"
-            ) from exc
-        log.info(f"------------------------- {config}")
-        # joy_adapter = joy_zmq_adapter.JoyZmqAdapter(self.__params)
-        # joy_adapter.start()
-        # joy_adapter.on_failsafe_enter += self._joystick_fs_enter
-        # joy_adapter.on_failsafe_exit += self.__joystick_fs_exit
-        # joy_adapter.on_interrupt += self.__handle_joy_interrupt
-        # TODO: convert to const and mapping
-        # self.register_joy_interrupt(joy_adapter)
-        log.info("load joy adapter")
-        #endregion
+        parameters = self._require_services().parameters
 
         # fail safe controller
-        self.controllers[RobotState.FAILSAFE] = FailSafeController(self.__params)
+        self.controllers[RobotState.FAILSAFE] = FailSafeController(parameters)
 
         # Takeoff
-        self.controllers[RobotState.TAKEOFF] = TakeoffController(self.__params)
+        self.controllers[RobotState.TAKEOFF] = TakeoffController(parameters)
 
         # arm controller
-        self.controllers[RobotState.ARM] = ARMController(self.__params)
+        self.controllers[RobotState.ARM] = ARMController(parameters)
 
         # search controller
-        self.controllers[RobotState.ALT_HOLD] = HoverYawController(self.__params)
+        self.controllers[RobotState.ALT_HOLD] = HoverYawController(parameters)
 
     # def register_joy_interrupt(self, joy_adapter):
     #     joy_adapter.register_interrupt(AETR1234.AUX4, JoyInterrupt.TAKEOFF_REQUEST)
@@ -306,7 +196,7 @@ class App:
         """
         Run one time when the state change
         """
-        self.mavlink_service.send_text_to_gcs(
+        self._require_services().mavlink.send_text_to_gcs(
             f"State changed: {previous_state} -> {new_state}",
             MavSeverity.INFO,
         )
@@ -345,10 +235,10 @@ class App:
                 self._reset_manual_land_detector()
 
             case RobotState.ALT_HOLD:
-                base_line = self.__params.get(ParameterKey.HOV_BASELINE)
+                base_line = self._require_services().parameters.get(ParameterKey.HOV_BASELINE)
                 from_takeoff = prev == RobotState.TAKEOFF
                 hold_setpoint = (
-                    self.__params.get(ParameterKey.TAKEOFF_ALT)
+                    self._require_services().parameters.get(ParameterKey.TAKEOFF_ALT)
                     if from_takeoff
                     else self.ctx.drone_alt
                 )
@@ -362,7 +252,7 @@ class App:
                 )
                 controller.set_baseline(base_line)# AETR1234.THROTTLE
                 self.ctx.alt_setpoint = hold_setpoint
-                self.mavlink_service.send_named_value_to_gcs(
+                self._require_services().mavlink.send_named_value_to_gcs(
                     NamedValue.ALT_SP,
                     hold_setpoint
                 )
@@ -380,10 +270,10 @@ class App:
 
             case RobotState.FAILSAFE:
                 # set the failsafe controller setpoint to the current altitude
-                base_line = self.__params.get(ParameterKey.HOV_BASELINE)
+                base_line = self._require_services().parameters.get(ParameterKey.HOV_BASELINE)
                 self.controllers[RobotState.FAILSAFE].reset(self.ctx.drone_alt)
                 self.controllers[RobotState.FAILSAFE].set_baseline(base_line)# AETR1234.THROTTLE 
-                self.mavlink_service.send_named_value_to_gcs(
+                self._require_services().mavlink.send_named_value_to_gcs(
                     NamedValue.ALT_SP,
                     self.ctx.drone_alt
                 )
@@ -452,19 +342,9 @@ class App:
 
     def _dispatch_pending_joystick_events(self) -> None:
         """Apply listener events on the application control-loop thread."""
-        listener = getattr(self, "controllers", {}).get(RobotState.MANUAL)
-        dispatch_pending = getattr(listener, "dispatch_pending", None)
-        if dispatch_pending is not None:
-            dispatch_pending()
+        self._require_services().joystick.dispatch_pending()
 
-    def _update_state_from_joystick(self):
-        """
-        update the context / blackboard from joystick zmq adapter
-        the context contain variable for state machine condition
-        """
-        # region read joystick state for arm request
-        
-
+    
     #endregion
 
     def _log_armability_transition(self) -> None:
@@ -488,7 +368,8 @@ class App:
         the context contain variable for state machine condition
         """
 
-        vehicle_state =self.drone_adapter.get_state()
+        drone = self._require_services().drone
+        vehicle_state = drone.get_state()
         if vehicle_state:
             #TODO: move to consts
             # TODO read more about armed mask the code is just for test
@@ -501,18 +382,18 @@ class App:
 
         # end region
         # the zero point is where the drone power on, if i land in lower surface the alt will be negative
-        self.ctx.drone_alt = self.drone_adapter.get_altitude() # in meter
-        altitude = self.drone_adapter.dispatcher.last_altitude
+        self.ctx.drone_alt = drone.get_altitude() # in meter
+        altitude = drone.dispatcher.last_altitude
         if altitude and "vertical_speed_m_s" in altitude:
             self.ctx.drone_vertical_speed = altitude["vertical_speed_m_s"]
             self.ctx.drone_alt_received_at_s = altitude.get("received_at_s", 0.0)
-        attitude = self.drone_adapter.dispatcher.last_attitude
+        attitude = drone.dispatcher.last_attitude
         if attitude:
             self.ctx.drone_roll_deg = float(attitude.get("roll_deg", 0.0))
             self.ctx.drone_pitch_deg = float(attitude.get("pitch_deg", 0.0))
             self.ctx.drone_heading_deg = float(attitude.get("heading_deg", 0.0))
         ## read last drone rc
-        rc = self.drone_adapter.get_rc()
+        rc = drone.get_rc()
         if rc:
             self.ctx.drone_rc = rc
             # read the aux1/armed value , the idea is to update ARM/AUX1 value when the system run with external pilot
@@ -524,7 +405,7 @@ class App:
             #     self.ctx.armed = armed
 
 
-        battery = self.drone_adapter.dispatcher.last_battery
+        battery = drone.dispatcher.last_battery
         if battery and "voltage_v" in battery:
             self.ctx.battery_voltage = battery["voltage_v"] + 20.0 #TODO: remove this hack, the voltage is not correct in betaflight 4.4.1
 
@@ -537,7 +418,7 @@ class App:
         - triggrt takeoff_reach flag
         """
         
-        setpoint = self.__params.get(ParameterKey.TAKEOFF_ALT)
+        setpoint = self._require_services().parameters.get(ParameterKey.TAKEOFF_ALT)
         #TODO: setpoint is alt_ref + setpoint validate again the start alt is zero
         rc = self.controllers[RobotState.TAKEOFF].update(
             setpoint,
@@ -548,7 +429,7 @@ class App:
         self.ctx.takeoff_reach = self.controllers[RobotState.TAKEOFF].time_in_alt >= 1
 
         if setpoint != self.ctx.alt_setpoint:
-            self.mavlink_service.send_named_value_to_gcs(
+            self._require_services().mavlink.send_named_value_to_gcs(
                     NamedValue.ALT_SP,
                     setpoint
                 )
@@ -581,7 +462,7 @@ class App:
         controller.update_pitch_roll(pitch, roll)
 
         if controller.consume_altitude_setpoint_request_event():
-            self.mavlink_service.send_text_to_gcs(
+            self._require_services().mavlink.send_text_to_gcs(
                 "Hover altitude setpoint change requested",
                 MavSeverity.DEBUG,
             )
@@ -590,7 +471,7 @@ class App:
         setpoint = controller.setpoint
         # update gcs setpoint
         if controller.setpoint != self.ctx.alt_setpoint:
-            self.mavlink_service.send_named_value_to_gcs(
+            self._require_services().mavlink.send_named_value_to_gcs(
                     NamedValue.ALT_SP,
                     setpoint
                 )
@@ -612,12 +493,12 @@ class App:
         controller = self.controllers[RobotState.FAILSAFE]
         rc = controller.update(self.ctx.drone_alt, self.ctx.drone_vertical_speed)
         if controller.consume_descent_started_event():
-            self.mavlink_service.send_text_to_gcs(
+            self._require_services().mavlink.send_text_to_gcs(
                 "Failsafe landing started",
                 MavSeverity.WARNING,
             )
         if controller.consume_landed_event():
-            self.mavlink_service.send_text_to_gcs(
+            self._require_services().mavlink.send_text_to_gcs(
                 "Failsafe land detected, disarming",
                 MavSeverity.WARNING,
             )
@@ -661,7 +542,7 @@ class App:
             return
 
         if not self._manual_land_detection_started_notified:
-            self.mavlink_service.send_text_to_gcs(
+            self._require_services().mavlink.send_text_to_gcs(
                 "Manual land detection started",
                 MavSeverity.INFO,
             )
@@ -675,7 +556,7 @@ class App:
             self.ctx.manual_land_confirmed
             and not self._manual_land_confirmed_notified
         ):
-            self.mavlink_service.send_text_to_gcs(
+            self._require_services().mavlink.send_text_to_gcs(
                 "Manual land confirmed, disarming",
                 MavSeverity.INFO,
             )
@@ -757,37 +638,23 @@ class App:
             self._shutdown_signal = signum
         self._stop_event.set()
 
-    def _shutdown(self) -> None:
-        """Stop all application services, keeping MSP shutdown first."""
-        resources = (
-            ("MSP adapter", getattr(self, "drone_adapter", None)),
-            (
-                "visual bridge manager",
-                getattr(self, "visual_bridge_manager", None),
-            ),
-            (
-                "joystick listener",
-                getattr(self, "controllers", {}).get(RobotState.MANUAL),
-            ),
-            ("MAVLink service", getattr(self, "mavlink_service", None)),
-            ("RC state recorder", getattr(self, "rc_recorder", None)),
-            ("parameter service", getattr(self, "_App__params", None)),
-        )
-        for resource_name, resource in resources:
-            stop = getattr(resource, "stop", None)
-            if stop is None:
-                continue
-            try:
-                stop()
-            except Exception as exc:
-                log.exception("Failed to stop {}: {}", resource_name, exc)
+    def stop(self) -> None:
+        if self._lifecycle in {AppLifecycle.STOPPING, AppLifecycle.STOPPED}:
+            return
+        self._lifecycle = AppLifecycle.STOPPING
+        self._stop_event.set()
+        if self.services is not None:
+            self.services.stop_all()
+        self._lifecycle = AppLifecycle.STOPPED
+
+    def _require_services(self) -> AppServices:
+        if self.services is None:
+            raise RuntimeError("application services are not initialized")
+        return self.services
 
     def _raise_if_msp_failed(self) -> None:
         """Surface fatal errors reported by the MSP worker thread."""
-        adapter = getattr(self, "drone_adapter", None)
-        raise_if_failed = getattr(adapter, "raise_if_failed", None)
-        if raise_if_failed is not None:
-            raise_if_failed()
+        self._require_services().drone.raise_if_failed()
 
     def _log_control_loop_failure(self, exc: Exception) -> None:
         """Log an unexpected loop failure with flight-state context."""
@@ -818,6 +685,9 @@ class App:
         raises.
         """
 
+        if self._lifecycle != AppLifecycle.RUNNING:
+            raise RuntimeError("application must be started before run()")
+
         period_s = 1.0 / FREQ_HZ
         next_deadline_s = time.monotonic()
 
@@ -837,9 +707,10 @@ class App:
                 if self._stop_event.is_set():
                     break
                 # log for diagnostic
-                self.rc_recorder.record(self.ctx.state, self.ctx.sent_rc)
+                services = self._require_services()
+                services.rc_recorder.record(self.ctx.state, self.ctx.sent_rc)
                 # send to FCU
-                self.drone_adapter.dispatcher.set_rc(self.ctx.sent_rc)
+                services.drone.dispatcher.set_rc(self.ctx.sent_rc)
                 next_deadline_s += period_s
                 now_s = time.monotonic()
                 if next_deadline_s <= now_s:
@@ -857,11 +728,14 @@ class App:
             else:
                 signal_name = signal.Signals(self._shutdown_signal).name
                 log.info("Application shutdown requested by {}", signal_name)
-            self._shutdown()
 
 def main(config: VehicleConfig):
     app = App(config=config)
-    app.run()
+    try:
+        app.start()
+        app.run()
+    finally:
+        app.stop()
 
 
 if __name__ == "__main__":

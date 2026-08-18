@@ -6,7 +6,8 @@ from pymavlink import mavutil
 
 import bt_app.app as app_module
 import bt_app.mavlink_wrapper as mavlink_module
-from bt_app.app import App
+from bt_app.app import App, AppLifecycle
+from bt_app.app_services import AppServices
 from bt_app.common import RobotState
 from bt_app.context import Context
 from bt_app.mavlink_wrapper import (
@@ -89,6 +90,42 @@ class FakeRcRecorder:
 
     def stop(self):
         self.stopped = True
+
+
+class FakeJoystick:
+    def dispatch_pending(self):
+        return None
+
+
+class FakeRuntimeServices:
+    def __init__(self, *, drone, mavlink=None, recorder=None):
+        self.drone = drone
+        self.mavlink = mavlink or FakeMavlinkService(context=Context())
+        self.rc_recorder = recorder or FakeRcRecorder()
+        self.joystick = FakeJoystick()
+        self.stopped = False
+
+    def stop_all(self):
+        self.stopped = True
+        self.mavlink.stop()
+        self.rc_recorder.stop()
+
+
+def make_running_app(*, drone, recorder=None, mavlink=None):
+    app = App.__new__(App)
+    app.ctx = Context()
+    app.config = VehicleConfig()
+    app.robot_sm = type("RobotSm", (), {"resolve": lambda self: None})()
+    app._stop_event = threading.Event()
+    app._shutdown_signal = None
+    app._lifecycle = AppLifecycle.RUNNING
+    app.controllers = {}
+    app.services = FakeRuntimeServices(
+        drone=drone,
+        mavlink=mavlink,
+        recorder=recorder,
+    )
+    return app
 
 
 class FakeScheduler:
@@ -436,9 +473,7 @@ def test_channel_status_v2_extension_uses_safe_defaults_without_sent_rc():
     assert unpacked[4:] == (1500, 1500, 1000, 1500, 1000, 1000, 1000, 1000)
 
 
-def test_app_starts_mavlink_service_with_shared_context(monkeypatch):
-    FakeMavlinkService.instances = []
-    monkeypatch.setattr(app_module, "MavlinkService", FakeMavlinkService)
+def test_app_starts_services_with_shared_context(monkeypatch):
     class FakeEvent:
         def subscribe(self, _callback):
             return None
@@ -450,63 +485,60 @@ def test_app_starts_mavlink_service_with_shared_context(monkeypatch):
         def get(self, _name):
             return 2.0
 
-    parameters = FakeParameters()
-    bridge_events = []
+    class FakeServices:
+        def __init__(self):
+            self.parameters = FakeParameters()
+            self.mavlink = FakeMavlinkService(context=Context())
+            self.events = []
 
-    class FakeVisualBridgeManager:
-        def __init__(self, endpoint):
-            bridge_events.append(("init", endpoint))
+        def start_all(self):
+            self.events.append("start")
 
-        def start(self):
-            bridge_events.append(("start",))
+        def stop_all(self):
+            self.events.append("stop")
 
-        def stop(self):
-            bridge_events.append(("stop",))
+    services = FakeServices()
+    build_calls = []
 
-    monkeypatch.setattr(app_module, "VisualBridgeManager", FakeVisualBridgeManager)
-    monkeypatch.setattr(App, "_App__load_parameters", lambda self: parameters)
+    def build_services(**kwargs):
+        build_calls.append(kwargs)
+        return services
+
+    monkeypatch.setattr(AppServices, "build", build_services)
     monkeypatch.setattr(App, "_App__load_manual_land_detector", lambda self: object())
-    monkeypatch.setattr(App, "_App__load_drone_interface", lambda self: None)
     monkeypatch.setattr(App, "_App__load_controllers", lambda self: None)
 
     app = App(VehicleConfig())
+    app.start()
+    app.start()
 
-    assert isinstance(app.mavlink_service, FakeMavlinkService)
-    assert app.mavlink_service.context is app.ctx
-    assert app.mavlink_service.parameter_service is parameters.service
-    assert app.mavlink_service.qopenhd_addr == ("127.0.0.1", 14550)
-    assert app.mavlink_service.started
-    assert bridge_events == [
-        ("init", "tcp://127.0.0.1:5556"),
-        ("start",),
-    ]
-    app._shutdown()
-    assert bridge_events[-1] == ("stop",)
+    assert build_calls[0]["context"] is app.ctx
+    assert services.events == ["start"]
+    assert app._lifecycle == AppLifecycle.RUNNING
+    app.stop()
+    assert services.events == ["start", "stop"]
 
 
-def test_app_run_stops_mavlink_service_on_shutdown(monkeypatch):
-    service = FakeMavlinkService(context=Context())
-    app = App.__new__(App)
-    app.mavlink_service = service
-    app._stop_event = threading.Event()
-    app._shutdown_signal = None
+def test_app_run_requires_start():
+    app = App(VehicleConfig())
+
+    with pytest.raises(RuntimeError, match="must be started"):
+        app.run()
+
+
+def test_app_stop_is_idempotent():
+    app = App(VehicleConfig())
     app.request_stop()
-
-    app.run()
-
-    assert service.stopped
+    app.stop()
+    app.stop()
+    assert app._lifecycle == AppLifecycle.STOPPED
+    with pytest.raises(RuntimeError, match="create a new App instance"):
+        app.start()
 
 
 def test_app_run_updates_sent_rc_before_dispatch(monkeypatch):
     service = FakeMavlinkService(context=Context())
-    app = App.__new__(App)
-    app.ctx = Context()
-    app.config = VehicleConfig()
-    app.robot_sm = type("RobotSm", (), {"resolve": lambda self: None})()
-    app.mavlink_service = service
-    app.rc_recorder = FakeRcRecorder()
-    app._stop_event = threading.Event()
-    app._shutdown_signal = None
+    recorder = FakeRcRecorder()
     dispatched = []
 
     class FakeDispatcher:
@@ -514,11 +546,13 @@ def test_app_run_updates_sent_rc_before_dispatch(monkeypatch):
             dispatched.append(list(channels))
             app.request_stop()
 
-    app.drone_adapter = type(
+    drone = type(
         "DroneAdapter",
         (),
         {"dispatcher": FakeDispatcher()},
     )()
+    drone.raise_if_failed = lambda: None
+    app = make_running_app(drone=drone, recorder=recorder, mavlink=service)
 
     monkeypatch.setattr(App, "_App__update_state", lambda self: None)
     monkeypatch.setattr(App, "_update_controllers", lambda self: None)
@@ -531,24 +565,15 @@ def test_app_run_updates_sent_rc_before_dispatch(monkeypatch):
     app.run()
 
     assert app.ctx.sent_rc == [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700]
-    assert app.rc_recorder.records == [
+    assert recorder.records == [
         (RobotState.IDLE, [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700])
     ]
     assert dispatched == [[1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700]]
-    assert service.stopped
-    assert app.rc_recorder.stopped
 
 
 def test_app_run_replaces_invalid_rc_channel_before_dispatch(monkeypatch):
     service = FakeMavlinkService(context=Context())
-    app = App.__new__(App)
-    app.ctx = Context()
-    app.config = VehicleConfig()
-    app.robot_sm = type("RobotSm", (), {"resolve": lambda self: None})()
-    app.mavlink_service = service
-    app.rc_recorder = FakeRcRecorder()
-    app._stop_event = threading.Event()
-    app._shutdown_signal = None
+    recorder = FakeRcRecorder()
     dispatched = []
 
     class FakeDispatcher:
@@ -556,11 +581,13 @@ def test_app_run_replaces_invalid_rc_channel_before_dispatch(monkeypatch):
             dispatched.append(list(channels))
             app.request_stop()
 
-    app.drone_adapter = type(
+    drone = type(
         "DroneAdapter",
         (),
         {"dispatcher": FakeDispatcher()},
     )()
+    drone.raise_if_failed = lambda: None
+    app = make_running_app(drone=drone, recorder=recorder, mavlink=service)
 
     monkeypatch.setattr(App, "_App__update_state", lambda self: None)
     monkeypatch.setattr(App, "_update_controllers", lambda self: None)
@@ -574,29 +601,23 @@ def test_app_run_replaces_invalid_rc_channel_before_dispatch(monkeypatch):
 
     assert app.ctx.sent_rc == [1500, 1500, 1000, 1500, 2000, 2000, 1000, 1000]
     assert dispatched == [[1500, 1500, 1000, 1500, 2000, 2000, 1000, 1000]]
-    assert service.stopped
-    assert app.rc_recorder.stopped
 
 
 def test_app_stop_request_before_dispatch_prevents_rc_output(monkeypatch):
-    app = App.__new__(App)
-    app.ctx = Context()
-    app._stop_event = threading.Event()
-    app._shutdown_signal = None
-    app.robot_sm = type("RobotSm", (), {"resolve": lambda self: None})()
-    app.mavlink_service = FakeMavlinkService(context=app.ctx)
-    app.rc_recorder = FakeRcRecorder()
+    recorder = FakeRcRecorder()
     dispatched = []
 
     class FakeDispatcher:
         def set_rc(self, channels):
             dispatched.append(list(channels))
 
-    app.drone_adapter = type(
+    drone = type(
         "DroneAdapter",
         (),
         {"dispatcher": FakeDispatcher()},
     )()
+    drone.raise_if_failed = lambda: None
+    app = make_running_app(drone=drone, recorder=recorder)
 
     monkeypatch.setattr(App, "_App__update_state", lambda self: None)
     monkeypatch.setattr(App, "_update_controllers", lambda self: None)
@@ -611,10 +632,10 @@ def test_app_stop_request_before_dispatch_prevents_rc_output(monkeypatch):
     app.run()
 
     assert dispatched == []
-    assert app.rc_recorder.records == []
+    assert recorder.records == []
 
 
-def test_app_shutdown_stops_resources_in_order_and_continues_after_error():
+def test_app_services_stop_in_safe_order_and_continue_after_error():
     events = []
 
     class Resource:
@@ -627,15 +648,22 @@ def test_app_shutdown_stops_resources_in_order_and_continues_after_error():
             if self.fail:
                 raise RuntimeError(self.name)
 
-    app = App.__new__(App)
-    app.drone_adapter = Resource("msp")
-    app.visual_bridge_manager = Resource("visual bridge")
-    app.controllers = {RobotState.MANUAL: Resource("joystick", fail=True)}
-    app.mavlink_service = Resource("mavlink")
-    app.rc_recorder = Resource("recorder")
-    app._App__params = Resource("parameters")
+    services = AppServices.__new__(AppServices)
+    services.drone = Resource("msp")
+    services.visual_bridge = Resource("visual bridge")
+    services.joystick = Resource("joystick", fail=True)
+    services.mavlink = Resource("mavlink")
+    services.rc_recorder = Resource("recorder")
+    services.parameters = Resource("parameters")
+    services._started = [
+        ("visual", services.visual_bridge),
+        ("msp", services.drone),
+        ("joystick", services.joystick),
+        ("mavlink", services.mavlink),
+        ("recorder", services.rc_recorder),
+    ]
 
-    app._shutdown()
+    services.stop_all()
 
     assert events == [
         "msp",
@@ -647,8 +675,7 @@ def test_app_shutdown_stops_resources_in_order_and_continues_after_error():
     ]
 
 
-def test_app_run_logs_context_and_cleans_up_after_loop_failure(monkeypatch):
-    events = []
+def test_app_run_logs_context_after_loop_failure(monkeypatch):
     critical_calls = []
 
     class FakeLog:
@@ -665,31 +692,18 @@ def test_app_run_logs_context_and_cleans_up_after_loop_failure(monkeypatch):
         def exception(self, *_args):
             return None
 
-    class Resource:
-        def __init__(self, name):
-            self.name = name
+    class Adapter:
+        dispatcher = object()
 
-        def stop(self):
-            events.append(self.name)
-
-    class Adapter(Resource):
         def raise_if_failed(self):
             return None
 
-    app = App.__new__(App)
-    app.ctx = Context()
+    app = make_running_app(drone=Adapter())
     app.ctx.state = RobotState.MANUAL
     app.ctx.armed = True
     app.ctx.drone_alt = 3.5
     app.ctx.drone_vertical_speed = -0.2
     app.ctx.arming_disable_flags = ["RX_FAILSAFE"]
-    app._stop_event = threading.Event()
-    app._shutdown_signal = None
-    app.drone_adapter = Adapter("msp")
-    app.controllers = {}
-    app.mavlink_service = Resource("mavlink")
-    app.rc_recorder = Resource("recorder")
-    app._App__params = Resource("parameters")
     failure = RuntimeError("state machine failed")
     app.robot_sm = type("RobotSm", (), {"resolve": lambda self: (_ for _ in ()).throw(failure)})()
 
@@ -705,7 +719,6 @@ def test_app_run_logs_context_and_cleans_up_after_loop_failure(monkeypatch):
     assert critical_calls[1][1][0] == RobotState.MANUAL
     assert critical_calls[1][1][1] is True
     assert critical_calls[1][1][4:7] == (3.5, -0.2, ["RX_FAILSAFE"])
-    assert events == ["msp", "mavlink", "recorder", "parameters"]
 
 
 @pytest.mark.parametrize(
@@ -744,14 +757,8 @@ def test_app_run_uses_deadlines_and_skips_overrun_catchup(
             return None
 
     stop_event = StopEvent()
-    app = App.__new__(App)
-    app.ctx = Context()
+    app = make_running_app(drone=Adapter(), recorder=FakeRcRecorder())
     app._stop_event = stop_event
-    app._shutdown_signal = None
-    app.drone_adapter = Adapter()
-    app.controllers = {}
-    app.robot_sm = type("RobotSm", (), {"resolve": lambda self: None})()
-    app.rc_recorder = FakeRcRecorder()
 
     monkeypatch.setattr(app_module.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(App, "_App__update_state", lambda self: None)
@@ -771,7 +778,6 @@ def test_app_run_uses_deadlines_and_skips_overrun_catchup(
 
 def test_app_run_surfaces_fatal_msp_worker_error_and_stops_output(monkeypatch):
     failure = RuntimeError("RC worker failed")
-    stopped = []
 
     class Adapter:
         dispatcher = object()
@@ -779,19 +785,9 @@ def test_app_run_surfaces_fatal_msp_worker_error_and_stops_output(monkeypatch):
         def raise_if_failed(self):
             raise failure
 
-        def stop(self):
-            stopped.append("msp")
-
-    app = App.__new__(App)
-    app.ctx = Context()
-    app._stop_event = threading.Event()
-    app._shutdown_signal = None
-    app.drone_adapter = Adapter()
-    app.controllers = {}
+    app = make_running_app(drone=Adapter())
 
     monkeypatch.setattr(App, "_log_control_loop_failure", lambda self, exc: None)
 
     with pytest.raises(RuntimeError, match="RC worker failed"):
         app.run()
-
-    assert stopped == ["msp"]

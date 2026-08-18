@@ -93,8 +93,10 @@ def _run_application(app) -> None:
     try:
         for signum in handled_signals:
             signal.signal(signum, request_stop)
+        app.start()
         app.run()
     finally:
+        app.stop()
         for signum, previous_handler in previous_handlers.items():
             signal.signal(signum, previous_handler)
 

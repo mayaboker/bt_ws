@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from bt_app.app import App
 from bt_app.common import MavSeverity, RobotState
 from bt_app.context import Context
@@ -177,13 +179,13 @@ def test_app_failsafe_handler_sends_gcs_messages_once():
     app.ctx.drone_vertical_speed = -0.1
     controller = FakeFailsafeController()
     app.controllers = {RobotState.FAILSAFE: controller}
-    app.mavlink_service = FakeMavlinkService()
+    app.services = SimpleNamespace(mavlink=FakeMavlinkService())
 
     assert app.failsafe_handler() == [1500] * 8
     assert app.failsafe_handler() == [1500] * 8
 
     assert controller.calls == [(1.2, -0.1), (1.2, -0.1)]
-    assert app.mavlink_service.messages == [
+    assert app.services.mavlink.messages == [
         ("Failsafe landing started", MavSeverity.WARNING),
         ("Failsafe land detected, disarming", MavSeverity.WARNING),
     ]

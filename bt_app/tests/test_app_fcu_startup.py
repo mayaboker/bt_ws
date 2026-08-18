@@ -1,7 +1,8 @@
 import pytest
 
-import bt_app.app as app_module
-from bt_app.app import App
+import bt_app.app_services as services_module
+from bt_app.app import App, AppLifecycle
+from bt_app.app_services import AppServices
 from bt_app.errors import AppExitCode, AppStartupError
 from bt_app.msp import MspTransportDependencyError
 from bt_app.vehicle_config import DroneSink, VehicleConfig
@@ -15,49 +16,18 @@ class FakeMspClient:
         self.close_count += 1
 
 
-def test_visual_bridge_endpoint_must_not_be_empty():
-    app = App.__new__(App)
-    app.config = VehicleConfig()
-    app.config.visual_zmq_endpoint = ""
-
-    with pytest.raises(AppStartupError, match="endpoint must not be empty"):
-        app._App__validate_startup_config()
-
-
-def test_visual_bridge_start_failure_is_startup_error(monkeypatch):
-    class FailingManager:
-        def __init__(self, endpoint):
-            assert endpoint == "tcp://127.0.0.1:5556"
-
-        def start(self):
-            raise RuntimeError("socket failed")
-
-    monkeypatch.setattr(app_module, "VisualBridgeManager", FailingManager)
-    app = App.__new__(App)
-    app.config = VehicleConfig()
-
-    with pytest.raises(AppStartupError, match="Unable to start visual bridge"):
-        app._App__load_visual_bridge_manager()
-
-
 class FakeAdapter:
     outcomes = []
 
-    def __init__(self, config):
-        self.config = config
+    def __init__(self):
         self.msp = FakeMspClient()
         self.start_count = 0
-        self.stop_count = 0
 
     def start(self):
         self.start_count += 1
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, BaseException):
             raise outcome
-
-    def stop(self):
-        self.stop_count += 1
-        self.msp.close()
 
 
 @pytest.fixture(autouse=True)
@@ -69,43 +39,103 @@ def reset_vehicle_config():
     VehicleConfig._initialized = False
 
 
-def make_loader_app():
-    app = App.__new__(App)
-    app.config = VehicleConfig()
-    app.config.drone_sink = DroneSink.ETHERNET.value
-    app.config.drone_eth_host = "127.0.0.1"
-    app.config.drone_eth_port = 5761
-    app.drone_adapter = None
-    return app
+def make_services(drone=None):
+    services = AppServices.__new__(AppServices)
+    services.config = VehicleConfig()
+    services.config.drone_sink = DroneSink.ETHERNET.value
+    services.config.drone_eth_host = "127.0.0.1"
+    services.config.drone_eth_port = 5761
+    services.drone = drone or FakeAdapter()
+    services._started = []
+    return services
+
+
+def test_app_constructor_has_no_external_side_effects(monkeypatch):
+    def unexpected_build(**_kwargs):
+        raise AssertionError("services built during App construction")
+
+    monkeypatch.setattr(AppServices, "build", unexpected_build)
+    app = App(VehicleConfig())
+
+    assert app.services is None
+
+
+def test_visual_bridge_endpoint_must_not_be_empty():
+    app = App(VehicleConfig())
+    app.config.visual_zmq_endpoint = ""
+
+    with pytest.raises(AppStartupError, match="endpoint must not be empty"):
+        app.start()
+
+
+def test_startup_notification_failure_rolls_back_services(monkeypatch):
+    events = []
+
+    class Parameters:
+        class Event:
+            def subscribe(self, _callback):
+                return None
+
+        on_parameter_changed = Event()
+
+        def get(self, _key):
+            return 1.0
+
+    class Mavlink:
+        def send_text_to_gcs(self, *_args):
+            raise OSError("GCS unavailable")
+
+    class Services:
+        parameters = Parameters()
+        mavlink = Mavlink()
+
+        def start_all(self):
+            events.append("start")
+
+        def stop_all(self):
+            events.append("stop")
+
+    monkeypatch.setattr(AppServices, "build", lambda **_kwargs: Services())
+    monkeypatch.setattr(App, "_App__load_manual_land_detector", lambda self: object())
+    monkeypatch.setattr(App, "_App__load_controllers", lambda self: None)
+    app = App(VehicleConfig())
+
+    with pytest.raises(OSError, match="GCS unavailable"):
+        app.start()
+
+    assert events == ["start", "stop"]
+    assert app._lifecycle == AppLifecycle.FAILED
+    with pytest.raises(RuntimeError, match="create a new App instance"):
+        app.start()
 
 
 def test_fcu_connection_retries_then_succeeds(monkeypatch):
-    FakeAdapter.outcomes = [
+    drone = FakeAdapter()
+    drone.outcomes = [
         ConnectionRefusedError(111, "Connection refused"),
         TimeoutError("timed out"),
         None,
     ]
     waits = []
-    monkeypatch.setattr(app_module, "MSPAdapter", FakeAdapter)
-    monkeypatch.setattr(app_module.time, "sleep", waits.append)
-    app = make_loader_app()
+    monkeypatch.setattr(services_module.time, "sleep", waits.append)
+    services = make_services(drone)
 
-    app._App__load_drone_interface()
+    services._start_drone()
 
-    assert app.drone_adapter.start_count == 3
-    assert app.drone_adapter.msp.close_count == 2
+    assert drone.start_count == 3
+    assert drone.msp.close_count == 2
     assert waits == [1.0, 1.0]
 
 
 def test_fcu_connection_failure_becomes_expected_startup_error(monkeypatch):
     errors = [ConnectionRefusedError(111, "Connection refused") for _ in range(3)]
-    FakeAdapter.outcomes = errors.copy()
-    monkeypatch.setattr(app_module, "MSPAdapter", FakeAdapter)
-    monkeypatch.setattr(app_module.time, "sleep", lambda _delay: None)
-    app = make_loader_app()
+    drone = FakeAdapter()
+    drone.outcomes = errors.copy()
+    monkeypatch.setattr(services_module.time, "sleep", lambda _delay: None)
+    services = make_services(drone)
 
     with pytest.raises(AppStartupError) as exc_info:
-        app._App__load_drone_interface()
+        services._start_drone()
 
     assert exc_info.value.exit_code == AppExitCode.FCU_CONNECTION_FAILED
     assert str(exc_info.value) == (
@@ -113,48 +143,19 @@ def test_fcu_connection_failure_becomes_expected_startup_error(monkeypatch):
         "3 attempts: connection refused"
     )
     assert exc_info.value.__cause__ is errors[-1]
-    assert app.drone_adapter.msp.close_count == 3
+    assert drone.msp.close_count == 3
 
 
-def test_missing_transport_dependency_fails_without_retry(monkeypatch):
+def test_missing_transport_dependency_fails_without_retry():
     error = MspTransportDependencyError("pyserial is missing")
-    FakeAdapter.outcomes = [error]
-    monkeypatch.setattr(app_module, "MSPAdapter", FakeAdapter)
-    app = make_loader_app()
+    drone = FakeAdapter()
+    drone.outcomes = [error]
+    services = make_services(drone)
 
     with pytest.raises(AppStartupError) as exc_info:
-        app._App__load_drone_interface()
+        services._start_drone()
 
     assert exc_info.value.exit_code == AppExitCode.FCU_CONNECTION_FAILED
     assert "Unable to initialize FCU TCP transport" in str(exc_info.value)
     assert exc_info.value.__cause__ is error
-    assert app.drone_adapter.start_count == 1
-
-
-def test_failed_app_initialization_stops_partial_resources(monkeypatch):
-    events = []
-
-    class FakeParams:
-        def get(self, _name):
-            return 1.0
-
-        def stop(self):
-            events.append("parameters")
-
-    class FailingAdapter(FakeAdapter):
-        outcomes = [ConnectionRefusedError(111, "Connection refused")]
-
-        def stop(self):
-            events.append("msp")
-            super().stop()
-
-    monkeypatch.setattr(app_module, "FCU_CONNECT_ATTEMPTS", 1)
-    monkeypatch.setattr(app_module, "MSPAdapter", FailingAdapter)
-    monkeypatch.setattr(App, "_App__load_parameters", lambda self: FakeParams())
-    monkeypatch.setattr(App, "_App__load_manual_land_detector", lambda self: object())
-    config = VehicleConfig()
-
-    with pytest.raises(AppStartupError):
-        App(config)
-
-    assert events == ["msp", "parameters"]
+    assert drone.start_count == 1

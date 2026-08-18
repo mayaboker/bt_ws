@@ -2,9 +2,9 @@ import threading
 
 import pytest
 
-import bt_app.app as app_module
 import bt_app.control.rc_channel_override as override_module
 from bt_app.app import App
+from bt_app.app_services import AppServices
 from bt_app.common import RobotState
 from bt_app.context import Context, DEFAULT_RC_CHANNELS
 from bt_app.control.rc_channel_override import (
@@ -431,7 +431,7 @@ def test_runtime_listener_failure_uses_same_joystick_failsafe_path():
     assert app.ctx.request_rc == DEFAULT_RC_CHANNELS
 
 
-def test_controller_loading_converts_listener_start_failure(monkeypatch):
+def test_service_start_converts_listener_start_failure():
     class FailingService:
         def __init__(self, **_kwargs):
             pass
@@ -442,10 +442,5 @@ def test_controller_loading_converts_listener_start_failure(monkeypatch):
         def stop(self):
             return None
 
-    monkeypatch.setattr(app_module, "MavlinkListenerService", FailingService)
-    app = App.__new__(App)
-    app.config = VehicleConfig()
-    app.controllers = {}
-
     with pytest.raises(AppStartupError, match="bind failed"):
-        app._App__load_controllers()
+        AppServices._start(AppServices.__new__(AppServices), "joystick listener", FailingService())

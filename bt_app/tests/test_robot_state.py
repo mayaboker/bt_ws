@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 
 from bt_app.app import App
 from bt_app.common import AETR1234, MavSeverity, RobotState
@@ -94,8 +95,11 @@ def make_app_with_context():
     app = App.__new__(App)
     app.ctx = Context()
     app.controllers = {}
-    app._App__params = FakeParams()
-    app.mavlink_service = FakeMavlinkService()
+    app.services = SimpleNamespace(
+        parameters=FakeParams(),
+        mavlink=FakeMavlinkService(),
+    )
+    app._last_rc_channel = [1500] * 8
     app.manual_land_detector = FakeLandDetector()
     app._manual_land_detection_started_notified = False
     app._manual_land_confirmed_notified = False
@@ -201,7 +205,7 @@ def test_alt_hold_entry_uses_hover_baseline_parameter():
     controller = FakeController([1500] * 8)
     app.controllers[RobotState.ALT_HOLD] = controller
     app.ctx.drone_alt = 3.25
-    app._App__params = FakeParams(baseline=1325)
+    app.services.parameters = FakeParams(baseline=1325)
 
     app._handle_before_state_changed(RobotState.MANUAL, RobotState.ALT_HOLD)
 
@@ -231,7 +235,7 @@ def test_takeoff_to_alt_hold_preserves_target_and_requires_centered_throttle():
         "require_throttle_center": True,
     }
     assert app.ctx.alt_setpoint == 42
-    assert (NamedValue.ALT_SP, 42) in app.mavlink_service.messages
+    assert (NamedValue.ALT_SP, 42) in app.services.mavlink.messages
 
 
 def test_failsafe_entry_uses_hover_baseline_parameter():
@@ -239,7 +243,7 @@ def test_failsafe_entry_uses_hover_baseline_parameter():
     controller = FakeController([1500] * 8)
     app.controllers[RobotState.FAILSAFE] = controller
     app.ctx.drone_alt = 4.5
-    app._App__params = FakeParams(baseline=1400)
+    app.services.parameters = FakeParams(baseline=1400)
 
     app._handle_before_state_changed(RobotState.MANUAL, RobotState.FAILSAFE)
 
@@ -296,7 +300,7 @@ def test_manual_land_detector_sends_messages_once():
     app._update_manual_land_detector()
 
     assert app.ctx.manual_land_confirmed
-    assert app.mavlink_service.messages == [
+    assert app.services.mavlink.messages == [
         ("Manual land detection started", MavSeverity.INFO),
         ("Manual land confirmed, disarming", MavSeverity.INFO),
     ]

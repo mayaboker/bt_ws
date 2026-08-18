@@ -2,7 +2,14 @@ import csv
 import time
 
 from bt_app.common import RobotState
-from bt_app.rc_state_recorder import CSV_HEADER, NullRcStateRecorder, RcStateRecorder
+import pytest
+
+from bt_app.rc_state_recorder import (
+    CSV_HEADER,
+    NullRcStateRecorder,
+    RcStateRecorder,
+    RcStateRecorderStartupError,
+)
 
 
 def read_rows(path):
@@ -21,7 +28,7 @@ def test_recorder_writes_header_and_valid_row(tmp_path):
     rows = read_rows(path)
     assert rows[0] == list(CSV_HEADER)
     assert rows[1][1:] == [
-        "HOVER",
+        "ALT_HOLD",
         "1100",
         "1200",
         "1300",
@@ -93,3 +100,12 @@ def test_null_recorder_does_not_create_file(tmp_path):
     recorder.stop()
 
     assert not path.exists()
+
+
+def test_enabled_recorder_surfaces_file_startup_error(tmp_path):
+    recorder = RcStateRecorder(tmp_path)
+
+    with pytest.raises(RcStateRecorderStartupError) as exc_info:
+        recorder.start()
+
+    assert exc_info.value.path == tmp_path

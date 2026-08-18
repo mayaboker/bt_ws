@@ -211,12 +211,20 @@ def test_run_application_converts_signal_to_stop_request_and_restores_handlers(
     class FakeApp:
         def __init__(self):
             self.stop_requests = []
+            self.events = []
+
+        def start(self):
+            self.events.append("start")
 
         def request_stop(self, requested_signum):
             self.stop_requests.append(requested_signum)
 
         def run(self):
+            self.events.append("run")
             installed_handlers[signum](signum, None)
+
+        def stop(self):
+            self.events.append("stop")
 
     monkeypatch.setattr(signal, "getsignal", fake_getsignal)
     monkeypatch.setattr(signal, "signal", fake_signal)
@@ -225,4 +233,5 @@ def test_run_application_converts_signal_to_stop_request_and_restores_handlers(
     _run_application(app)
 
     assert app.stop_requests == [signum]
+    assert app.events == ["start", "run", "stop"]
     assert restored_handlers == previous_handlers

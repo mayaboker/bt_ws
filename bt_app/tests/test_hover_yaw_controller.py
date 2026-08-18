@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from bt_app.app import App
 from bt_app.common import AETR1234, MavSeverity, RobotState
 from bt_app.context import Context
@@ -351,11 +353,11 @@ def test_hover_handler_sends_low_severity_text_when_setpoint_request_starts():
     app.ctx.request_rc = [1500] * 8
     app.ctx.request_rc[AETR1234.THROTTLE] = 1800
     app.controllers = {RobotState.ALT_HOLD: FakeHoverController()}
-    app.mavlink_service = FakeMavlinkService()
+    app.services = SimpleNamespace(mavlink=FakeMavlinkService())
 
     app.alt_hold_handler()
     app.alt_hold_handler()
 
-    assert app.mavlink_service.messages == [
+    assert app.services.mavlink.messages == [
         ("Hover altitude setpoint change requested", MavSeverity.DEBUG)
     ]
