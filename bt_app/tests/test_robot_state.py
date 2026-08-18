@@ -2,7 +2,7 @@ import pytest
 from types import SimpleNamespace
 
 from bt_app.app import App
-from bt_app.common import AETR1234, MavSeverity, RobotState
+from bt_app.common import AETR1234, RobotState
 from bt_app.common.mavlink import NamedValue
 from bt_app.context import Context
 from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RC_MIN, RCChannel_alias as RCChannel
@@ -86,9 +86,16 @@ class FakeMavlinkService:
         self.messages.append((name, value))
 
 
-class FakeLandDetector:
+class FakeManualLandService:
+    def __init__(self):
+        self.reset_calls = 0
+        self.update_calls = 0
+
     def reset(self):
-        pass
+        self.reset_calls += 1
+
+    def update(self):
+        self.update_calls += 1
 
 
 def make_app_with_context():
@@ -98,11 +105,9 @@ def make_app_with_context():
     app.services = SimpleNamespace(
         parameters=FakeParams(),
         mavlink=FakeMavlinkService(),
+        manual_land=FakeManualLandService(),
     )
     app._last_rc_channel = [1500] * 8
-    app.manual_land_detector = FakeLandDetector()
-    app._manual_land_detection_started_notified = False
-    app._manual_land_confirmed_notified = False
     return app
 
 
@@ -270,60 +275,10 @@ def test_manual_to_idle_waits_for_land_confirmation():
     assert ctx.state == RobotState.IDLE
 
 
-def test_manual_land_detector_sends_messages_once():
-    class FakeLandDetector:
-        def __init__(self):
-            self.reset_calls = 0
-            self.update_calls = []
-            self.results = [False, True, True]
-
-        def reset(self):
-            self.reset_calls += 1
-
-        def update(self, altitude, vertical_speed):
-            self.update_calls.append((altitude, vertical_speed))
-            return self.results.pop(0)
-
+def test_notification_center_updates_manual_land_service():
     app = make_app_with_context()
-    app.manual_land_detector = FakeLandDetector()
-    app._manual_land_detection_started_notified = False
-    app._manual_land_confirmed_notified = False
-    app.ctx.state = RobotState.MANUAL
-    app.ctx.joy_manual_request = False
-    app.ctx.drone_alt = 0.1
-    app.ctx.drone_vertical_speed = 0.0
-    app.ctx.request_rc = [1500] * 8
-    app.ctx.request_rc[AETR1234.THROTTLE] = 1000
 
-    app._update_manual_land_detector()
-    app._update_manual_land_detector()
-    app._update_manual_land_detector()
+    app._notification_center()
 
-    assert app.ctx.manual_land_confirmed
-    assert app.services.mavlink.messages == [
-        ("Manual land detection started", MavSeverity.INFO),
-        ("Manual land confirmed, disarming", MavSeverity.INFO),
-    ]
-
-
-def test_manual_land_detector_resets_when_request_stops():
-    class FakeLandDetector:
-        def __init__(self):
-            self.reset_calls = 0
-
-        def reset(self):
-            self.reset_calls += 1
-
-    app = make_app_with_context()
-    app.manual_land_detector = FakeLandDetector()
-    app._manual_land_detection_started_notified = True
-    app._manual_land_confirmed_notified = True
-    app.ctx.state = RobotState.MANUAL
-    app.ctx.joy_manual_request = True
-    app.ctx.manual_land_confirmed = True
-    app.ctx.request_rc = [1500] * 8
-
-    app._update_manual_land_detector()
-
-    assert not app.ctx.manual_land_confirmed
-    assert app.manual_land_detector.reset_calls == 1
+    assert app.services.manual_land.update_calls == 1
+    assert app.services.mavlink.messages == []

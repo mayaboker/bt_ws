@@ -8,8 +8,6 @@ import pytest
 import yaml
 from pymavlink import mavutil
 
-from bt_app.app import App
-from bt_app.control.land_detector import LandDetector
 from bt_app.parameters.generated import ALL_PARAMETER_KEYS
 from bt_app.parameters.mavlink import MavlinkParameterProtocol
 from bt_app.parameters.service import ParameterService
@@ -95,27 +93,6 @@ def test_callback_failure_does_not_block_other_subscribers():
     service.set("HOV_BASELINE", 1400)
 
     assert changes == [("HOV_BASELINE", 1400)]
-
-
-@pytest.mark.parametrize(
-    ("name", "value", "attribute"),
-    [
-        ("MI_LAND_CONFIRM", 3.0, "confirm_s"),
-        ("FS_LAND_ALT", 0.25, "land_altitude_m"),
-        ("FS_LAND_VSPEED", 0.2, "land_vertical_speed_m_s"),
-    ],
-)
-def test_manual_land_detector_parameter_changes_apply_live(name, value, attribute):
-    app = App.__new__(App)
-    app.manual_land_detector = LandDetector(
-        confirm_s=2.0,
-        land_altitude_m=0.15,
-        land_vertical_speed_m_s=0.1,
-    )
-
-    app._on_application_parameter_changed(name, value)
-
-    assert getattr(app.manual_land_detector, attribute) == value
 
 
 def test_list_read_and_int_set_use_canonical_names():

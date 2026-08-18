@@ -69,7 +69,7 @@ stateDiagram-v2
 | `take_control` | Flag reserved for control ownership. | Defined in `Context`; no active writer found in current app code. |
 | `auto_arm` | Allows automatic arm without joystick AUX1 high. | Defined in `Context`; no active writer found in current app code. |
 | `takeoff_reach` | Takeoff controller has reached/stabilized at target altitude. | `App._takeoff_handler` sets it from `TakeoffController.time_in_alt >= 1`. |
-| `manual_land_confirmed` | Manual landing detector has confirmed landing. | `App._update_manual_land_detector` writes detector result; `App._reset_manual_land_detector` clears it. |
+| `manual_land_confirmed` | Manual landing detector has confirmed landing. | `services.manual_land.update()` writes the detector result; `services.manual_land.reset()` clears it. |
 | `drone_alt` | Current vehicle altitude in meters. | `App.__update_state` reads `services.drone.get_altitude()`. |
 | `drone_vertical_speed` | Current vehicle vertical speed in m/s. | `App.__update_state` reads `services.drone.dispatcher.last_altitude["vertical_speed_m_s"]`. |
 | `drone_rc` | Last RC channel values read from the vehicle. | `App.__update_state` reads `services.drone.get_rc()`. |

@@ -96,7 +96,6 @@ def test_startup_notification_failure_rolls_back_services(monkeypatch):
             events.append("stop")
 
     monkeypatch.setattr(AppServices, "build", lambda **_kwargs: Services())
-    monkeypatch.setattr(App, "_App__load_manual_land_detector", lambda self: object())
     monkeypatch.setattr(App, "_App__load_controllers", lambda self: None)
     app = App(VehicleConfig())
 

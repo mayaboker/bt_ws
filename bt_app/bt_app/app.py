@@ -20,7 +20,6 @@ from bt_app.context import Context, DEFAULT_RC_CHANNELS
 from bt_app.vehicle_config import DroneSink, VehicleConfig
 from bt_app.errors import AppExitCode, AppStartupError
 from bt_app.app_services import AppServices
-from bt_app.control.land_detector import LandDetector
 from bt_app.common import (
     NO_RC_CHANNELS, 
     RobotState,
@@ -73,9 +72,6 @@ class App:
         self.robot_sm.on_state_changed += self._state_changed_handler
         self.controllers = {}
         self.services: AppServices | None = None
-        self.manual_land_detector = None
-        self._manual_land_detection_started_notified = False
-        self._manual_land_confirmed_notified = False
         self._last_rc_channel = DEFAULT_RC_CHANNELS.copy()
 
     def start(self) -> None:
@@ -115,10 +111,6 @@ class App:
         services = self._require_services()
         parameters = services.parameters
         self.ctx.alt_setpoint = parameters.get(ParameterKey.TAKEOFF_ALT)
-        self.manual_land_detector = self.__load_manual_land_detector()
-        parameters.on_parameter_changed.subscribe(
-            self._on_application_parameter_changed
-        )
         self.__load_controllers()
 
     def __banner(self):
@@ -145,24 +137,6 @@ class App:
                 exit_code=AppExitCode.SERIAL_PORT_NOT_FOUND,
             )
 
-
-    def __load_manual_land_detector(self):
-        parameters = self._require_services().parameters
-        return LandDetector(
-            confirm_s=parameters.get(ParameterKey.MI_LAND_CONFIRM),
-            land_altitude_m=parameters.get(ParameterKey.FS_LAND_ALT),
-            land_vertical_speed_m_s=parameters.get(
-                ParameterKey.FS_LAND_VSPEED
-            ),
-        )
-
-    def _on_application_parameter_changed(self, name: str, value) -> None:
-        if name == ParameterKey.MI_LAND_CONFIRM:
-            self.manual_land_detector.confirm_s = float(value)
-        elif name == ParameterKey.FS_LAND_ALT:
-            self.manual_land_detector.land_altitude_m = float(value)
-        elif name == ParameterKey.FS_LAND_VSPEED:
-            self.manual_land_detector.land_vertical_speed_m_s = float(value)
 
     def __load_controllers(self):
         """
@@ -219,7 +193,7 @@ class App:
         # only next condition
         match next:
             case RobotState.MANUAL:
-                self._reset_manual_land_detector()
+                self._require_services().manual_land.reset()
 
             case RobotState.TAKEOFF:
                 self.controllers[RobotState.TAKEOFF].reset()
@@ -232,7 +206,7 @@ class App:
                 self.ctx.joy_arm_requested = False
                 self.ctx.joy_takeoff_request = False
                 self.ctx.armed = False
-                self._reset_manual_land_detector()
+                self._require_services().manual_land.reset()
 
             case RobotState.ALT_HOLD:
                 base_line = self._require_services().parameters.get(ParameterKey.HOV_BASELINE)
@@ -280,7 +254,7 @@ class App:
                 log.info(f"switch to alt hold at altitude {self.ctx.drone_alt} with baseline {base_line}")
 
         if prev == RobotState.MANUAL and next != RobotState.IDLE:
-            self._reset_manual_land_detector()
+            self._require_services().manual_land.reset()
 
     #region joystick handlers
     def __handle_joy_rc(self, event: RcChannelsOverrideEvent):
@@ -515,52 +489,13 @@ class App:
     def _notification_center(self):
         """
         TODO: think about queue and other service handle it, for know we  only user scheduler submit it like queue"""
-        self._update_manual_land_detector()
+        self._require_services().manual_land.update()
         if self.ctx.state == RobotState.ARM:
             if self.ctx.arming_disable_flags:
                 pass
                 # print(self.ctx.arming_disable_flags)
 
         # log.info(self.ctx)
-
-    def _manual_land_detection_requested(self) -> bool:
-        return (
-            self.ctx.state == RobotState.MANUAL
-            and not self.ctx.joy_manual_request
-            and self.ctx.request_rc[AETR1234.THROTTLE] < 1050
-        )
-
-    def _reset_manual_land_detector(self) -> None:
-        self.manual_land_detector.reset()
-        self.ctx.manual_land_confirmed = False
-        self._manual_land_detection_started_notified = False
-        self._manual_land_confirmed_notified = False
-
-    def _update_manual_land_detector(self) -> None:
-        if not self._manual_land_detection_requested():
-            self._reset_manual_land_detector()
-            return
-
-        if not self._manual_land_detection_started_notified:
-            self._require_services().mavlink.send_text_to_gcs(
-                "Manual land detection started",
-                MavSeverity.INFO,
-            )
-            self._manual_land_detection_started_notified = True
-
-        self.ctx.manual_land_confirmed = self.manual_land_detector.update(
-            self.ctx.drone_alt,
-            self.ctx.drone_vertical_speed,
-        )
-        if (
-            self.ctx.manual_land_confirmed
-            and not self._manual_land_confirmed_notified
-        ):
-            self._require_services().mavlink.send_text_to_gcs(
-                "Manual land confirmed, disarming",
-                MavSeverity.INFO,
-            )
-            self._manual_land_confirmed_notified = True
 
     def _update_controllers(self):
         """

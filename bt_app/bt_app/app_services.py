@@ -14,6 +14,7 @@ from bt_app.msp import MspTransportDependencyError
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.parameters import Parameters
 from bt_app.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
+from bt_app.services import ManualLandService
 from bt_app.vehicle_config import DroneSink, VehicleConfig
 from bt_app.visual_bridge import VisualBridgeManager
 from bt_joy.server.mavlink import (
@@ -40,6 +41,7 @@ class AppServices:
         joystick: MavlinkListenerService,
         mavlink: MavlinkService,
         rc_recorder: RcStateRecorder | NullRcStateRecorder,
+        manual_land: ManualLandService,
     ) -> None:
         self.config = config
         self.parameters = parameters
@@ -48,6 +50,7 @@ class AppServices:
         self.joystick = joystick
         self.mavlink = mavlink
         self.rc_recorder = rc_recorder
+        self.manual_land = manual_land
         self._started: list[tuple[str, object]] = []
 
     @classmethod
@@ -94,6 +97,10 @@ class AppServices:
             if config.rc_record_enabled
             else NullRcStateRecorder()
         )
+        manual_land = ManualLandService(
+            context=context,
+            parameters=parameters,
+        )
         return cls(
             config=config,
             parameters=parameters,
@@ -102,6 +109,7 @@ class AppServices:
             joystick=joystick,
             mavlink=mavlink,
             rc_recorder=recorder,
+            manual_land=manual_land,
         )
 
     @staticmethod

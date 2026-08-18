@@ -505,7 +505,6 @@ def test_app_starts_services_with_shared_context(monkeypatch):
         return services
 
     monkeypatch.setattr(AppServices, "build", build_services)
-    monkeypatch.setattr(App, "_App__load_manual_land_detector", lambda self: object())
     monkeypatch.setattr(App, "_App__load_controllers", lambda self: None)
 
     app = App(VehicleConfig())
@@ -655,6 +654,7 @@ def test_app_services_stop_in_safe_order_and_continue_after_error():
     services.mavlink = Resource("mavlink")
     services.rc_recorder = Resource("recorder")
     services.parameters = Resource("parameters")
+    services.manual_land = Resource("manual land")
     services._started = [
         ("visual", services.visual_bridge),
         ("msp", services.drone),
