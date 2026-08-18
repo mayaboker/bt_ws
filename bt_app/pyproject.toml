@@ -18,7 +18,11 @@ dependencies = [
     "pyzmq",
     "msgpack",
     "pymavlink>=2.4.49",
+    "bt-msgs",
 ]
+
+[tool.uv.sources]
+bt-msgs = { path = "../bt_msgs", editable = true }
 
 [project.optional-dependencies]
 dev = [

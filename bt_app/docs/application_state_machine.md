@@ -23,7 +23,6 @@ After a successful transition, the machine:
 | `TAKEOFF` | Climbs to the configured altitude setpoint. |
 | `ALT_HOLD` | Holds altitude while accepting hover/yaw commands. |
 | `FAILSAFE` | Holds altitude while joystick failsafe is active. |
-| `TRACKING` | Runs cursor or target-tracking automatic control. |
 | `RECOVERY` | Declared in `RobotState`, but has no registered transitions or RC handler. |
 
 ## Active Transitions
@@ -43,9 +42,6 @@ with logical AND unless stated otherwise.
 | `TAKEOFF` | `MANUAL` | `enter_manual_from_takeoff` | `armed` and `joy_manual_request` and not `joy_takeoff_request` |
 | `ALT_HOLD` | `FAILSAFE` | `enter_failsafe` | `armed` and `joy_fail_safe` |
 | `ALT_HOLD` | `MANUAL` | `enter_manual_mode_from_hover` | `joy_manual_request` and `armed` |
-| `ALT_HOLD` | `TRACKING` | `enter_tracking_mode_from_alt_hold` | `auto_mode_type` is `TRACKING`, `auto_mode_enable`, and `armed` |
-| `TRACKING` | `ALT_HOLD` | `enter_alt_hold_mode_from_auto` | not `auto_mode_enable`, `armed`, and not `joy_manual_request` |
-| `TRACKING` | `FAILSAFE` | `enter_failsafe` | `armed` and `joy_fail_safe` |
 | `FAILSAFE` | `ALT_HOLD` | `exit_failsafe` | `armed` and not `joy_fail_safe` |
 | `FAILSAFE` | `IDLE` | `exit_failsafe_to_idle` | not `joy_fail_safe`, not `joy_manual_request`, and not `joy_takeoff_request` |
 
@@ -53,7 +49,7 @@ For states with multiple outgoing transitions, registration order determines
 priority when more than one guard is true:
 
 - `MANUAL`: `TAKEOFF`, `FAILSAFE`, `IDLE`, then `ALT_HOLD`.
-- `ALT_HOLD`: `FAILSAFE`, `MANUAL`, then `TRACKING`.
+- `ALT_HOLD`: `FAILSAFE`, then `MANUAL`.
 - `TAKEOFF`: `ALT_HOLD`, then `MANUAL`.
 - `FAILSAFE`: `ALT_HOLD`, then `IDLE`.
 
@@ -76,11 +72,6 @@ stateDiagram-v2
 
     ALT_HOLD --> FAILSAFE: armed and joystick failsafe
     ALT_HOLD --> MANUAL: armed and manual requested
-    ALT_HOLD --> TRACKING: armed and auto mode enabled
-
-    TRACKING --> ALT_HOLD: armed, enabler cleared\nmanual not requested
-    TRACKING --> FAILSAFE: armed and joystick failsafe
-
     FAILSAFE --> ALT_HOLD: armed and failsafe cleared
     FAILSAFE --> IDLE: failsafe cleared\nno manual or takeoff request
 
@@ -104,7 +95,6 @@ The guards read these `Context` values:
 | `is_low_throttle()` | Returns whether requested joystick throttle is below 1050. |
 | `drone_alt` / `alt_setpoint` | Current and requested altitude used to admit takeoff. |
 | `takeoff_reach` | The takeoff controller has remained at its target long enough to enter `ALT_HOLD`. |
-| `auto_mode_type` | `DISABLED`, `CURSOR`, or `TRACKING`; CURSOR is a state-independent pre-tracking phase, while TRACKING plus the enabler admits the flight state. |
 
 ## Application Callbacks
 
@@ -127,7 +117,7 @@ The guards read these `Context` values:
 - There is no direct `ARM -> IDLE` or `ARM -> TAKEOFF` transition. `ARM` can
   currently advance only to `MANUAL`.
 - Failsafe transitions are registered only from `MANUAL` and `ALT_HOLD`, not
-  from `ARM`, `TAKEOFF`, or `TRACKING`.
+  from `ARM` or `TAKEOFF`.
 - `RECOVERY` is declared but not connected.
 - Landing confirmation is not part of `MANUAL -> IDLE`; the guard relies on
   manual request, arm switch, and low throttle.

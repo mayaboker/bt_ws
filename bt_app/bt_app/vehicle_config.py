@@ -26,22 +26,7 @@ class VehicleConfig():
     rc_record_queue_size: int = field(default=1000)
     config_name: str = field(default="parameters.yaml")
     log_level: str = field(default="INFO")
-    visual_observer_enabled: bool = field(default=False)
     visual_zmq_endpoint: str = field(default="tcp://127.0.0.1:5556")
-    visual_image_width: int = field(default=640)
-    visual_image_height: int = field(default=480)
-    visual_print_rate_hz: float = field(default=2.0)
-    visual_mavlink_rate_hz: float = field(default=20.0)
-    tracker_request_endpoint: str = field(default="tcp://127.0.0.1:5555")
-    tracker_initial_x: int = field(default=320)
-    tracker_initial_y: int = field(default=240)
-    tracker_adjust_step_x_px: int = field(default=5)
-    tracker_adjust_step_y_px: int = field(default=3)
-    tracker_adjust_rate_hz: float = field(default=5.0)
-    tracker_adjust_deadband_pwm: int = field(default=100)
-    tracker_bridge_health_timeout_s: float = field(default=1.0)
-    tracker_result_timeout_s: float = field(default=0.25)
-
     # region singleton
     _instance = None
     _initialized = False

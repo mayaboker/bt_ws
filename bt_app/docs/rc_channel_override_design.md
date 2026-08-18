@@ -338,7 +338,7 @@ Options:
 ### 4. Failsafe scope — Decision required
 
 Define which states may be armed and must react to joystick loss. At minimum,
-confirm expected behavior for `ARM`, `TAKEOFF`, `TRACKING`, `MANUAL`, and
+confirm expected behavior for `ARM`, `TAKEOFF`, `MANUAL`, and
 `ALT_HOLD`. This decision belongs to the state-machine safety requirements, not
 only to the listener implementation.
 

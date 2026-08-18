@@ -53,21 +53,6 @@ channels:
   'off': 1000
   'on': 2000
 #ch7
-- name: enabler
-  source: button
-  index: 5
-  'off': 1000
-  'on': 2000
-#ch8
-- name: tracker_mode
-  source: axis
-  index: 6
-  in_min: -32767
-  in_max: 32767
-  out_min: 1000
-  out_max: 2000
-  deadband: 100
-#ch9
 - name: not_use
   source: axis
   index: 5

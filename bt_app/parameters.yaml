@@ -149,54 +149,6 @@ parameters:
     limits:
       min: 0.0
       max: 1.0
-  VIS_HOV_THR:
-    type: float
-    default: 0.55
-    limits:
-      min: 0.0
-      max: 1.0
-  VIS_FWD_PITCH:
-    type: float
-    default: -20.0
-    limits:
-      min: -100.0
-      max: 100.0
-  VIS_MAX_PITCH:
-    type: float
-    default: 60.0
-    limits:
-      min: 0.0
-      max: 100.0
-  VIS_MAX_THR:
-    type: float
-    default: 0.85
-    limits:
-      min: 0.0
-      max: 1.0
-  VIS_KP_YAW:
-    type: float
-    default: 1
-    limits:
-      min: 0.0
-      max: 100.0
-  VIS_MAX_YAW:
-    type: float
-    default: 15.0
-    limits:
-      min: 0.0
-      max: 1000.0
-  VIS_KP_PITCH:
-    type: float
-    default: 1
-    limits:
-      min: 0.0
-      max: 100.0
-  VIS_KP_THR:
-    type: float
-    default: 0.06
-    limits:
-      min: 0.0
-      max: 1.0
   BF_YAW_RATE:
     type: float
     default: 67.0

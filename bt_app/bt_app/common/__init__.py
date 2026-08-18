@@ -15,16 +15,9 @@ ZMQ_TRACKER_RESULT_TOPIC = b"tracker_result"
 
 NO_RC_CHANNELS = 8
 
-class AutoModeType(IntEnum):
-    DISABLED = 1000
-    CURSOR = 1500
-    TRACKING = 2000
-
 class JoyInterrupt(StrEnum):
     TAKEOFF_REQUEST = "takeoff_request"
     MANUAL_REQUEST = "manual_request"
-    AUTO_REQUEST = "auto_request"
-    ENABLER_REQUEST = "enabler_request"
 
 
 class InternalJoy(IntEnum):
@@ -38,8 +31,6 @@ class InternalJoy(IntEnum):
     ARM = auto() # SE(4)
     MANUAL = auto() # SA(5)
     AUTO_TAKE_OFF = auto() # SD(6)
-    ENABLER = auto() # SF(7)
-    TRACKER_MODE = auto() # SB(8)
 
 class AETR1234(IntEnum):
     """
@@ -60,7 +51,6 @@ class AETR1234(IntEnum):
 class RobotState(IntEnum):
     IDLE = 0
     MANUAL = 1
-    TRACKING = 2
     RECOVERY = 3
     FAILSAFE = 4
     TAKEOFF = 5

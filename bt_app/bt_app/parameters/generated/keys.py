@@ -32,14 +32,6 @@ class ParameterKey:
     HY_MAX_RATE: Final[Literal['HY_MAX_RATE']] = 'HY_MAX_RATE'
     HY_DEADBAND: Final[Literal['HY_DEADBAND']] = 'HY_DEADBAND'
     HY_EXPO: Final[Literal['HY_EXPO']] = 'HY_EXPO'
-    VIS_HOV_THR: Final[Literal['VIS_HOV_THR']] = 'VIS_HOV_THR'
-    VIS_FWD_PITCH: Final[Literal['VIS_FWD_PITCH']] = 'VIS_FWD_PITCH'
-    VIS_MAX_PITCH: Final[Literal['VIS_MAX_PITCH']] = 'VIS_MAX_PITCH'
-    VIS_MAX_THR: Final[Literal['VIS_MAX_THR']] = 'VIS_MAX_THR'
-    VIS_KP_YAW: Final[Literal['VIS_KP_YAW']] = 'VIS_KP_YAW'
-    VIS_MAX_YAW: Final[Literal['VIS_MAX_YAW']] = 'VIS_MAX_YAW'
-    VIS_KP_PITCH: Final[Literal['VIS_KP_PITCH']] = 'VIS_KP_PITCH'
-    VIS_KP_THR: Final[Literal['VIS_KP_THR']] = 'VIS_KP_THR'
     BF_YAW_RATE: Final[Literal['BF_YAW_RATE']] = 'BF_YAW_RATE'
 
 
@@ -69,13 +61,5 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'HY_MAX_RATE',
     'HY_DEADBAND',
     'HY_EXPO',
-    'VIS_HOV_THR',
-    'VIS_FWD_PITCH',
-    'VIS_MAX_PITCH',
-    'VIS_MAX_THR',
-    'VIS_KP_YAW',
-    'VIS_MAX_YAW',
-    'VIS_KP_PITCH',
-    'VIS_KP_THR',
     'BF_YAW_RATE',
 )

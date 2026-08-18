@@ -5,7 +5,7 @@ import struct
 import time
 import math
 from dataclasses import dataclass
-from typing import Any, Callable, ClassVar, Mapping
+from typing import ClassVar
 
 from loguru import logger as log
 from pymavlink import mavutil
@@ -15,11 +15,6 @@ from bt_app.context import Context
 from bt_app.parameters.mavlink import MavlinkParameterProtocol, MavlinkParameterResponse
 from bt_app.parameters.service import ParameterService
 from bt_app.scheduler import Command, CommandScheduler, SchedulerContext
-from bt_app.visual_mavlink import (
-    V2_EXTENSION_RED_DETECTION_MESSAGE_TYPE,
-    VisualMavlinkCodecError,
-    encode_red_detection,
-)
 
 
 QOPENHD_ADDR = ("127.0.0.1", 14550)
@@ -108,15 +103,6 @@ class SendChannelStatusV2ExtensionCommand(Command):
 
 
 @dataclass
-class SendRedDetectionV2ExtensionCommand(Command):
-    key: ClassVar[str | None] = "mavlink_v2_extension_red_detection"
-    service: "MavlinkService"
-
-    def execute(self, context: SchedulerContext) -> None:
-        self.service._send_latest_red_detection()
-
-
-@dataclass
 class NamedValueFloatCommand(Command):
     key: ClassVar[str | None] = "mavlink_named_value_float"
     service: "MavlinkService"
@@ -174,8 +160,6 @@ class MavlinkService:
         sys_status_interval_s: float = SYS_STATUS_INTERVAL_S,
         rc_channels_interval_s: float = RC_CHANNELS_INTERVAL_S,
         v2_extension_channel_status_interval_s: float = V2_EXTENSION_CHANNEL_STATUS_INTERVAL_S,
-        visual_detection_supplier: Callable[[], Mapping[str, Any] | None] | None = None,
-        visual_mavlink_rate_hz: float = 20.0,
         poll_interval_s: float = 0.01,
     ) -> None:
         self.context = context
@@ -189,12 +173,6 @@ class MavlinkService:
         self.v2_extension_channel_status_interval_s = (
             v2_extension_channel_status_interval_s
         )
-        if visual_mavlink_rate_hz <= 0:
-            raise ValueError("visual_mavlink_rate_hz must be > 0")
-        self.visual_detection_supplier = visual_detection_supplier
-        self.visual_mavlink_interval_s = 1.0 / visual_mavlink_rate_hz
-        self._last_visual_emission_key: tuple[int, int | None] | None = None
-        self._last_visual_warning_at = float("-inf")
         self.poll_interval_s = poll_interval_s
         self._started = False
         self._socket = None
@@ -261,13 +239,6 @@ class MavlinkService:
             interval_s=self.v2_extension_channel_status_interval_s,
             key=SendChannelStatusV2ExtensionCommand.key,
         )
-
-        if self.visual_detection_supplier is not None:
-            self._scheduler.schedule(
-                SendRedDetectionV2ExtensionCommand(self),
-                interval_s=self.visual_mavlink_interval_s,
-                key=SendRedDetectionV2ExtensionCommand.key,
-            )
 
         self._scheduler.schedule(
             ReceivePendingCommand(self),
@@ -440,32 +411,6 @@ class MavlinkService:
             V2_EXTENSION_CHANNEL_STATUS_MESSAGE_TYPE,
             self._make_channel_status_payload(),
         )
-
-    def _send_latest_red_detection(self) -> None:
-        supplier = self.visual_detection_supplier
-        if supplier is None:
-            return
-        detection = supplier()
-        if detection is None:
-            return
-        try:
-            emission_key = (
-                int(detection["frame_id"]),
-                None
-                if detection["timestamp_ns"] is None
-                else int(detection["timestamp_ns"]),
-            )
-            if emission_key == self._last_visual_emission_key:
-                return
-            payload = encode_red_detection(detection)
-        except (KeyError, TypeError, ValueError, VisualMavlinkCodecError) as exc:
-            now = time.monotonic()
-            if now - self._last_visual_warning_at >= 2.0:
-                self._last_visual_warning_at = now
-                log.warning("Unable to publish visual MAVLink telemetry: {}", exc)
-            return
-        self._send_v2_extension(V2_EXTENSION_RED_DETECTION_MESSAGE_TYPE, payload)
-        self._last_visual_emission_key = emission_key
 
     def _send_named_value_float(self, named: str, value: float) -> None:
         if self._socket is None:

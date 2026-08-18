@@ -61,6 +61,7 @@ wheels = [
 name = "bt-app"
 source = { editable = "." }
 dependencies = [
+    { name = "bt-msgs" },
     { name = "click" },
     { name = "loguru" },
     { name = "msgpack" },
@@ -85,6 +86,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "bt-msgs", editable = "../bt_msgs" },
     { name = "click" },
     { name = "loguru" },
     { name = "msgpack" },
@@ -99,6 +101,22 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "transitions" },
     { name = "websockify", marker = "extra == 'dev'" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "bt-msgs"
+version = "0.1.0"
+source = { editable = "../bt_msgs" }
+dependencies = [
+    { name = "msgpack" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "msgpack", specifier = ">=1.0" },
+    { name = "pytest", marker = "extra == 'dev'" },
+    { name = "ruff", marker = "extra == 'dev'" },
 ]
 provides-extras = ["dev"]
 

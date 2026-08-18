@@ -26,8 +26,6 @@ YAW = 3
 ARM = 4
 MANUAL = 5
 AUTO_TAKEOFF = 6
-ENABLER = 7
-TRACKER_MODE = 8
 
 RC_MIN = 1000
 RC_MID = 1500
@@ -81,15 +79,13 @@ def rc_channels(
     armed: bool = False,
     manual: bool = False,
     auto_takeoff: bool = False,
-    tracker_mode: bool = False,
 ) -> tuple[int, ...]:
     """Build the eight application joystick channels."""
 
-    channels = [RC_MID, RC_MID, throttle, RC_MID, RC_MIN, RC_MAX, RC_MIN, RC_MIN, RC_MIN]
+    channels = [RC_MID, RC_MID, throttle, RC_MID, RC_MIN, RC_MAX, RC_MIN, RC_MIN]
     channels[ARM] = RC_MAX if armed else RC_MIN
     channels[MANUAL] = RC_MIN if manual else RC_MAX
     channels[AUTO_TAKEOFF] = RC_MAX if auto_takeoff else RC_MIN
-    channels[TRACKER_MODE] = RC_MAX if tracker_mode else RC_MIN
     return tuple(channels)
 
 

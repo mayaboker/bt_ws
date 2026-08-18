@@ -5,7 +5,7 @@ The context is a singleton class that holds the current state of the drone. It i
 from bt_app.common import RobotState
 from dataclasses import dataclass, field
 from typing import ClassVar
-from bt_app.common import AutoModeType, InternalJoy
+from bt_app.common import InternalJoy
 
 DEFAULT_RC_CHANNELS = [1500, 1500, 1000, 1500, 1000, 1000, 1000, 1000]
 
@@ -49,13 +49,8 @@ class Context:
     request_rc: list = field(default_factory=lambda: DEFAULT_RC_CHANNELS.copy())
     sent_rc: list = field(default_factory=lambda: DEFAULT_RC_CHANNELS.copy())
     battery_voltage: float = 0.0
-    # auto mode state 
-    auto_mode_type: AutoModeType = field(default=AutoModeType.DISABLED)
     # altitude request setpoint use (takeoff, alt_hold)
     alt_setpoint: float = 0.0
-
-    # auto mode enable
-    auto_mode_enable: bool = field(default=False)
 
     def is_low_throttle(self):
         return self.request_rc[InternalJoy.THROTTLE] < 1050
@@ -96,8 +91,6 @@ class Context:
         self.request_rc = DEFAULT_RC_CHANNELS.copy()
         self.sent_rc = DEFAULT_RC_CHANNELS.copy()
         self.battery_voltage = 0.0
-        self.auto_mode_type = AutoModeType.DISABLED
-        self.auto_mode_enable = False
         self._initialized = True
         self.takeoff_setpoint = 0.0
     # endregion

@@ -105,7 +105,7 @@ def make_app_with_context():
 def test_robot_state_uses_stable_integer_values():
     assert RobotState.IDLE.value == 0
     assert RobotState.MANUAL.value == 1
-    assert RobotState.TRACKING.value == 2
+    assert "TRACKING" not in RobotState.__members__
     assert RobotState.RECOVERY.value == 3
     assert RobotState.FAILSAFE.value == 4
     assert RobotState.TAKEOFF.value == 5

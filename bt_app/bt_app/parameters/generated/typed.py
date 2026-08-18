@@ -119,37 +119,5 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.HY_EXPO))
 
     @property
-    def vis_hov_thr(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VIS_HOV_THR))
-
-    @property
-    def vis_fwd_pitch(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VIS_FWD_PITCH))
-
-    @property
-    def vis_max_pitch(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VIS_MAX_PITCH))
-
-    @property
-    def vis_max_thr(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VIS_MAX_THR))
-
-    @property
-    def vis_kp_yaw(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VIS_KP_YAW))
-
-    @property
-    def vis_max_yaw(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VIS_MAX_YAW))
-
-    @property
-    def vis_kp_pitch(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VIS_KP_PITCH))
-
-    @property
-    def vis_kp_thr(self) -> float:
-        return cast(float, self._parameters.get(ParameterKey.VIS_KP_THR))
-
-    @property
     def bf_yaw_rate(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.BF_YAW_RATE))

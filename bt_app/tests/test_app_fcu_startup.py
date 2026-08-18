@@ -15,6 +15,31 @@ class FakeMspClient:
         self.close_count += 1
 
 
+def test_visual_bridge_endpoint_must_not_be_empty():
+    app = App.__new__(App)
+    app.config = VehicleConfig()
+    app.config.visual_zmq_endpoint = ""
+
+    with pytest.raises(AppStartupError, match="endpoint must not be empty"):
+        app._App__validate_startup_config()
+
+
+def test_visual_bridge_start_failure_is_startup_error(monkeypatch):
+    class FailingManager:
+        def __init__(self, endpoint):
+            assert endpoint == "tcp://127.0.0.1:5556"
+
+        def start(self):
+            raise RuntimeError("socket failed")
+
+    monkeypatch.setattr(app_module, "VisualBridgeManager", FailingManager)
+    app = App.__new__(App)
+    app.config = VehicleConfig()
+
+    with pytest.raises(AppStartupError, match="Unable to start visual bridge"):
+        app._App__load_visual_bridge_manager()
+
+
 class FakeAdapter:
     outcomes = []
 

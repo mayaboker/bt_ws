@@ -4,7 +4,7 @@ from transitions import Machine
 from bt_app.common import Event
 from bt_app.vehicle_config import VehicleConfig
 from bt_app.context import Context
-from bt_app.common import AETR1234, AutoModeType
+from bt_app.common import AETR1234
 
 def _coerce_robot_state(state) -> RobotState:
     if isinstance(state, RobotState):
@@ -96,15 +96,6 @@ class Robot_StateMachine:
             before=lambda x: self.on_before_state_changed.emit(RobotState.ALT_HOLD, RobotState.FAILSAFE),
             conditions=[self.enter_failsafe]
         )
-        self.machine.add_transition(
-            "resolve",
-            RobotState.TRACKING,
-            RobotState.FAILSAFE,
-            before=lambda x: self.on_before_state_changed.emit(
-                RobotState.TRACKING, RobotState.FAILSAFE
-            ),
-            conditions=[self.enter_failsafe],
-        )
         # endregion to FAILSAFE
 
         # region from FAILSAFE
@@ -173,31 +164,11 @@ class Robot_StateMachine:
         )
         # endregion from HOVER
 
-        # region to AUTO
-        self.machine.add_transition(
-            "resolve",
-            RobotState.ALT_HOLD,
-            RobotState.TRACKING,
-            before=lambda x: self.on_before_state_changed.emit(RobotState.ALT_HOLD, RobotState.TRACKING),
-            conditions=[self.enter_tracking_mode_from_alt_hold],
-        )
-
-        self.machine.add_transition(
-            "resolve",
-            RobotState.TRACKING,
-            RobotState.ALT_HOLD,
-            before=lambda x: self.on_before_state_changed.emit(RobotState.TRACKING, RobotState.ALT_HOLD),
-            conditions=[self.enter_alt_hold_mode_from_auto],
-        )
-        # endregion auto mode
-
-
 
     def on_state_changed_handler(self, event):
         """
         """
         # TODO: move to app logic
-        previous_state = _coerce_robot_state(event.transition.source)
         new_state = _coerce_robot_state(event.transition.dest)
         self.ctx.state = new_state
         log.info(f"State changed: {event.transition.source} -> {event.transition.dest}")
@@ -348,22 +319,5 @@ class Robot_StateMachine:
             self.ctx.armed
         ])
         return ok
-    
-    def enter_tracking_mode_from_alt_hold(self, event):
-        ok = all([
-            self.ctx.auto_mode_type == AutoModeType.TRACKING,
-            self.ctx.auto_mode_enable,
-            self.ctx.armed
-        ])
-        return ok
-    
-    def enter_alt_hold_mode_from_auto(self, event):
-        ok = all([
-            not self.ctx.auto_mode_enable,
-            self.ctx.armed,
-            not self.ctx.joy_manual_request
-        ])
-        return ok
-    
     
     #endregion manual mode
