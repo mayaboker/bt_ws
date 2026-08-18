@@ -2,7 +2,7 @@ import pytest
 from types import SimpleNamespace
 
 from bt_app.app import App
-from bt_app.common import AETR1234, RobotState
+from bt_app.common import AETR1234, InternalJoystick, RobotState
 from bt_app.common.mavlink import NamedValue
 from bt_app.context import Context
 from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RC_MIN, RCChannel_alias as RCChannel
@@ -34,6 +34,7 @@ class FakeController:
         self.reset_setpoint_altitude = None
         self.reset_setpoint_kwargs = None
         self.reset_altitude = None
+        self.is_arm_done = False
 
     def update(self, *args):
         self.calls.append(args)
@@ -44,6 +45,9 @@ class FakeController:
 
     def update_yaw_from_joystick(self, yaw_rc):
         self.calls.append(("yaw", yaw_rc))
+
+    def update_pitch_roll(self, pitch_rc, roll_rc):
+        self.calls.append(("pitch_roll", pitch_rc, roll_rc))
 
     def consume_altitude_setpoint_request_event(self):
         return False
@@ -107,7 +111,6 @@ def make_app_with_context():
         mavlink=FakeMavlinkService(),
         manual_land=FakeManualLandService(),
     )
-    app._last_rc_channel = [1500] * 8
     return app
 
 
@@ -133,8 +136,7 @@ def test_state_machine_transition_assigns_robot_state_member():
     machine = Robot_StateMachine(ctx, config)
 
     ctx.armable = True
-    ctx.joy_arm_requested = True
-    ctx.joy_manual_request = True
+    ctx.request_rc = InternalJoystick(arm=RC_MAX)
     machine.resolve()
     ctx.armed = True
     machine.resolve()
@@ -149,8 +151,7 @@ def test_manual_to_takeoff_uses_initialized_altitude_setpoint():
     machine.machine.set_state(RobotState.MANUAL)
     ctx.state = RobotState.MANUAL
     ctx.armed = True
-    ctx.joy_manual_request = False
-    ctx.joy_takeoff_request = True
+    ctx.request_rc = InternalJoystick(manual=RC_MID, auto_takeoff=RC_MAX)
     ctx.drone_alt = 0.0
     ctx.alt_setpoint = 2.0
 
@@ -177,17 +178,38 @@ def test_rc_selector_uses_robot_state_members(state, controller_key):
     app.ctx.state = state
     app.ctx.drone_alt = 12.5
     app.ctx.drone_vertical_speed = -0.1
-    app.ctx.request_rc = [1500] * 8
+    app.ctx.request_rc = InternalJoystick(
+        roll=1500,
+        pitch=1500,
+        throttle=1500,
+        yaw=1500,
+        arm=1500,
+        manual=1500,
+        auto_takeoff=1500,
+        reserved_8=1500,
+    )
 
-    assert app._resolve_rc() == channels
+    result = app._resolve_rc()
 
-    if state == RobotState.TAKEOFF:
-        assert controller.calls == [(42, 12.5)]
+    if state == RobotState.MANUAL:
+        assert result == list(app.ctx.request_rc)
+        assert controller.calls == []
+    elif state == RobotState.TAKEOFF:
+        assert result == channels
+        assert controller.calls == [(42, 12.5, 0.0)]
     elif state == RobotState.FAILSAFE:
+        assert result == channels
         assert controller.calls == [(12.5, -0.1)]
     elif state == RobotState.ALT_HOLD:
-        assert controller.calls == [("throttle", 1500), ("yaw", 1500), (42, 12.5)]
+        assert result == channels
+        assert controller.calls == [
+            ("throttle", 1500),
+            ("yaw", 1500),
+            ("pitch_roll", 1500, 1500),
+            (42, 12.5, 0.0),
+        ]
     else:
+        assert result == channels
         assert controller.calls == [()]
 
 
@@ -256,22 +278,53 @@ def test_failsafe_entry_uses_hover_baseline_parameter():
     assert controller.baseline == 1400
 
 
-def test_manual_to_idle_waits_for_land_confirmation():
+def test_manual_to_idle_uses_switches_and_low_throttle():
     ctx = Context()
     machine = Robot_StateMachine(ctx, VehicleConfig())
     machine.machine.set_state(RobotState.MANUAL)
     ctx.state = RobotState.MANUAL
     ctx.armed = True
-    ctx.joy_manual_request = False
-    ctx.request_rc = [1500] * 8
-    ctx.request_rc[AETR1234.THROTTLE] = 1000
-    ctx.request_rc[AETR1234.YAW] = 1500
+    ctx.request_rc = InternalJoystick(arm=RC_MAX)
 
     machine.resolve()
     assert ctx.state == RobotState.MANUAL
 
-    ctx.manual_land_confirmed = True
+    ctx.request_rc = InternalJoystick()
     machine.resolve()
+    assert ctx.state == RobotState.IDLE
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (RobotState.TAKEOFF, RobotState.MANUAL),
+        (RobotState.ALT_HOLD, RobotState.MANUAL),
+    ],
+)
+def test_manual_selection_returns_armed_flight_states_to_manual(source, expected):
+    ctx = Context()
+    ctx.state = source
+    ctx.armed = True
+    ctx.request_rc = InternalJoystick()
+    machine = Robot_StateMachine(ctx, VehicleConfig())
+    machine.machine.set_state(source)
+
+    machine.resolve()
+
+    assert ctx.state == expected
+
+
+def test_failsafe_returns_to_idle_when_disarmed_with_no_mode_selected():
+    ctx = Context()
+    ctx.state = RobotState.FAILSAFE
+    ctx.armed = False
+    ctx.joy_fail_safe = False
+    ctx.request_rc = InternalJoystick(manual=RC_MID)
+    machine = Robot_StateMachine(ctx, VehicleConfig())
+    machine.machine.set_state(RobotState.FAILSAFE)
+
+    machine.resolve()
+
     assert ctx.state == RobotState.IDLE
 
 

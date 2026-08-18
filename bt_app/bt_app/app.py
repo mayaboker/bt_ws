@@ -37,7 +37,7 @@ from bt_app.msp.bt_v2 import (
 )
 from bt_app.common import (
     AETR1234,
-    InternalJoy)
+    InternalJoystick)
 from loguru import logger as log
 import time
 from bt_app.common.mavlink import NamedValue
@@ -72,7 +72,6 @@ class App:
         self.robot_sm.on_state_changed += self._state_changed_handler
         self.controllers = {}
         self.services: AppServices | None = None
-        self._last_rc_channel = DEFAULT_RC_CHANNELS.copy()
 
     def start(self) -> None:
         if self._lifecycle == AppLifecycle.RUNNING:
@@ -175,12 +174,6 @@ class App:
             MavSeverity.INFO,
         )
 
-        if all([previous_state == RobotState.MANUAL,
-                new_state == RobotState.FAILSAFE]):
-            # set manual_request to false, fail safe return to hold
-            # we need  toggle return to manual
-            self.ctx.joy_manual_request = False
-        
     def _handle_before_state_changed(self, prev, next):
         
         """
@@ -202,9 +195,6 @@ class App:
                 log.warning("reset all controllers")
                 self.controllers[RobotState.ARM].reset()
                 self.controllers[RobotState.TAKEOFF].reset()
-                self.ctx.armed_allowed = False
-                self.ctx.joy_arm_requested = False
-                self.ctx.joy_takeoff_request = False
                 self.ctx.armed = False
                 self._require_services().manual_land.reset()
 
@@ -258,42 +248,17 @@ class App:
 
     #region joystick handlers
     def __handle_joy_rc(self, event: RcChannelsOverrideEvent):
-        """
-        handle interrupt that register as joy action
-        """
-        channels = list(event.channels)
-        self._last_rc_channel = channels
-        self.ctx.request_rc = self._last_rc_channel
-        # if name == JoyInterrupt.TAKEOFF_REQUEST:
-        self.ctx.joy_takeoff_request = self._last_rc_channel[InternalJoy.AUTO_TAKE_OFF] == RC_MAX
-        self.ctx.joy_manual_request = self._last_rc_channel[InternalJoy.MANUAL] == RC_MIN
-        self.ctx.arm_switch = self._last_rc_channel[InternalJoy.ARM] == RC_MAX
-        throttle_for_arm = self._last_rc_channel[InternalJoy.THROTTLE] < 1050
-        # if all([roll_for_arm, pitch_for_arm]):#, roll_for_arm, pitch_for_arm]):
-        if all([throttle_for_arm, self.ctx.arm_switch]):
-            # log.warning("Joystick arm request detected")
-            self.ctx.armed_allowed = True
-        elif all([not self.ctx.arm_switch, throttle_for_arm]):
-            # log.warning("Joystick disarm request detected")
-            self.ctx.armed_allowed = False
+        """Validate and publish the latest joystick snapshot to the context."""
+        try:
+            self.ctx.request_rc = InternalJoystick.from_channels(event.channels)
+        except ValueError as exc:
+            log.warning("Invalid joystick RC event; entering failsafe: {}", exc)
+            self._enter_joystick_failsafe()
 
-        self.ctx.joy_arm_requested = all([throttle_for_arm, self.ctx.armed_allowed])#, roll_for_arm, pitch_for_arm])
-        # end region
-
-        
-
-    
     def _enter_joystick_failsafe(self) -> None:
         """Clear stale joystick intent and request application failsafe."""
-        safe_channels = DEFAULT_RC_CHANNELS.copy()
-        self._last_rc_channel = safe_channels.copy()
-        self.ctx.request_rc = safe_channels
+        self.ctx.request_rc = InternalJoystick()
         self.ctx.joy_fail_safe = True
-        self.ctx.joy_takeoff_request = False
-        self.ctx.joy_manual_request = False
-        self.ctx.joy_arm_requested = False
-        self.ctx.armed_allowed = False
-        self.ctx.arm_switch = False
 
     def _joystick_fs_enter(self, event: NoCommunicationEvent):
         log.warning(
@@ -420,18 +385,18 @@ class App:
         
         # update alt setpoint
         controller.update_setpoint_from_throttle(
-            self.ctx.request_rc[InternalJoy.THROTTLE]
+            self.ctx.request_rc.throttle
         )
 
         # control yaw
         controller.update_yaw_from_joystick(
-            self.ctx.request_rc[InternalJoy.YAW]
+            self.ctx.request_rc.yaw
         )
 
         # TODO: add deadband ???
         # control pitch and yaw
-        pitch = self.ctx.request_rc[InternalJoy.PITCH]
-        roll = self.ctx.request_rc[InternalJoy.ROLL]
+        pitch = self.ctx.request_rc.pitch
+        roll = self.ctx.request_rc.roll
 
         controller.update_pitch_roll(pitch, roll)
 
@@ -480,7 +445,7 @@ class App:
         return rc
 
     def _manual_handler(self):
-        channels = self._last_rc_channel
+        channels = list(self.ctx.request_rc)
         if self.ctx.armed:
             channels[AETR1234.AUX1] = RC_MAX
             channels[AETR1234.AUX2] = RC_MAX

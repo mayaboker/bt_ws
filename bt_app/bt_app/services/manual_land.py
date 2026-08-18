@@ -1,4 +1,4 @@
-from bt_app.common import InternalJoy, RobotState
+from bt_app.common import RobotState
 from bt_app.context import Context
 from bt_app.control.land_detector import LandDetector
 from bt_app.parameters import Parameters
@@ -41,9 +41,8 @@ class ManualLandService:
         channels = self._context.request_rc
         return (
             self._context.state == RobotState.MANUAL
-            and not self._context.joy_manual_request
-            and len(channels) > int(InternalJoy.THROTTLE)
-            and channels[InternalJoy.THROTTLE] < 1050
+            and not channels.is_manual()
+            and channels.is_throttle_low()
         )
 
     def _on_parameter_changed(self, name: str, value: object) -> None:

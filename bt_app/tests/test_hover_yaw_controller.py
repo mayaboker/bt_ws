@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from bt_app.app import App
-from bt_app.common import AETR1234, MavSeverity, RobotState
+from bt_app.common import InternalJoystick, MavSeverity, RobotState
 from bt_app.context import Context
 from bt_app.control import hover_yaw_controller as hover_module
 from bt_app.control.hover_yaw_controller import HoverYawController
@@ -297,9 +297,7 @@ def test_hover_handler_updates_setpoint_from_requested_throttle():
     app.ctx.drone_vertical_speed = 0.3
     app.ctx.drone_alt_received_at_s = 123.0
     app.ctx.alt_setpoint = 5.0
-    app.ctx.request_rc = [1500] * 8
-    app.ctx.request_rc[AETR1234.THROTTLE] = 1800
-    app.ctx.request_rc[AETR1234.YAW] = 1700
+    app.ctx.request_rc = InternalJoystick(throttle=1800, yaw=1700)
     hover_controller = FakeHoverController()
     app.controllers = {RobotState.ALT_HOLD: hover_controller}
 
@@ -350,8 +348,7 @@ def test_hover_handler_sends_low_severity_text_when_setpoint_request_starts():
     app.ctx.state = RobotState.ALT_HOLD
     app.ctx.drone_alt = 4.2
     app.ctx.alt_setpoint = 5.0
-    app.ctx.request_rc = [1500] * 8
-    app.ctx.request_rc[AETR1234.THROTTLE] = 1800
+    app.ctx.request_rc = InternalJoystick(throttle=1800)
     app.controllers = {RobotState.ALT_HOLD: FakeHoverController()}
     app.services = SimpleNamespace(mavlink=FakeMavlinkService())
 

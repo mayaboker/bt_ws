@@ -1,5 +1,6 @@
 from enum import IntEnum, auto, StrEnum
 from bt_app.common.event import Event
+from bt_app.common.joystick import InternalJoystick
 from bt_app.common.mavlink import MavSeverity
 
 TREE_TICK_INTERVAL_S = 0.1
@@ -18,19 +19,6 @@ NO_RC_CHANNELS = 8
 class JoyInterrupt(StrEnum):
     TAKEOFF_REQUEST = "takeoff_request"
     MANUAL_REQUEST = "manual_request"
-
-
-class InternalJoy(IntEnum):
-    """
-        roll, pitch, throttle, yaw
-    """
-    ROLL= 0
-    PITCH = auto()
-    THROTTLE = auto()
-    YAW = auto()
-    ARM = auto() # SE(4)
-    MANUAL = auto() # SA(5)
-    AUTO_TAKE_OFF = auto() # SD(6)
 
 class AETR1234(IntEnum):
     """
@@ -88,5 +76,6 @@ __all__ = [
     "ZMQ_ULTRASONIC_LIDAR_TOPIC",
     "ZMQ_TRACKER_RESULT_ENDPOINT",
     "ZMQ_TRACKER_RESULT_TOPIC",
+    "InternalJoystick",
     "RobotState"
 ]

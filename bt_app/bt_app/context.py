@@ -5,7 +5,7 @@ The context is a singleton class that holds the current state of the drone. It i
 from bt_app.common import RobotState
 from dataclasses import dataclass, field
 from typing import ClassVar
-from bt_app.common import InternalJoy
+from bt_app.common import InternalJoystick
 
 DEFAULT_RC_CHANNELS = [1500, 1500, 1000, 1500, 1000, 1000, 1000, 1000]
 
@@ -13,20 +13,12 @@ DEFAULT_RC_CHANNELS = [1500, 1500, 1000, 1500, 1000, 1000, 1000, 1000]
 class Context:
     # current state machine state update when state changed
     state: RobotState = field(default=RobotState.IDLE)
-    joy_takeoff_request: bool = field(default=False)
-    joy_manual_request: bool = field(default=False)
-    # true: if joy request arm combination, reset when disarmed or arm failed
-    joy_arm_requested: bool = field(default=False)
     # drone state arm disabled update at 1hz
     arming_disable_flags: list = field(default_factory=list)
     # drone state - if drone can armed update at 1hz
     armable: bool = field(default=False)
     # is drone armed update 1hz
     armed: bool = field(default=False)
-    # flag true: if we make the arm sequence
-    armed_allowed: bool = field(default=False)
-    arm_switch: bool = field(default=False)
-
     # joystick network connection lost, if true enter failsafe
     joy_fail_safe: bool = field(default=False)
     take_control: bool = field(default=False)
@@ -45,15 +37,12 @@ class Context:
     drone_heading_deg: float = 0.0
     #current rc read from drone (use to switch between external and internal pilot and controller switch)
     drone_rc: list = field(default_factory=lambda: DEFAULT_RC_CHANNELS.copy())
-    # last joystick rc state
-    request_rc: list = field(default_factory=lambda: DEFAULT_RC_CHANNELS.copy())
+    # last validated joystick input snapshot
+    request_rc: InternalJoystick = field(default_factory=InternalJoystick)
     sent_rc: list = field(default_factory=lambda: DEFAULT_RC_CHANNELS.copy())
     battery_voltage: float = 0.0
     # altitude request setpoint use (takeoff, alt_hold)
     alt_setpoint: float = 0.0
-
-    def is_low_throttle(self):
-        return self.request_rc[InternalJoy.THROTTLE] < 1050
 
     # region singleton
     _instance: ClassVar["Context | None"] = None
@@ -69,13 +58,9 @@ class Context:
             return
 
         self.state = RobotState.IDLE
-        self.joy_takeoff_request = False
-        self.joy_manual_request = False
-        self.joy_arm_requested = False
         self.arming_disable_flags = []
         self.armable = False
         self.armed = False
-        self.armed_allowed = False
         self.joy_fail_safe = False
         self.take_control = False
         self.auto_arm = False
@@ -88,7 +73,7 @@ class Context:
         self.drone_pitch_deg = 0.0
         self.drone_heading_deg = 0.0
         self.drone_rc = DEFAULT_RC_CHANNELS.copy()
-        self.request_rc = DEFAULT_RC_CHANNELS.copy()
+        self.request_rc = InternalJoystick()
         self.sent_rc = DEFAULT_RC_CHANNELS.copy()
         self.battery_voltage = 0.0
         self._initialized = True

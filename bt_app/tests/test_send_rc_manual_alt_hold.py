@@ -22,7 +22,7 @@ from send_rc import (  # noqa: E402
     RC_MIN,
     THROTTLE,
 )
-from bt_app.common import AETR1234, RobotState  # noqa: E402
+from bt_app.common import InternalJoystick, RobotState  # noqa: E402
 from bt_app.context import Context  # noqa: E402
 from bt_app.sm import Robot_StateMachine  # noqa: E402
 from bt_app.vehicle_config import VehicleConfig  # noqa: E402
@@ -107,14 +107,12 @@ def test_centered_alt_hold_request_passes_manual_transition_guard():
     ctx = Context()
     ctx.state = RobotState.MANUAL
     ctx.armed = True
-    ctx.joy_manual_request = False
-    ctx.joy_takeoff_request = False
     ctx.joy_fail_safe = False
-    ctx.request_rc = list(ALT_HOLD_ARMED)
+    ctx.request_rc = InternalJoystick(*ALT_HOLD_ARMED)
     machine = Robot_StateMachine(ctx, VehicleConfig())
     machine.machine.set_state(RobotState.MANUAL)
 
     machine.resolve()
 
-    assert ctx.request_rc[AETR1234.THROTTLE] > 1050
+    assert ctx.request_rc.throttle > 1050
     assert ctx.state == RobotState.ALT_HOLD

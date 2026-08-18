@@ -32,18 +32,18 @@ with logical AND unless stated otherwise.
 
 | From | To | Guard | Conditions |
 | --- | --- | --- | --- |
-| `IDLE` | `ARM` | `enter_arm` | (`joy_takeoff_request` OR `joy_manual_request`) and `armable` and not `armed` and `joy_arm_requested` |
-| `ARM` | `MANUAL` | `enter_manual_mode_from_arm` | `armed` and `joy_manual_request` |
-| `MANUAL` | `TAKEOFF` | `enter_takeoff_from_manual` | `armed` and `joy_takeoff_request` and `drone_alt < alt_setpoint` |
+| `IDLE` | `ARM` | `enter_arm` | manual or auto-takeoff selected, ARM high, throttle below 1050, `armable`, and not `armed` |
+| `ARM` | `MANUAL` | `enter_manual_mode_from_arm` | `armed` and manual selected |
+| `MANUAL` | `TAKEOFF` | `enter_takeoff_from_manual` | `armed`, auto-takeoff selected, and `drone_alt < alt_setpoint` |
 | `MANUAL` | `FAILSAFE` | `enter_failsafe` | `armed` and `joy_fail_safe` |
-| `MANUAL` | `IDLE` | `enter_idle_from_manual` | `joy_manual_request` and not `arm_switch` and low throttle |
-| `MANUAL` | `ALT_HOLD` | `enter_hover_from_manual` | requested throttle > 1050 and not `joy_manual_request` and `armed` |
+| `MANUAL` | `IDLE` | `enter_idle_from_manual` | manual selected, ARM off, and throttle below 1050 |
+| `MANUAL` | `ALT_HOLD` | `enter_hover_from_manual` | throttle above 1050, manual not selected, and `armed` |
 | `TAKEOFF` | `ALT_HOLD` | `enter_hover_from_takeoff` | `takeoff_reach` |
-| `TAKEOFF` | `MANUAL` | `enter_manual_from_takeoff` | `armed` and `joy_manual_request` and not `joy_takeoff_request` |
+| `TAKEOFF` | `MANUAL` | `enter_manual_from_takeoff` | `armed`, manual selected, and auto-takeoff not selected |
 | `ALT_HOLD` | `FAILSAFE` | `enter_failsafe` | `armed` and `joy_fail_safe` |
-| `ALT_HOLD` | `MANUAL` | `enter_manual_mode_from_hover` | `joy_manual_request` and `armed` |
+| `ALT_HOLD` | `MANUAL` | `enter_manual_mode_from_hover` | manual selected and `armed` |
 | `FAILSAFE` | `ALT_HOLD` | `exit_failsafe` | `armed` and not `joy_fail_safe` |
-| `FAILSAFE` | `IDLE` | `exit_failsafe_to_idle` | not `joy_fail_safe`, not `joy_manual_request`, and not `joy_takeoff_request` |
+| `FAILSAFE` | `IDLE` | `exit_failsafe_to_idle` | failsafe cleared, manual not selected, and auto-takeoff not selected |
 
 For states with multiple outgoing transitions, registration order determines
 priority when more than one guard is true:
@@ -59,7 +59,7 @@ priority when more than one guard is true:
 stateDiagram-v2
     [*] --> IDLE
 
-    IDLE --> ARM: arm/manual request\narmable, disarmed, arm gesture
+    IDLE --> ARM: manual/takeoff selected\narmable, disarmed, ARM high, throttle low
     ARM --> MANUAL: armed and manual requested
 
     MANUAL --> TAKEOFF: armed, takeoff requested\nbelow altitude setpoint
@@ -80,19 +80,18 @@ stateDiagram-v2
 
 ## Guard Context
 
-The guards read these `Context` values:
+The guards read these `Context` values. Joystick positions come from the single
+immutable `request_rc: InternalJoystick` snapshot:
 
 | Field or method | Meaning in the state machine |
 | --- | --- |
 | `armed` | The vehicle/controller is considered armed. |
 | `armable` | The vehicle currently permits arming. |
-| `arm_switch` | The arm switch used when deciding whether manual mode may return to `IDLE`. |
-| `joy_arm_requested` | The operator completed the arm request/gesture. |
-| `joy_manual_request` | Manual mode is requested. |
-| `joy_takeoff_request` | Automatic takeoff is requested. |
 | `joy_fail_safe` | Joystick failsafe is active. |
-| `request_rc[THROTTLE]` | Requested throttle; values above 1050 allow `MANUAL -> ALT_HOLD`. |
-| `is_low_throttle()` | Returns whether requested joystick throttle is below 1050. |
+| `request_rc.is_armed()` | The joystick ARM switch is high. |
+| `request_rc.is_manual()` | Manual mode is selected. |
+| `request_rc.is_auto_takeoff()` | Automatic takeoff is selected. |
+| `request_rc.is_throttle_low()` | Requested throttle is below 1050. |
 | `drone_alt` / `alt_setpoint` | Current and requested altitude used to admit takeoff. |
 | `takeoff_reach` | The takeoff controller has remained at its target long enough to enter `ALT_HOLD`. |
 
@@ -104,13 +103,11 @@ The guards read these `Context` values:
 - Before entering `TAKEOFF`, it resets the takeoff controller.
 - Before entering `MANUAL`, it resets the manual landing detector.
 - Before entering `IDLE`, it resets the arm and takeoff controllers and clears
-  arming/takeoff state.
+  vehicle arming state.
 - Before entering `ALT_HOLD`, it initializes the altitude setpoint from the
   current altitude and applies the hover throttle baseline.
 - Before entering `FAILSAFE`, it initializes the failsafe controller from the
   current altitude and applies the hover throttle baseline.
-- After `MANUAL -> FAILSAFE`, it clears `joy_manual_request`, requiring the
-  operator to request manual mode again.
 
 ## Current Limitations
 
@@ -120,5 +117,5 @@ The guards read these `Context` values:
   from `ARM` or `TAKEOFF`.
 - `RECOVERY` is declared but not connected.
 - Landing confirmation is not part of `MANUAL -> IDLE`; the guard relies on
-  manual request, arm switch, and low throttle.
+  the manual selection, ARM switch, and low throttle from `request_rc`.
 - The failsafe exit guards do not yet include an airborne/landed check.

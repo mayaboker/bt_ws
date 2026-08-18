@@ -1,6 +1,7 @@
 import pytest
 
-from bt_app.common import AETR1234, RobotState
+from bt_app.common import InternalJoystick, RobotState
+from bt_app.msp.bt_v2 import RC_MID, RC_MIN
 from bt_app.context import Context
 from bt_app.parameters.generated import ParameterKey
 from bt_app.services import ManualLandService
@@ -50,12 +51,16 @@ class FakeDetector:
 def make_context():
     context = Context()
     context.state = RobotState.MANUAL
-    context.joy_manual_request = False
     context.drone_alt = 0.1
     context.drone_vertical_speed = 0.02
     context.manual_land_confirmed = False
-    context.request_rc = [1500] * 8
-    context.request_rc[AETR1234.THROTTLE] = 1000
+    context.request_rc = InternalJoystick(
+        roll=RC_MID,
+        pitch=RC_MID,
+        throttle=RC_MIN,
+        yaw=RC_MID,
+        manual=RC_MID,
+    )
     return context
 
 
@@ -78,9 +83,12 @@ def test_update_sets_context_from_detector_result():
     "deactivate",
     [
         lambda context: setattr(context, "state", RobotState.ALT_HOLD),
-        lambda context: setattr(context, "joy_manual_request", True),
-        lambda context: context.request_rc.__setitem__(AETR1234.THROTTLE, 1500),
-        lambda context: setattr(context, "request_rc", []),
+        lambda context: setattr(
+            context, "request_rc", context.request_rc._replace(manual=RC_MIN)
+        ),
+        lambda context: setattr(
+            context, "request_rc", context.request_rc._replace(throttle=RC_MID)
+        ),
     ],
 )
 def test_inactive_or_malformed_input_resets(deactivate):

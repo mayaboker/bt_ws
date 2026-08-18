@@ -228,15 +228,15 @@ Verification:
 Locations: `bt_app/bt_app/app.py`, `App.__handle_joy_rc()`,
 `App._joystick_fs_enter()`, and `App.__joystick_fs_exit()`.
 
-Joystick input changes multiple control flags without recording their edges,
-making it difficult to determine why the state machine moved or refused to
-move.
+Joystick input changes the immutable `Context.request_rc` snapshot without
+recording meaningful control edges, making it difficult to determine why the
+state machine moved or refused to move.
 
 Required changes:
 
 - Log manual, takeoff, and mode-request changes at `INFO`.
 - Log arm-switch changes at `INFO`.
-- Log derived `armed_allowed` and `joy_arm_requested` changes at `DEBUG`.
+- Log low-throttle arming eligibility changes at `DEBUG`.
 - Log raw joystick channels at rate-limited `TRACE`.
 - Keep failsafe entry at `WARNING`.
 - Change successful communication recovery from `WARNING` to `INFO`.

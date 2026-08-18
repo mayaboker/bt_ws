@@ -5,8 +5,8 @@ import pytest
 import bt_app.control.rc_channel_override as override_module
 from bt_app.app import App
 from bt_app.app_services import AppServices
-from bt_app.common import RobotState
-from bt_app.context import Context, DEFAULT_RC_CHANNELS
+from bt_app.common import InternalJoystick, RobotState
+from bt_app.context import Context
 from bt_app.control.rc_channel_override import (
     MavlinkListenerError,
     MavlinkListenerService,
@@ -384,12 +384,12 @@ def test_joystick_timeout_clears_stale_requests_and_enters_failsafe():
     app = App.__new__(App)
     app.ctx = Context()
     app.ctx.armed = True
-    app.ctx.armed_allowed = True
-    app.ctx.joy_arm_requested = True
-    app.ctx.joy_takeoff_request = True
-    app.ctx.joy_manual_request = True
-    app.ctx.arm_switch = True
-    app._last_rc_channel = [1900] * 8
+    app.ctx.request_rc = InternalJoystick(
+        throttle=1000,
+        arm=2000,
+        manual=2000,
+        auto_takeoff=2000,
+    )
     app.robot_sm = Robot_StateMachine(app.ctx, VehicleConfig())
     app.robot_sm.machine.set_state(RobotState.MANUAL)
     app.ctx.state = RobotState.MANUAL
@@ -405,30 +405,66 @@ def test_joystick_timeout_clears_stale_requests_and_enters_failsafe():
 
     assert app.ctx.state == RobotState.FAILSAFE
     assert app.ctx.joy_fail_safe is True
-    assert app.ctx.armed_allowed is False
-    assert app.ctx.joy_arm_requested is False
-    assert app.ctx.joy_takeoff_request is False
-    assert app.ctx.joy_manual_request is False
-    assert app.ctx.arm_switch is False
-    assert app.ctx.request_rc == DEFAULT_RC_CHANNELS
-    assert app._last_rc_channel == DEFAULT_RC_CHANNELS
+    assert app.ctx.request_rc == InternalJoystick()
 
 
 def test_runtime_listener_failure_uses_same_joystick_failsafe_path():
     app = App.__new__(App)
     app.ctx = Context()
-    app.ctx.joy_arm_requested = True
-    app.ctx.armed_allowed = True
-    app._last_rc_channel = [1900] * 8
+    app.ctx.request_rc = InternalJoystick(arm=2000, manual=2000)
 
     app._joystick_listener_failed(
         MavlinkListenerError("receive failed", ConnectionError())
     )
 
     assert app.ctx.joy_fail_safe is True
-    assert app.ctx.joy_arm_requested is False
-    assert app.ctx.armed_allowed is False
-    assert app.ctx.request_rc == DEFAULT_RC_CHANNELS
+    assert app.ctx.request_rc == InternalJoystick()
+
+
+def test_valid_rc_event_updates_the_context_snapshot():
+    app = App.__new__(App)
+    app.ctx = Context()
+    channels = (1500, 1500, 1000, 1500, 2000, 1000, 1000, *([0] * 11))
+    event = RcChannelsOverrideEvent(
+        channels=channels,
+        target_system=1,
+        target_component=1,
+        source_system=2,
+        source_component=2,
+        received_at=1.0,
+    )
+
+    app._App__handle_joy_rc(event)
+
+    assert app.ctx.request_rc.arm == 2000
+    assert app.ctx.request_rc.reserved_18 == 1000
+    assert app.ctx.joy_fail_safe is False
+
+
+@pytest.mark.parametrize(
+    "channels",
+    [
+        (1500,) * 17,
+        (0, 1500, 1000, 1500, 1000, 1000, 1000, *([0] * 11)),
+    ],
+)
+def test_invalid_rc_event_enters_failsafe_without_raising(channels):
+    app = App.__new__(App)
+    app.ctx = Context()
+    app.ctx.request_rc = InternalJoystick(arm=2000)
+    event = RcChannelsOverrideEvent(
+        channels=channels,
+        target_system=1,
+        target_component=1,
+        source_system=2,
+        source_component=2,
+        received_at=1.0,
+    )
+
+    app._App__handle_joy_rc(event)
+
+    assert app.ctx.joy_fail_safe is True
+    assert app.ctx.request_rc == InternalJoystick()
 
 
 def test_service_start_converts_listener_start_failure():
