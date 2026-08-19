@@ -155,3 +155,39 @@ parameters:
     limits:
       min: 1.0
       max: 1000.0
+  CAM_FX_PX:
+    type: float
+    default: 320.0
+    limits: {min: 1.0, max: 10000.0}
+  CAM_FY_PX:
+    type: float
+    default: 320.0
+    limits: {min: 1.0, max: 10000.0}
+  CAM_CX_PX:
+    type: float
+    default: 320.0
+    limits: {min: 0.0, max: 10000.0}
+  CAM_CY_PX:
+    type: float
+    default: 240.0
+    limits: {min: 0.0, max: 10000.0}
+  CAM_WIDTH_PX:
+    type: int
+    default: 640
+    limits: {min: 1, max: 10000}
+  CAM_HEIGHT_PX:
+    type: int
+    default: 480
+    limits: {min: 1, max: 10000}
+  OBJ_WIDTH_M:
+    type: float
+    default: 1.0
+    limits: {min: 0.001, max: 1000.0}
+  OBJ_HEIGHT_M:
+    type: float
+    default: 1.0
+    limits: {min: 0.001, max: 1000.0}
+  VIS_SPEED_MPS:
+    type: float
+    default: 5.0
+    limits: {min: 0.01, max: 100.0}

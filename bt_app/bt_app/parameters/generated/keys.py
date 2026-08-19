@@ -33,6 +33,15 @@ class ParameterKey:
     HY_DEADBAND: Final[Literal['HY_DEADBAND']] = 'HY_DEADBAND'
     HY_EXPO: Final[Literal['HY_EXPO']] = 'HY_EXPO'
     BF_YAW_RATE: Final[Literal['BF_YAW_RATE']] = 'BF_YAW_RATE'
+    CAM_FX_PX: Final[Literal['CAM_FX_PX']] = 'CAM_FX_PX'
+    CAM_FY_PX: Final[Literal['CAM_FY_PX']] = 'CAM_FY_PX'
+    CAM_CX_PX: Final[Literal['CAM_CX_PX']] = 'CAM_CX_PX'
+    CAM_CY_PX: Final[Literal['CAM_CY_PX']] = 'CAM_CY_PX'
+    CAM_WIDTH_PX: Final[Literal['CAM_WIDTH_PX']] = 'CAM_WIDTH_PX'
+    CAM_HEIGHT_PX: Final[Literal['CAM_HEIGHT_PX']] = 'CAM_HEIGHT_PX'
+    OBJ_WIDTH_M: Final[Literal['OBJ_WIDTH_M']] = 'OBJ_WIDTH_M'
+    OBJ_HEIGHT_M: Final[Literal['OBJ_HEIGHT_M']] = 'OBJ_HEIGHT_M'
+    VIS_SPEED_MPS: Final[Literal['VIS_SPEED_MPS']] = 'VIS_SPEED_MPS'
 
 
 ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
@@ -62,4 +71,13 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'HY_DEADBAND',
     'HY_EXPO',
     'BF_YAW_RATE',
+    'CAM_FX_PX',
+    'CAM_FY_PX',
+    'CAM_CX_PX',
+    'CAM_CY_PX',
+    'CAM_WIDTH_PX',
+    'CAM_HEIGHT_PX',
+    'OBJ_WIDTH_M',
+    'OBJ_HEIGHT_M',
+    'VIS_SPEED_MPS',
 )

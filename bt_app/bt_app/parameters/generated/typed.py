@@ -121,3 +121,39 @@ class TypedParameters:
     @property
     def bf_yaw_rate(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.BF_YAW_RATE))
+
+    @property
+    def cam_fx_px(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.CAM_FX_PX))
+
+    @property
+    def cam_fy_px(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.CAM_FY_PX))
+
+    @property
+    def cam_cx_px(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.CAM_CX_PX))
+
+    @property
+    def cam_cy_px(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.CAM_CY_PX))
+
+    @property
+    def cam_width_px(self) -> int:
+        return cast(int, self._parameters.get(ParameterKey.CAM_WIDTH_PX))
+
+    @property
+    def cam_height_px(self) -> int:
+        return cast(int, self._parameters.get(ParameterKey.CAM_HEIGHT_PX))
+
+    @property
+    def obj_width_m(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.OBJ_WIDTH_M))
+
+    @property
+    def obj_height_m(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.OBJ_HEIGHT_M))
+
+    @property
+    def vis_speed_mps(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.VIS_SPEED_MPS))

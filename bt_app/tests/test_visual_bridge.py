@@ -91,7 +91,7 @@ def test_visual_target_comm_surfaces_startup_failure():
         comm.stop()
 
 
-def test_visual_bridge_manager_owns_comm_and_logs_result(monkeypatch):
+def test_visual_bridge_manager_owns_comm_and_dispatches_result(monkeypatch):
     calls = []
 
     class FakeComm:
@@ -108,28 +108,51 @@ def test_visual_bridge_manager_owns_comm_and_logs_result(monkeypatch):
             self.is_running = False
             calls.append(("stop",))
 
-    class FakeLog:
-        def info(self, message, *args):
-            calls.append(("log", message, args))
-
     monkeypatch.setattr(manager_module, "VisualTargetComm", FakeComm)
-    monkeypatch.setattr(manager_module, "log", FakeLog())
 
     manager = VisualBridgeManager("tcp://127.0.0.1:6000")
+    received = []
+    manager.subscribe(received.append)
     manager.start()
-    manager._comm.on_result(TrackerResultMessage(frame_id=8, timestamp_ns=900))
+    message = TrackerResultMessage(frame_id=8, timestamp_ns=900)
+    manager._comm.on_result(message)
 
     assert manager.is_running
     assert calls == [
         ("init", "tcp://127.0.0.1:6000"),
         ("start",),
-        (
-            "log",
-            "Incoming tracker result frame_id={} timestamp_ns={}",
-            (8, 900),
-        ),
     ]
+    assert received == [message]
 
+    manager.unsubscribe(received.append)
     manager.stop()
     assert not manager.is_running
     assert calls[-1] == ("stop",)
+
+
+def test_visual_bridge_manager_isolates_subscriber_failure(monkeypatch):
+    class FakeComm:
+        def __init__(self, *, endpoint, on_result):
+            self.on_result = on_result
+            self.is_running = False
+
+        def start(self):
+            self.is_running = True
+
+        def stop(self):
+            self.is_running = False
+
+    monkeypatch.setattr(manager_module, "VisualTargetComm", FakeComm)
+    manager = VisualBridgeManager("tcp://127.0.0.1:6000")
+    received = []
+
+    def fail(_message):
+        raise RuntimeError("consumer failed")
+
+    manager.subscribe(fail)
+    manager.subscribe(received.append)
+    message = TrackerResultMessage(frame_id=9, timestamp_ns=None)
+
+    manager._comm.on_result(message)
+
+    assert received == [message]
