@@ -39,8 +39,12 @@ def main() -> int:
                 print(f"Ignored invalid message: {exc}")
                 continue
             print(
-                f"frame_id={message.frame_id} "
-                f"timestamp={message.timestamp}"
+                f"tracker_id={message.tracker_id} frame_id={message.frame_id} "
+                f"timestamp_ns={message.timestamp_ns} locked={message.locked} "
+                f"bbox=({message.bbox_x},{message.bbox_y},"
+                f"{message.bbox_width},{message.bbox_height}) "
+                f"score={message.score} state={message.state} "
+                f"delta=({message.dx},{message.dy})"
             )
     except KeyboardInterrupt:
         print("Stopped")

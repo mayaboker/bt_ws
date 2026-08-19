@@ -26,7 +26,7 @@ class VisualBridgeManager:
     @staticmethod
     def _on_tracker_result(message: TrackerResultMessage) -> None:
         log.info(
-            "Incoming tracker result frame_id={} timestamp={}",
+            "Incoming tracker result frame_id={} timestamp_ns={}",
             message.frame_id,
-            message.timestamp,
+            message.timestamp_ns,
         )

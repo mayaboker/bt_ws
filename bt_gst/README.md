@@ -56,6 +56,8 @@ preview and stream include the detected bounding box.
 
 When `zmq.enabled` is true, each detector frame supplies a
 `bt_msgs.TrackerResultMessage` to a background publisher. It contains the frame
-ID and GStreamer PTS. The publisher sends only the latest result on the
-configured PUB endpoint at no more than `zmq.max_rate_hz`, without doing
-serialization or socket work on the GStreamer streaming thread.
+ID, GStreamer PTS in nanoseconds, detection lock, and bounding box, plus generic
+tracker fields with explicit placeholder values. The publisher sends only the
+latest result on the configured PUB endpoint at no more than
+`zmq.max_rate_hz`, without doing serialization or socket work on the GStreamer
+streaming thread.

@@ -1,9 +1,8 @@
 # Red Detection to ZMQ Publication Flow
 
 This document describes the current `bt_gst` implementation. The red detector
-adds bounding-box metadata to every video buffer, while the ZMQ publisher
-currently sends only the buffer's frame ID and presentation timestamp. Red
-detection fields are not on the ZMQ wire yet.
+adds bounding-box metadata to every video buffer, and the ZMQ publisher copies
+that detection into the generic tracker-result wire message.
 
 The design keeps MessagePack encoding and all socket operations away from the
 GStreamer streaming thread so a slow or disconnected subscriber cannot stall
@@ -23,7 +22,7 @@ flowchart LR
     RTP[H.264 RTP/UDP branch]
     Preview[Optional local preview]
 
-    Message[TrackerResultMessage<br/>frame_id + timestamp]
+    Message[TrackerResultMessage<br/>frame, lock, bbox + placeholders]
     Latest[Single latest-message slot]
     Worker[ZMQ publisher thread<br/>rate limited]
     Pub[ZMQ PUB socket]
@@ -64,13 +63,16 @@ sequenceDiagram
     participant SUB as ZMQ subscriber
 
     GST->>Probe: Buffer reaches detector src pad
-    Probe->>Probe: Read buffer PTS
     Probe->>Probe: Allocate next frame_id
-    opt Overlay enabled
-        Probe->>Probe: Read GstRedDetectionMeta
+    Probe->>Probe: Read GstRedDetectionMeta once
+    alt Metadata present
+        opt Overlay enabled
         Probe->>Probe: Update thread-safe overlay state
+        end
+        Probe->>Slot: Replace pending TrackerResultMessage
+    else Metadata absent
+        Probe->>Probe: Rate-limited warning; skip publication
     end
-    Probe->>Slot: Replace pending TrackerResultMessage
     Probe-->>GST: PadProbeReturn.OK
 
     Note over Probe,Slot: No pixel copy, MessagePack encoding, or socket call
@@ -83,15 +85,17 @@ sequenceDiagram
 
 For every non-null buffer, the publication side of the probe performs only:
 
-1. `int(buffer.pts)` and normalization of `GST_CLOCK_TIME_NONE` to `None`.
-2. `next(frame_ids)`, where IDs start at 1 for each pipeline run.
-3. Construction of an immutable `TrackerResultMessage`.
+1. `next(frame_ids)`, where IDs start at 1 for each pipeline run.
+2. One read of the buffer's scalar detector metadata and PTS.
+3. Construction of an immutable slots `TrackerResultMessage`.
 4. Replacement of `_pending_message` while holding a short-lived condition
    lock, followed by a worker notification.
 
 The probe never passes a `Gst.Buffer` or `GstCustomMeta` to another thread. If
 GStreamer provides no buffer, no frame ID is consumed and no message is
-published.
+published. If a real buffer lacks detector metadata, its frame ID is consumed,
+publication is skipped, and a warning is emitted at most once every five
+seconds. Explicit metadata with `found=false` publishes a valid unlocked result.
 
 ## Latest-value and rate-limit behavior
 
@@ -125,7 +129,17 @@ pending frames.
 ```python
 TrackerResultMessage(
     frame_id=42,
-    timestamp=123456789,
+    timestamp_ns=123456789,
+    tracker_id=0,
+    locked=True,
+    bbox_x=10,
+    bbox_y=20,
+    bbox_width=30,
+    bbox_height=40,
+    score=0.0,
+    state=0,
+    dx=0,
+    dy=0,
 )
 ```
 
@@ -133,17 +147,34 @@ Wire mapping:
 
 ```python
 {
+    "tracker_id": 0,
     "frame_id": 42,
-    "timestamp": 123456789,
+    "timestamp_ns": 123456789,
+    "locked": True,
+    "bbox_x": 10,
+    "bbox_y": 20,
+    "bbox_width": 30,
+    "bbox_height": 40,
+    "score": 0.0,
+    "state": 0,
+    "dx": 0,
+    "dy": 0,
 }
 ```
 
-`timestamp` is the buffer's GStreamer PTS in nanoseconds, or `None` when the
+`timestamp_ns` is the buffer's GStreamer PTS in nanoseconds, or `None` when the
 buffer has no valid PTS. It is media time, not Unix wall-clock time, and may
 restart when a pipeline restarts or a file is seeked.
 
-The existing `bt_app` red-detection subscriber ignores this basic message
-because it has no `type: "red-detection"` field.
+The current red detector maps `found` to `locked` and copies its bounding box.
+It uses zero placeholders for tracker ID, score, state, and deltas because it
+does not yet compute those generic tracker values. State `0` means unknown.
+
+The codec uses an explicit map rather than `dataclasses.asdict()` so internal
+fields cannot accidentally enter the protocol. A local 12-field microbenchmark
+measured about 1.19 microseconds and 105 bytes for the map versus 0.81
+microseconds and 21 bytes for a positional array. At 30 Hz this difference is
+negligible; named keys provide safer schema evolution.
 
 ## ZMQ ownership and lifecycle
 
@@ -235,25 +266,24 @@ bt_gst/.venv/bin/python bt_gst/scripts/listen_zmq.py
 Example output:
 
 ```text
-frame_id=42 timestamp=123456789
-frame_id=43 timestamp=156790122
+tracker_id=0 frame_id=42 timestamp_ns=123456789 locked=True bbox=(10,20,30,40) score=0.0 state=0 delta=(0,0)
+tracker_id=0 frame_id=43 timestamp_ns=156790122 locked=False bbox=(0,0,0,0) score=0.0 state=0 delta=(0,0)
 ```
 
 ## Known limitations from the code review
 
-- The ZMQ message does not contain `found` or bounding-box fields yet. Those
-  values are used only by the optional Cairo overlay.
-- An unexpected exception outside the handled ZMQ send errors—for example, an
-  unexpected encoding failure—terminates the daemon publisher thread. The
-  pipeline currently has no worker-health signal and would continue running
-  without publishing further messages.
+- The red detector does not yet produce a tracker ID, normalized score, tracker
+  state, or center-relative deltas, so those fields contain documented zeros.
+- Encoding failures are logged and drop only the affected result; the publisher
+  worker continues. Unexpected exceptions outside the handled codec and ZMQ
+  boundaries can still terminate the daemon publisher thread.
 - `publish()` silently accepts and replaces messages even if the worker has
   already terminated unexpectedly; only normal startup and shutdown failures
   are surfaced to the pipeline runner.
 - PUB/SUB intentionally favors freshness over reliability. There is no
   backpressure, retry, history, or subscriber-presence detection.
 
-## Adding red-detection fields later
+## Extending tracker fields later
 
 When `TrackerResultMessage` is extended, preserve the current performance
 boundary:

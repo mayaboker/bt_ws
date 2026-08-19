@@ -21,7 +21,11 @@ from bt_gst.config import (
     validate_config,
 )
 from bt_gst.pipeline_builder import build_pipeline_description
-from bt_gst.pipeline_runner import _on_detection_overlay_draw, _on_detector_buffer
+from bt_gst.pipeline_runner import (
+    _WarningRateLimiter,
+    _on_detection_overlay_draw,
+    _on_detector_buffer,
+)
 from bt_gst.red_detection import (
     GST_CLOCK_TIME_NONE,
     DetectionOverlayState,
@@ -157,25 +161,39 @@ def test_detection_overlay_draws_matching_detection() -> None:
 
 
 class FakeStructure:
-    def __init__(self) -> None:
-        self.values = {"found": True, "x": 1, "y": 2, "width": 3, "height": 4}
+    def __init__(self, found: bool = True) -> None:
+        self.values = {
+            "found": found,
+            "x": 1 if found else 0,
+            "y": 2 if found else 0,
+            "width": 3 if found else 0,
+            "height": 4 if found else 0,
+        }
 
     def get_value(self, name: str) -> object:
         return self.values[name]
 
 
 class FakeMeta:
+    def __init__(self, found: bool = True) -> None:
+        self.found = found
+
     def get_structure(self) -> FakeStructure:
-        return FakeStructure()
+        return FakeStructure(self.found)
 
 
 class FakeBuffer:
-    def __init__(self, pts: int, has_meta: bool = True) -> None:
+    def __init__(
+        self, pts: int, has_meta: bool = True, found: bool = True
+    ) -> None:
         self.pts = pts
         self.has_meta = has_meta
+        self.found = found
+        self.meta_reads = 0
 
     def get_custom_meta(self, _name: str) -> FakeMeta | None:
-        return FakeMeta() if self.has_meta else None
+        self.meta_reads += 1
+        return FakeMeta(self.found) if self.has_meta else None
 
 
 def test_read_red_detection_handles_timestamp_and_missing_meta() -> None:
@@ -208,17 +226,35 @@ class FakeGst:
 def test_detector_probe_updates_overlay_and_only_notifies_publisher() -> None:
     overlay_state = DetectionOverlayState()
     publisher = FakePublisher()
+    buffer = FakeBuffer(123)
 
     result = _on_detector_buffer(
         None,
-        FakeProbeInfo(FakeBuffer(123)),
-        (overlay_state, publisher, iter(range(1, 100)), FakeGst),
+        FakeProbeInfo(buffer),
+        (
+            overlay_state,
+            publisher,
+            iter(range(1, 100)),
+            _WarningRateLimiter(),
+            FakeGst,
+        ),
     )
 
     assert overlay_state.detection_for_timestamp(123) == RedDetection(
         True, 1, 2, 3, 4, 123
     )
-    assert publisher.messages == [TrackerResultMessage(frame_id=1, timestamp=123)]
+    assert publisher.messages == [
+        TrackerResultMessage(
+            frame_id=1,
+            timestamp_ns=123,
+            locked=True,
+            bbox_x=1,
+            bbox_y=2,
+            bbox_width=3,
+            bbox_height=4,
+        )
+    ]
+    assert buffer.meta_reads == 1
     assert result is FakeGst.PadProbeReturn.OK
 
 
@@ -229,18 +265,81 @@ def test_detector_probe_publishes_sequential_frame_messages() -> None:
     _on_detector_buffer(
         None,
         FakeProbeInfo(FakeBuffer(100)),
-        (None, publisher, frame_ids, FakeGst),
+        (None, publisher, frame_ids, _WarningRateLimiter(), FakeGst),
     )
     _on_detector_buffer(
         None,
         FakeProbeInfo(FakeBuffer(GST_CLOCK_TIME_NONE)),
-        (None, publisher, frame_ids, FakeGst),
+        (None, publisher, frame_ids, _WarningRateLimiter(), FakeGst),
     )
 
     assert publisher.messages == [
-        TrackerResultMessage(frame_id=1, timestamp=100),
-        TrackerResultMessage(frame_id=2, timestamp=None),
+        TrackerResultMessage(
+            frame_id=1,
+            timestamp_ns=100,
+            locked=True,
+            bbox_x=1,
+            bbox_y=2,
+            bbox_width=3,
+            bbox_height=4,
+        ),
+        TrackerResultMessage(
+            frame_id=2,
+            timestamp_ns=None,
+            locked=True,
+            bbox_x=1,
+            bbox_y=2,
+            bbox_width=3,
+            bbox_height=4,
+        ),
     ]
+
+
+def test_detector_probe_skips_missing_metadata_and_preserves_frame_gap() -> None:
+    publisher = FakePublisher()
+    frame_ids = iter(range(1, 100))
+    warning_limiter = _WarningRateLimiter()
+
+    _on_detector_buffer(
+        None,
+        FakeProbeInfo(FakeBuffer(100, has_meta=False)),
+        (None, publisher, frame_ids, warning_limiter, FakeGst),
+    )
+    _on_detector_buffer(
+        None,
+        FakeProbeInfo(FakeBuffer(200)),
+        (None, publisher, frame_ids, warning_limiter, FakeGst),
+    )
+
+    assert [message.frame_id for message in publisher.messages] == [2]
+
+
+def test_detector_probe_publishes_unlocked_zero_box_when_not_found() -> None:
+    publisher = FakePublisher()
+
+    _on_detector_buffer(
+        None,
+        FakeProbeInfo(FakeBuffer(100, found=False)),
+        (
+            None,
+            publisher,
+            iter(range(1, 100)),
+            _WarningRateLimiter(),
+            FakeGst,
+        ),
+    )
+
+    assert publisher.messages == [
+        TrackerResultMessage(frame_id=1, timestamp_ns=100)
+    ]
+
+
+def test_missing_metadata_warning_limiter_allows_one_warning_per_interval() -> None:
+    limiter = _WarningRateLimiter(interval_s=5.0)
+
+    assert limiter.ready(now=10.0)
+    assert not limiter.ready(now=14.999)
+    assert limiter.ready(now=15.0)
 
 
 def test_cli_parses_commands(file_config_path: Path) -> None:

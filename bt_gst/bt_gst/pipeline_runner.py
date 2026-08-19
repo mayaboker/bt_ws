@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from itertools import count
+import time
 
 from bt_msgs import TrackerResultMessage
 from loguru import logger
@@ -7,7 +8,6 @@ from loguru import logger
 from bt_gst.config import AppConfig
 from bt_gst.pipeline_builder import build_pipeline_description
 from bt_gst.red_detection import (
-    GST_CLOCK_TIME_NONE,
     DetectionOverlayState,
     read_red_detection,
 )
@@ -18,6 +18,19 @@ pipeline_runner_logger = logger.bind(component="bt_gst.pipeline_runner")
 
 class PipelineRunError(RuntimeError):
     """Raised when a GStreamer pipeline cannot be run."""
+
+
+class _WarningRateLimiter:
+    def __init__(self, interval_s: float = 5.0) -> None:
+        self.interval_s = interval_s
+        self._last_warning_at = float("-inf")
+
+    def ready(self, now: float | None = None) -> bool:
+        current = time.monotonic() if now is None else now
+        if current - self._last_warning_at < self.interval_s:
+            return False
+        self._last_warning_at = current
+        return True
 
 
 def run_pipeline(config: AppConfig) -> int:
@@ -67,6 +80,7 @@ def run_pipeline(config: AppConfig) -> int:
             detection_overlay.connect("draw", _on_detection_overlay_draw, overlay_state)
 
         frame_ids = count(1) if publisher is not None else None
+        metadata_warning_limiter = _WarningRateLimiter()
         if config.detector.enabled and (overlay_state is not None or publisher is not None):
             red_detector = pipeline.get_by_name("red_detector")
             if red_detector is None:
@@ -77,7 +91,13 @@ def run_pipeline(config: AppConfig) -> int:
             detector_src_pad.add_probe(
                 Gst.PadProbeType.BUFFER,
                 _on_detector_buffer,
-                (overlay_state, publisher, frame_ids, Gst),
+                (
+                    overlay_state,
+                    publisher,
+                    frame_ids,
+                    metadata_warning_limiter,
+                    Gst,
+                ),
             )
 
         bus = pipeline.get_bus()
@@ -123,19 +143,32 @@ def _on_detector_buffer(
         DetectionOverlayState | None,
         ZmqFramePublisher | None,
         Iterator[int] | None,
+        _WarningRateLimiter,
         object,
     ],
 ) -> object:
-    overlay_state, publisher, frame_ids, gst = callback_data
+    overlay_state, publisher, frame_ids, warning_limiter, gst = callback_data
     buffer = info.get_buffer()
+    detection = read_red_detection(buffer) if buffer is not None else None
     if overlay_state is not None:
-        overlay_state.update(read_red_detection(buffer) if buffer is not None else None)
+        overlay_state.update(detection)
     if publisher is not None and frame_ids is not None and buffer is not None:
-        pts = int(buffer.pts)
+        frame_id = next(frame_ids)
+        if detection is None:
+            if warning_limiter.ready():
+                pipeline_runner_logger.warning(
+                    "skipped tracker result reason=red-detection-metadata-missing"
+                )
+            return gst.PadProbeReturn.OK
         publisher.publish(
             TrackerResultMessage(
-                frame_id=next(frame_ids),
-                timestamp=None if pts == GST_CLOCK_TIME_NONE else pts,
+                frame_id=frame_id,
+                timestamp_ns=detection.pts_ns,
+                locked=detection.found,
+                bbox_x=detection.x,
+                bbox_y=detection.y,
+                bbox_width=detection.width,
+                bbox_height=detection.height,
             )
         )
     return gst.PadProbeReturn.OK

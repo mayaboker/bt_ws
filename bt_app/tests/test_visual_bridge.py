@@ -30,7 +30,7 @@ def test_visual_target_comm_delivers_tracker_result():
     try:
         comm.start()
         assert comm.is_running
-        message = TrackerResultMessage(frame_id=7, timestamp=123)
+        message = TrackerResultMessage(frame_id=7, timestamp_ns=123)
         _publish_until_received(publisher, message.encode(), received)
         assert results[-1] == message
     finally:
@@ -60,7 +60,7 @@ def test_visual_target_comm_survives_bad_payload_and_callback_error():
     try:
         comm.start()
         publisher.send(b"not-messagepack")
-        first = TrackerResultMessage(frame_id=1, timestamp=None).encode()
+        first = TrackerResultMessage(frame_id=1, timestamp_ns=None).encode()
         deadline = time.monotonic() + 2.0
         while not calls and time.monotonic() < deadline:
             publisher.send(first)
@@ -68,7 +68,7 @@ def test_visual_target_comm_survives_bad_payload_and_callback_error():
         assert calls
         _publish_until_received(
             publisher,
-            TrackerResultMessage(frame_id=2, timestamp=456).encode(),
+            TrackerResultMessage(frame_id=2, timestamp_ns=456).encode(),
             received,
         )
         assert calls[-1] == 2
@@ -117,7 +117,7 @@ def test_visual_bridge_manager_owns_comm_and_logs_result(monkeypatch):
 
     manager = VisualBridgeManager("tcp://127.0.0.1:6000")
     manager.start()
-    manager._comm.on_result(TrackerResultMessage(frame_id=8, timestamp=900))
+    manager._comm.on_result(TrackerResultMessage(frame_id=8, timestamp_ns=900))
 
     assert manager.is_running
     assert calls == [
@@ -125,7 +125,7 @@ def test_visual_bridge_manager_owns_comm_and_logs_result(monkeypatch):
         ("start",),
         (
             "log",
-            "Incoming tracker result frame_id={} timestamp={}",
+            "Incoming tracker result frame_id={} timestamp_ns={}",
             (8, 900),
         ),
     ]

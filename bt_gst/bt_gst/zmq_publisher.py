@@ -118,7 +118,15 @@ class ZmqFramePublisher:
                     self._pending_message = None
 
                 try:
-                    socket.send(message.encode(), flags=zmq.NOBLOCK)
+                    payload = message.encode()
+                except ValueError as exc:
+                    publisher_logger.warning(
+                        "dropped tracker result reason=encode-failed error={}", exc
+                    )
+                    continue
+
+                try:
+                    socket.send(payload, flags=zmq.NOBLOCK)
                 except zmq.Again:
                     publisher_logger.debug("dropped tracker result reason=send-would-block")
                 except zmq.ZMQError as exc:
