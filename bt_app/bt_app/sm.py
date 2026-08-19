@@ -161,7 +161,45 @@ class Robot_StateMachine:
             before=lambda x: self.on_before_state_changed.emit(RobotState.ALT_HOLD, RobotState.MANUAL),
             conditions=[self.enter_manual_mode_from_hover],
         )
+        self.machine.add_transition(
+            "resolve",
+            RobotState.ALT_HOLD,
+            RobotState.TRACK,
+            before=lambda x: self.on_before_state_changed.emit(
+                RobotState.ALT_HOLD, RobotState.TRACK
+            ),
+            conditions=[self.enter_tracking],
+        )
         # endregion from HOVER
+
+        # TRACK transition order is the control-override priority.
+        self.machine.add_transition(
+            "resolve",
+            RobotState.TRACK,
+            RobotState.FAILSAFE,
+            before=lambda x: self.on_before_state_changed.emit(
+                RobotState.TRACK, RobotState.FAILSAFE
+            ),
+            conditions=[self.enter_failsafe],
+        )
+        self.machine.add_transition(
+            "resolve",
+            RobotState.TRACK,
+            RobotState.MANUAL,
+            before=lambda x: self.on_before_state_changed.emit(
+                RobotState.TRACK, RobotState.MANUAL
+            ),
+            conditions=[self.enter_manual_mode_from_hover],
+        )
+        self.machine.add_transition(
+            "resolve",
+            RobotState.TRACK,
+            RobotState.ALT_HOLD,
+            before=lambda x: self.on_before_state_changed.emit(
+                RobotState.TRACK, RobotState.ALT_HOLD
+            ),
+            conditions=[self.exit_tracking],
+        )
 
 
     def on_state_changed_handler(self, event):
@@ -199,6 +237,25 @@ class Robot_StateMachine:
         ])
 
         return ok
+
+    def enter_tracking(self, event):
+        return all(
+            [
+                self.ctx.armed,
+                not self.ctx.request_rc.is_manual(),
+                self.ctx.request_rc.is_tracker_selected(),
+                self.ctx.tracker_ready,
+                self.ctx.tracker_start_requested,
+            ]
+        )
+
+    def exit_tracking(self, event):
+        return any(
+            [
+                self.ctx.tracker_exit_requested,
+                not self.ctx.request_rc.is_tracker_selected(),
+            ]
+        )
     
     # def enter_manual_from_takeoff(self, event):
     #     ok = all([

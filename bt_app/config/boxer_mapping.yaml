@@ -52,8 +52,8 @@ channels:
   index: 3
   'off': 1000
   'on': 2000
-#ch7
-- name: not_use
+# ch7 / MAVLink channel 8: SB three-position tracker selector
+- name: tracker_mode
   source: axis
   index: 5
   in_min: -32767
@@ -61,3 +61,9 @@ channels:
   out_min: 1000
   out_max: 2000
   deadband: 100
+# ch8 / MAVLink channel 9: SF momentary tracker enable
+- name: tracker_enable
+  source: button
+  index: 5
+  'off': 1000
+  'on': 2000

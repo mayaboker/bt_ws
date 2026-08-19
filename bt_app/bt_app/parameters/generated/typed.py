@@ -157,3 +157,47 @@ class TypedParameters:
     @property
     def vis_speed_mps(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.VIS_SPEED_MPS))
+
+    @property
+    def trk_pitch_deg(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_PITCH_DEG))
+
+    @property
+    def trk_yaw_kp(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_YAW_KP))
+
+    @property
+    def trk_yaw_max(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_YAW_MAX))
+
+    @property
+    def trk_thr_kp(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_THR_KP))
+
+    @property
+    def trk_thr_max(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_THR_MAX))
+
+    @property
+    def trk_deadband(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_DEADBAND))
+
+    @property
+    def trk_timeout_s(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_TIMEOUT_S))
+
+    @property
+    def trk_lock_frames(self) -> int:
+        return cast(int, self._parameters.get(ParameterKey.TRK_LOCK_FRAMES))
+
+    @property
+    def trk_commit_m(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_COMMIT_M))
+
+    @property
+    def trk_commit_s(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_COMMIT_S))
+
+    @property
+    def bf_angle_limit(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.BF_ANGLE_LIMIT))

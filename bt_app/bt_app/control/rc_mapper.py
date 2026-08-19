@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 
 def clamp(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
@@ -49,3 +51,20 @@ class BetaflightRcMapper:
         yaw_norm = self.yaw_rate_to_norm(yaw_rate_dps)
         rc_yaw = round(self.rc_mid + self.yaw_sign * self.rc_range * yaw_norm)
         return int(clamp(rc_yaw, self.rc_min, self.rc_max))
+
+    def angle_to_rc(
+        self,
+        angle_deg: float,
+        *,
+        angle_limit_deg: float,
+        sign: float = 1.0,
+    ) -> int:
+        """Map a physical attitude angle to a centered RC channel."""
+        values = (float(angle_deg), float(angle_limit_deg), float(sign))
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("angle mapping values must be finite")
+        if angle_limit_deg <= 0:
+            raise ValueError("angle_limit_deg must be greater than zero")
+        normalized = clamp(angle_deg / angle_limit_deg, -1.0, 1.0)
+        rc_value = round(self.rc_mid + sign * self.rc_range * normalized)
+        return int(clamp(rc_value, self.rc_min, self.rc_max))

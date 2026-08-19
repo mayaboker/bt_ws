@@ -1,6 +1,6 @@
 import pytest
 
-from bt_app.common import InternalJoystick
+from bt_app.common import InternalJoystick, TrackerMode
 from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RC_MIN
 
 
@@ -27,6 +27,8 @@ def test_defaults_are_safe_and_center_attitude_axes():
     assert joystick.arm == RC_MIN
     assert joystick.manual == RC_MIN
     assert joystick.auto_takeoff == RC_MIN
+    assert joystick.tracker_mode == TrackerMode.DISABLED
+    assert joystick.tracker_enable == RC_MIN
     assert len(joystick) == 18
 
 
@@ -39,7 +41,8 @@ def test_from_channels_preserves_active_values_and_normalizes_reserved_zeros():
 
     assert joystick.roll == 1600
     assert joystick.arm == RC_MAX
-    assert joystick.reserved_8 == RC_MIN
+    assert joystick.tracker_mode == TrackerMode.DISABLED
+    assert joystick.tracker_enable == RC_MIN
     assert joystick.reserved_18 == RC_MIN
 
 
@@ -79,6 +82,33 @@ def test_position_predicates_use_existing_switch_and_throttle_rules():
     assert joystick.is_armed()
     assert joystick.is_manual()
     assert joystick.is_auto_takeoff()
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected", "selected"),
+    [
+        (RC_MIN, TrackerMode.DISABLED, False),
+        (RC_MID, TrackerMode.TRACKER1, True),
+        (RC_MAX, TrackerMode.TRACKER2, True),
+    ],
+)
+def test_tracker_mode_positions(raw_value, expected, selected):
+    joystick = InternalJoystick(tracker_mode=raw_value)
+
+    assert joystick.selected_tracker_mode() == expected
+    assert joystick.is_tracker_selected() is selected
+
+
+def test_unknown_tracker_mode_is_not_selected():
+    joystick = InternalJoystick(tracker_mode=1400)
+
+    assert joystick.selected_tracker_mode() is None
+    assert not joystick.is_tracker_selected()
+
+
+def test_tracker_enable_requires_high_position():
+    assert not InternalJoystick(tracker_enable=RC_MIN).is_tracker_enable_high()
+    assert InternalJoystick(tracker_enable=RC_MAX).is_tracker_enable_high()
 
 
 def test_named_tuple_is_immutable():

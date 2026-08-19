@@ -54,6 +54,8 @@ def test_centered_target_produces_depth_slant_and_forward_velocity():
     assert estimate.received_at_s == 12.5
     assert estimate.depth_m == pytest.approx(10.0)
     assert estimate.slant_range_m == pytest.approx(10.0)
+    assert estimate.error_x == pytest.approx(0.0)
+    assert estimate.error_y == pytest.approx(0.0)
     assert estimate.vx_m_s == pytest.approx(5.0)
     assert estimate.vy_m_s == pytest.approx(0.0)
 
@@ -107,6 +109,8 @@ def test_invalid_tracker_result_clears_distance_and_velocity():
     assert result.reason == "tracker unlocked"
     assert result.depth_m is None
     assert result.slant_range_m is None
+    assert result.error_x is None
+    assert result.error_y is None
     assert result.vx_m_s == 0.0
     assert result.vy_m_s == 0.0
     assert service.latest_estimate == result
@@ -139,3 +143,15 @@ def test_invalid_camera_calibration_is_rejected():
             target_width_m=1.0,
             target_height_m=1.0,
         )
+
+
+def test_target_center_errors_have_camera_control_signs_and_are_clamped():
+    service = make_service()
+
+    upper_right = service.process_tracker_result(
+        tracker_result(frame_id=1, x=608, y=1, width=31, height=31)
+    )
+
+    assert upper_right.valid
+    assert upper_right.error_x == pytest.approx(0.9484375)
+    assert upper_right.error_y == pytest.approx(0.93125)

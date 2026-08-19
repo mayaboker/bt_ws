@@ -14,6 +14,8 @@ from bt_app.control import (
     ARMController,
     HoverYawController,
     MavlinkListenerError,
+    TrackerController,
+    TrackerControlResult,
 )
 from bt_app.sm import Robot_StateMachine
 from bt_app.context import Context, DEFAULT_RC_CHANNELS
@@ -37,7 +39,8 @@ from bt_app.msp.bt_v2 import (
 )
 from bt_app.common import (
     AETR1234,
-    InternalJoystick)
+    InternalJoystick,
+    TrackerMode)
 from loguru import logger as log
 import time
 from bt_app.common.mavlink import NamedValue
@@ -72,6 +75,10 @@ class App:
         self.robot_sm.on_state_changed += self._state_changed_handler
         self.controllers = {}
         self.services: AppServices | None = None
+        self._tracker_now_s = 0.0
+        self._tracker_result: TrackerControlResult | None = None
+        self._tracker_enable_was_low = False
+        self._selected_tracker_mode = TrackerMode.DISABLED
 
     def start(self) -> None:
         if self._lifecycle == AppLifecycle.RUNNING:
@@ -160,6 +167,9 @@ class App:
         # search controller
         self.controllers[RobotState.ALT_HOLD] = HoverYawController(parameters)
 
+        # red-target visual controller
+        self.controllers[RobotState.TRACK] = TrackerController(parameters)
+
     # def register_joy_interrupt(self, joy_adapter):
     #     joy_adapter.register_interrupt(AETR1234.AUX4, JoyInterrupt.TAKEOFF_REQUEST)
     #     joy_adapter.register_interrupt(AETR1234.AUX1, JoyInterrupt.MANUAL_REQUEST)
@@ -182,6 +192,12 @@ class App:
         if prev == RobotState.IDLE and next == RobotState.ARM:
             log.warning("reset arm controller ")
             self.controllers[RobotState.ARM].reset()
+
+        if prev == RobotState.TRACK and next != RobotState.TRACK:
+            self.controllers[RobotState.TRACK].stop_tracking()
+            self._tracker_result = None
+            self.ctx.tracker_ready = False
+            self.ctx.tracker_exit_requested = False
 
         # only next condition
         match next:
@@ -230,6 +246,16 @@ class App:
                     base_line,
                     previous_throttle,
                     from_takeoff,
+                )
+
+            case RobotState.TRACK:
+                self.controllers[RobotState.TRACK].start_tracking()
+                self._tracker_result = None
+                self.ctx.tracker_ready = False
+                self.ctx.tracker_exit_requested = False
+                log.info(
+                    "tracking started with mode={}",
+                    self._selected_tracker_mode.name,
                 )
 
             case RobotState.FAILSAFE:
@@ -467,6 +493,33 @@ class App:
         """
         update/keep the controllers with the current context
         """
+        tracker = self.controllers.get(RobotState.TRACK)
+        if tracker is not None:
+            self._tracker_now_s = time.monotonic()
+            self._prepare_tracker_switches()
+            estimate = self._require_services().distance_estimator.latest_estimate
+            tracker.observe(
+                estimate,
+                now_s=self._tracker_now_s,
+                mode_selected=self.ctx.request_rc.is_tracker_selected(),
+            )
+            self.ctx.tracker_ready = tracker.ready_to_track
+            self.ctx.tracker_start_requested = all(
+                [
+                    self.ctx.tracker_start_requested,
+                    self.ctx.state == RobotState.ALT_HOLD,
+                    self.ctx.armed,
+                    not self.ctx.request_rc.is_manual(),
+                    self.ctx.tracker_ready,
+                ]
+            )
+            if self.ctx.state == RobotState.TRACK:
+                self._tracker_result = tracker.update(now_s=self._tracker_now_s)
+                self.ctx.tracker_exit_requested = tracker.exit_requested
+            else:
+                self._tracker_result = None
+                self.ctx.tracker_exit_requested = False
+
         if self.ctx.drone_rc is not None:
             pass
             #TODO: to understand why base 3
@@ -478,6 +531,23 @@ class App:
             #     self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE
             # if self.ctx.state != RobotState.FAILSAFE: 
             #     self.controllers[RobotState.FAILSAFE].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE 
+
+    def _prepare_tracker_switches(self) -> None:
+        """Turn an observed SF low-to-high transition into a one-loop request."""
+        joystick = self.ctx.request_rc
+        mode = joystick.selected_tracker_mode()
+        self._selected_tracker_mode = mode or TrackerMode.DISABLED
+        self.ctx.tracker_start_requested = False
+
+        if joystick.tracker_enable == RC_MIN:
+            self._tracker_enable_was_low = True
+            return
+        if not joystick.is_tracker_enable_high():
+            self._tracker_enable_was_low = False
+            return
+        if self._tracker_enable_was_low and joystick.is_tracker_selected():
+            self.ctx.tracker_start_requested = True
+        self._tracker_enable_was_low = False
 
     def _resolve_rc(self):
         """
@@ -497,6 +567,8 @@ class App:
                 return self._arm_handler()
             case RobotState.ALT_HOLD:
                 return self.alt_hold_handler()
+            case RobotState.TRACK:
+                return self.tracker_handler()
             case _:
                 log.error(f"RC selector not implemented for state {self.ctx.state}")
                 raise NotImplementedError(f"RC selector not implemented for state {self.ctx.state}")
@@ -521,6 +593,16 @@ class App:
         arm_controller: ARMController = cast(ARMController, self.controllers[RobotState.ARM])
         self.ctx.armed = arm_controller.is_arm_done
         return self.controllers[RobotState.ARM].update()
+
+    def tracker_handler(self) -> list[int]:
+        if self._tracker_result is None:
+            self._tracker_result = self.controllers[RobotState.TRACK].update(
+                now_s=self._tracker_now_s
+            )
+        self.ctx.tracker_exit_requested = self.controllers[
+            RobotState.TRACK
+        ].exit_requested
+        return list(self._tracker_result.channels)
     #TODO: move to arm controller 
 
     def _make_disarm_channels(self) -> list[int]:

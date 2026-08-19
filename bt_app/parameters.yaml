@@ -191,3 +191,47 @@ parameters:
     type: float
     default: 5.0
     limits: {min: 0.01, max: 100.0}
+  TRK_PITCH_DEG:
+    type: float
+    default: -10.0
+    limits: {min: -30.0, max: 0.0}
+  TRK_YAW_KP:
+    type: float
+    default: 15.0
+    limits: {min: 0.0, max: 1000.0}
+  TRK_YAW_MAX:
+    type: float
+    default: 20.0
+    limits: {min: 0.0, max: 1000.0}
+  TRK_THR_KP:
+    type: float
+    default: 100.0
+    limits: {min: 0.0, max: 500.0}
+  TRK_THR_MAX:
+    type: float
+    default: 100.0
+    limits: {min: 0.0, max: 500.0}
+  TRK_DEADBAND:
+    type: float
+    default: 0.03
+    limits: {min: 0.0, max: 1.0}
+  TRK_TIMEOUT_S:
+    type: float
+    default: 0.25
+    limits: {min: 0.01, max: 10.0}
+  TRK_LOCK_FRAMES:
+    type: int
+    default: 3
+    limits: {min: 1, max: 100}
+  TRK_COMMIT_M:
+    type: float
+    default: 1.0
+    limits: {min: 0.01, max: 100.0}
+  TRK_COMMIT_S:
+    type: float
+    default: 1.0
+    limits: {min: 0.0, max: 10.0}
+  BF_ANGLE_LIMIT:
+    type: float
+    default: 60.0
+    limits: {min: 1.0, max: 90.0}

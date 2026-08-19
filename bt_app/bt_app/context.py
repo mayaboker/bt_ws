@@ -28,6 +28,9 @@ class Context:
     takeoff_reach: bool = field(default=False)
     takeoff_setpoint: float = field(default=0)
     manual_land_confirmed: bool = field(default=False)
+    tracker_ready: bool = field(default=False)
+    tracker_exit_requested: bool = field(default=False)
+    tracker_start_requested: bool = field(default=False)
     # current drone alt , update from drone at 10hz
     drone_alt: float = 0.0
     drone_vertical_speed: float = 0.0
@@ -66,6 +69,9 @@ class Context:
         self.auto_arm = False
         self.takeoff_reach = False
         self.manual_land_confirmed = False
+        self.tracker_ready = False
+        self.tracker_exit_requested = False
+        self.tracker_start_requested = False
         self.drone_alt = 0.0
         self.drone_vertical_speed = 0.0
         self.drone_alt_received_at_s = 0.0

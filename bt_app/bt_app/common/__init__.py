@@ -1,6 +1,6 @@
 from enum import IntEnum, auto, StrEnum
 from bt_app.common.event import Event
-from bt_app.common.joystick import InternalJoystick
+from bt_app.common.joystick import InternalJoystick, TrackerMode
 from bt_app.common.mavlink import MavSeverity
 
 TREE_TICK_INTERVAL_S = 0.1
@@ -44,6 +44,7 @@ class RobotState(IntEnum):
     TAKEOFF = 5
     ARM = 6
     ALT_HOLD = 7
+    TRACK = 8
 
 
 def print_channels(channels: list[int]):
@@ -77,5 +78,6 @@ __all__ = [
     "ZMQ_TRACKER_RESULT_ENDPOINT",
     "ZMQ_TRACKER_RESULT_TOPIC",
     "InternalJoystick",
+    "TrackerMode",
     "RobotState"
 ]

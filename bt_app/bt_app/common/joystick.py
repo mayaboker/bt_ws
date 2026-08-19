@@ -1,6 +1,7 @@
 """Internal representation of joystick input received over MAVLink."""
 
 from collections.abc import Sequence
+from enum import IntEnum
 from typing import NamedTuple
 
 from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RC_MIN
@@ -11,8 +12,23 @@ INTERNAL_JOYSTICK_CHANNELS = 18
 ACTIVE_JOYSTICK_CHANNELS = 7
 
 
+class TrackerMode(IntEnum):
+    DISABLED = RC_MIN
+    TRACKER1 = RC_MID
+    TRACKER2 = RC_MAX
+
+
 class InternalJoystick(NamedTuple):
-    """Immutable, named snapshot of the application's joystick channels."""
+    """Immutable, named snapshot of the application's joystick channels.
+
+    boxer
+    SA: manual/althokd
+    SB: tracker mode: disabled/tracker1/tracker2
+    SC:
+    SD: auto take off
+    SE: arm
+    SF: enabler
+    """
 
     roll: int = RC_MID
     pitch: int = RC_MID
@@ -21,8 +37,8 @@ class InternalJoystick(NamedTuple):
     arm: int = RC_MIN
     manual: int = RC_MIN
     auto_takeoff: int = RC_MIN
-    reserved_8: int = RC_MIN
-    reserved_9: int = RC_MIN
+    tracker_mode: int = TrackerMode.DISABLED
+    tracker_enable: int = RC_MIN
     reserved_10: int = RC_MIN
     reserved_11: int = RC_MIN
     reserved_12: int = RC_MIN
@@ -74,10 +90,26 @@ class InternalJoystick(NamedTuple):
     def is_auto_takeoff(self) -> bool:
         return self.auto_takeoff == RC_MAX
 
+    def selected_tracker_mode(self) -> TrackerMode | None:
+        try:
+            return TrackerMode(self.tracker_mode)
+        except ValueError:
+            return None
+
+    def is_tracker_selected(self) -> bool:
+        return self.selected_tracker_mode() in {
+            TrackerMode.TRACKER1,
+            TrackerMode.TRACKER2,
+        }
+
+    def is_tracker_enable_high(self) -> bool:
+        return self.tracker_enable == RC_MAX
+
 
 __all__ = [
     "ACTIVE_JOYSTICK_CHANNELS",
     "INTERNAL_JOYSTICK_CHANNELS",
     "InternalJoystick",
     "LOW_THROTTLE_THRESHOLD",
+    "TrackerMode",
 ]

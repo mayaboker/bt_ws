@@ -42,6 +42,17 @@ class ParameterKey:
     OBJ_WIDTH_M: Final[Literal['OBJ_WIDTH_M']] = 'OBJ_WIDTH_M'
     OBJ_HEIGHT_M: Final[Literal['OBJ_HEIGHT_M']] = 'OBJ_HEIGHT_M'
     VIS_SPEED_MPS: Final[Literal['VIS_SPEED_MPS']] = 'VIS_SPEED_MPS'
+    TRK_PITCH_DEG: Final[Literal['TRK_PITCH_DEG']] = 'TRK_PITCH_DEG'
+    TRK_YAW_KP: Final[Literal['TRK_YAW_KP']] = 'TRK_YAW_KP'
+    TRK_YAW_MAX: Final[Literal['TRK_YAW_MAX']] = 'TRK_YAW_MAX'
+    TRK_THR_KP: Final[Literal['TRK_THR_KP']] = 'TRK_THR_KP'
+    TRK_THR_MAX: Final[Literal['TRK_THR_MAX']] = 'TRK_THR_MAX'
+    TRK_DEADBAND: Final[Literal['TRK_DEADBAND']] = 'TRK_DEADBAND'
+    TRK_TIMEOUT_S: Final[Literal['TRK_TIMEOUT_S']] = 'TRK_TIMEOUT_S'
+    TRK_LOCK_FRAMES: Final[Literal['TRK_LOCK_FRAMES']] = 'TRK_LOCK_FRAMES'
+    TRK_COMMIT_M: Final[Literal['TRK_COMMIT_M']] = 'TRK_COMMIT_M'
+    TRK_COMMIT_S: Final[Literal['TRK_COMMIT_S']] = 'TRK_COMMIT_S'
+    BF_ANGLE_LIMIT: Final[Literal['BF_ANGLE_LIMIT']] = 'BF_ANGLE_LIMIT'
 
 
 ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
@@ -80,4 +91,15 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'OBJ_WIDTH_M',
     'OBJ_HEIGHT_M',
     'VIS_SPEED_MPS',
+    'TRK_PITCH_DEG',
+    'TRK_YAW_KP',
+    'TRK_YAW_MAX',
+    'TRK_THR_KP',
+    'TRK_THR_MAX',
+    'TRK_DEADBAND',
+    'TRK_TIMEOUT_S',
+    'TRK_LOCK_FRAMES',
+    'TRK_COMMIT_M',
+    'TRK_COMMIT_S',
+    'BF_ANGLE_LIMIT',
 )

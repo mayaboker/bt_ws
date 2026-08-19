@@ -109,12 +109,13 @@ altitude span while enforcing 25-degree pitch and 1 m altitude-drift limits.
 
 Radiomaster BOXER config
 
-|     |   |   |
-|---  |---|---|
-| SA  | idle / manual  |   |
-| SB  | alt hold/ courser / tracking  |   |
-| SC  | enabler  | to enable move from low to high  |
-| SD  | auto takeoff  |   |
+| Switch | Function | Values |
+|---|---|---|
+| SA | manual / altitude hold | low / high |
+| SB | tracker mode | `1000` disabled, `1500` tracker1, `2000` tracker2 |
+| SD | auto takeoff | low / high |
+| SE | arm | low / high |
+| SF | tracking entry | momentary `1000` to `2000` |
 
 
 ### Idle -> Manual
@@ -138,5 +139,9 @@ Radiomaster BOXER config
 - SA switch up (idle)
 - throttle down + yaw left for disarmed
 
-### ALT_HOLD -> tracking(hover) before auto enable
-- SB > 1000
+### ALT_HOLD -> tracking
+
+- Select tracker1 or tracker2 with SB.
+- Wait for a valid tracker lock.
+- Press SF once. A press before lock is ignored.
+- Move SB to disabled to return immediately to `ALT_HOLD`.

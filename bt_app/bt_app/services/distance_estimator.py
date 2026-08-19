@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
+from math import isfinite
 from typing import Callable
 
 from bt_msgs import TrackerResultMessage
@@ -25,6 +26,8 @@ class TargetEstimate:
     received_at_s: float
     depth_m: float | None
     slant_range_m: float | None
+    error_x: float | None
+    error_y: float | None
     vx_m_s: float
     vy_m_s: float
     valid: bool
@@ -97,12 +100,15 @@ class DistanceEstimatorService:
                     depth_m=distance.depth_m,
                     vertical_offset_m=distance.vertical_offset_m,
                 )
+                error_x, error_y = self._normalized_error(message)
                 estimate = TargetEstimate(
                     frame_id=message.frame_id,
                     timestamp_ns=message.timestamp_ns,
                     received_at_s=received_at,
                     depth_m=distance.depth_m,
                     slant_range_m=distance.slant_range_m,
+                    error_x=error_x,
+                    error_y=error_y,
                     vx_m_s=velocity.vx_m_s,
                     vy_m_s=velocity.vy_m_s,
                     valid=True,
@@ -114,6 +120,8 @@ class DistanceEstimatorService:
                     received_at_s=received_at,
                     depth_m=None,
                     slant_range_m=None,
+                    error_x=None,
+                    error_y=None,
                     vx_m_s=0.0,
                     vy_m_s=0.0,
                     valid=False,
@@ -121,3 +129,18 @@ class DistanceEstimatorService:
                 )
             self._latest_estimate = estimate
             return estimate
+
+    def _normalized_error(self, message: TrackerResultMessage) -> tuple[float, float]:
+        intrinsics = self._distance_estimator.intrinsics
+        center_x = message.bbox_x + message.bbox_width / 2.0
+        center_y = message.bbox_y + message.bbox_height / 2.0
+        error_x = (center_x - intrinsics.cx_px) / (intrinsics.image_width_px / 2.0)
+        error_y = (intrinsics.cy_px - center_y) / (
+            intrinsics.image_height_px / 2.0
+        )
+        if not isfinite(error_x) or not isfinite(error_y):
+            raise ValueError("non-finite target-center error")
+        return (
+            max(-1.0, min(1.0, error_x)),
+            max(-1.0, min(1.0, error_y)),
+        )

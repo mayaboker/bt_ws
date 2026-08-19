@@ -2,7 +2,8 @@ import pytest
 from types import SimpleNamespace
 
 from bt_app.app import App
-from bt_app.common import AETR1234, InternalJoystick, RobotState
+import bt_app.app as app_module
+from bt_app.common import AETR1234, InternalJoystick, RobotState, TrackerMode
 from bt_app.common.mavlink import NamedValue
 from bt_app.context import Context
 from bt_app.msp.bt_v2 import RC_MAX, RC_MID, RC_MIN, RCChannel_alias as RCChannel
@@ -102,14 +103,43 @@ class FakeManualLandService:
         self.update_calls += 1
 
 
+class FakeTrackerController:
+    def __init__(self, channels=None):
+        self.channels = tuple(channels or [1500] * 8)
+        self.ready_to_track = False
+        self.exit_requested = False
+        self.started = 0
+        self.stopped = 0
+        self.observations = []
+
+    def observe(self, estimate, *, now_s, mode_selected):
+        self.observations.append((estimate, now_s, mode_selected))
+        if not mode_selected:
+            self.ready_to_track = False
+
+    def start_tracking(self):
+        self.started += 1
+
+    def stop_tracking(self):
+        self.stopped += 1
+
+    def update(self, *, now_s):
+        return SimpleNamespace(channels=self.channels)
+
+
 def make_app_with_context():
     app = App.__new__(App)
     app.ctx = Context()
     app.controllers = {}
+    app._tracker_now_s = 0.0
+    app._tracker_result = None
+    app._tracker_enable_was_low = False
+    app._selected_tracker_mode = TrackerMode.DISABLED
     app.services = SimpleNamespace(
         parameters=FakeParams(),
         mavlink=FakeMavlinkService(),
         manual_land=FakeManualLandService(),
+        distance_estimator=SimpleNamespace(latest_estimate=None),
     )
     return app
 
@@ -123,6 +153,7 @@ def test_robot_state_uses_stable_integer_values():
     assert RobotState.TAKEOFF.value == 5
     assert RobotState.ARM.value == 6
     assert RobotState.ALT_HOLD.value == 7
+    assert RobotState.TRACK.value == 8
 
 
 def test_context_state_defaults_to_robot_state_member():
@@ -186,13 +217,15 @@ def test_rc_selector_uses_robot_state_members(state, controller_key):
         arm=1500,
         manual=1500,
         auto_takeoff=1500,
-        reserved_8=1500,
+        tracker_mode=1500,
     )
 
     result = app._resolve_rc()
 
     if state == RobotState.MANUAL:
-        assert result == list(app.ctx.request_rc)
+        expected = list(app.ctx.request_rc)
+        expected[AETR1234.AUX2] = RC_MAX
+        assert result == expected
         assert controller.calls == []
     elif state == RobotState.TAKEOFF:
         assert result == channels
@@ -335,3 +368,239 @@ def test_notification_center_updates_manual_land_service():
 
     assert app.services.manual_land.update_calls == 1
     assert app.services.mavlink.messages == []
+
+
+@pytest.mark.parametrize(
+    "tracker_mode",
+    [TrackerMode.TRACKER1, TrackerMode.TRACKER2],
+)
+def test_alt_hold_enters_track_on_ready_sf_edge_request(tracker_mode):
+    ctx = Context()
+    ctx.state = RobotState.ALT_HOLD
+    ctx.armed = True
+    ctx.tracker_ready = True
+    ctx.tracker_start_requested = True
+    ctx.request_rc = InternalJoystick(
+        manual=RC_MID,
+        tracker_mode=tracker_mode,
+    )
+    machine = Robot_StateMachine(ctx, VehicleConfig())
+    machine.machine.set_state(RobotState.ALT_HOLD)
+
+    machine.resolve()
+
+    assert ctx.state == RobotState.TRACK
+
+
+def test_alt_hold_override_priority_is_failsafe_then_manual_then_track():
+    ctx = Context()
+    ctx.state = RobotState.ALT_HOLD
+    ctx.armed = True
+    ctx.tracker_ready = True
+    ctx.joy_fail_safe = True
+    ctx.tracker_start_requested = True
+    ctx.request_rc = InternalJoystick(tracker_mode=TrackerMode.TRACKER1)
+    machine = Robot_StateMachine(ctx, VehicleConfig())
+    machine.machine.set_state(RobotState.ALT_HOLD)
+
+    machine.resolve()
+
+    assert ctx.state == RobotState.FAILSAFE
+
+
+@pytest.mark.parametrize(
+    ("joystick", "joy_failsafe", "exit_requested", "expected"),
+    [
+        (InternalJoystick(tracker_mode=TrackerMode.TRACKER1), True, True, RobotState.FAILSAFE),
+        (
+            InternalJoystick(manual=RC_MIN, tracker_mode=TrackerMode.TRACKER1),
+            False,
+            True,
+            RobotState.MANUAL,
+        ),
+        (
+            InternalJoystick(manual=RC_MID, tracker_mode=TrackerMode.TRACKER1),
+            False,
+            True,
+            RobotState.ALT_HOLD,
+        ),
+    ],
+)
+def test_track_transition_priority(joystick, joy_failsafe, exit_requested, expected):
+    ctx = Context()
+    ctx.state = RobotState.TRACK
+    ctx.armed = True
+    ctx.request_rc = joystick
+    ctx.joy_fail_safe = joy_failsafe
+    ctx.tracker_exit_requested = exit_requested
+    machine = Robot_StateMachine(ctx, VehicleConfig())
+    machine.machine.set_state(RobotState.TRACK)
+
+    machine.resolve()
+
+    assert ctx.state == expected
+
+
+def test_tracker_disabled_exits_track_without_controller_exit_request():
+    ctx = Context()
+    ctx.state = RobotState.TRACK
+    ctx.armed = True
+    ctx.request_rc = InternalJoystick(manual=RC_MID)
+    machine = Robot_StateMachine(ctx, VehicleConfig())
+    machine.machine.set_state(RobotState.TRACK)
+
+    machine.resolve()
+
+    assert ctx.state == RobotState.ALT_HOLD
+
+
+def test_track_rc_handler_routes_cached_immutable_command():
+    app = make_app_with_context()
+    tracker = FakeTrackerController([1500, 1417, 1508, 1500, 2000, 2000, 1000, 1000])
+    app.controllers[RobotState.TRACK] = tracker
+    app.ctx.state = RobotState.TRACK
+
+    channels = app._resolve_rc()
+
+    assert channels == list(tracker.channels)
+
+
+def test_track_to_alt_hold_stops_tracker_and_seeds_current_altitude():
+    app = make_app_with_context()
+    tracker = FakeTrackerController()
+    hover = FakeController([1500] * 8)
+    app.controllers[RobotState.TRACK] = tracker
+    app.controllers[RobotState.ALT_HOLD] = hover
+    app.ctx.drone_alt = 6.5
+    app.ctx.drone_vertical_speed = -0.2
+    app.ctx.drone_alt_received_at_s = 10.0
+
+    app._handle_before_state_changed(RobotState.TRACK, RobotState.ALT_HOLD)
+
+    assert tracker.stopped == 1
+    assert hover.reset_setpoint_kwargs == {
+        "setpoint": 6.5,
+        "altitude_sample_time_s": 10.0,
+        "vertical_speed_m_s": -0.2,
+        "require_throttle_center": False,
+    }
+
+
+def test_app_prepares_tracker_from_one_latest_estimate_snapshot(monkeypatch):
+    app = make_app_with_context()
+    tracker = FakeTrackerController()
+    tracker.ready_to_track = True
+    observation = object()
+    app.controllers[RobotState.TRACK] = tracker
+    app.services.distance_estimator.latest_estimate = observation
+    app.ctx.request_rc = InternalJoystick(
+        manual=RC_MID,
+        tracker_mode=TrackerMode.TRACKER1,
+    )
+    monkeypatch.setattr(app_module.time, "monotonic", lambda: 12.5)
+
+    app._update_controllers()
+
+    assert tracker.observations == [(observation, 12.5, True)]
+    assert app.ctx.tracker_ready
+
+
+def test_tracker_enable_requires_observed_low_before_startup_high():
+    app = make_app_with_context()
+    app.ctx.request_rc = InternalJoystick(
+        tracker_mode=TrackerMode.TRACKER1,
+        tracker_enable=RC_MAX,
+    )
+
+    app._prepare_tracker_switches()
+
+    assert not app.ctx.tracker_start_requested
+
+
+def test_tracker_enable_rising_edge_is_one_loop_pulse():
+    app = make_app_with_context()
+    app.ctx.request_rc = InternalJoystick(
+        tracker_mode=TrackerMode.TRACKER2,
+        tracker_enable=RC_MIN,
+    )
+    app._prepare_tracker_switches()
+    app.ctx.request_rc = app.ctx.request_rc._replace(tracker_enable=RC_MAX)
+
+    app._prepare_tracker_switches()
+    assert app.ctx.tracker_start_requested
+    assert app._selected_tracker_mode == TrackerMode.TRACKER2
+
+    app._prepare_tracker_switches()
+    assert not app.ctx.tracker_start_requested
+
+
+def test_tracker_enable_requires_direct_low_to_high_transition():
+    app = make_app_with_context()
+    app.ctx.request_rc = InternalJoystick(
+        tracker_mode=TrackerMode.TRACKER1,
+        tracker_enable=RC_MIN,
+    )
+    app._prepare_tracker_switches()
+    app.ctx.request_rc = app.ctx.request_rc._replace(tracker_enable=RC_MID)
+    app._prepare_tracker_switches()
+    app.ctx.request_rc = app.ctx.request_rc._replace(tracker_enable=RC_MAX)
+
+    app._prepare_tracker_switches()
+
+    assert not app.ctx.tracker_start_requested
+
+
+def test_tracker_enable_edge_is_ignored_when_tracker_is_not_ready(monkeypatch):
+    app = make_app_with_context()
+    tracker = FakeTrackerController()
+    app.controllers[RobotState.TRACK] = tracker
+    app.ctx.state = RobotState.ALT_HOLD
+    app.ctx.armed = True
+    app.ctx.request_rc = InternalJoystick(
+        manual=RC_MID,
+        tracker_mode=TrackerMode.TRACKER1,
+        tracker_enable=RC_MIN,
+    )
+    app._prepare_tracker_switches()
+    app.ctx.request_rc = app.ctx.request_rc._replace(tracker_enable=RC_MAX)
+    monkeypatch.setattr(app_module.time, "monotonic", lambda: 12.5)
+
+    app._update_controllers()
+
+    assert not app.ctx.tracker_start_requested
+
+
+def test_ready_tracker_accepts_sf_edge_in_armed_alt_hold(monkeypatch):
+    app = make_app_with_context()
+    tracker = FakeTrackerController()
+    tracker.ready_to_track = True
+    app.controllers[RobotState.TRACK] = tracker
+    app.ctx.state = RobotState.ALT_HOLD
+    app.ctx.armed = True
+    app.ctx.request_rc = InternalJoystick(
+        manual=RC_MID,
+        tracker_mode=TrackerMode.TRACKER1,
+        tracker_enable=RC_MIN,
+    )
+    app._prepare_tracker_switches()
+    app.ctx.request_rc = app.ctx.request_rc._replace(tracker_enable=RC_MAX)
+    monkeypatch.setattr(app_module.time, "monotonic", lambda: 12.5)
+
+    app._update_controllers()
+
+    assert app.ctx.tracker_start_requested
+
+
+def test_tracker_disabled_cancels_ready_acquisition(monkeypatch):
+    app = make_app_with_context()
+    tracker = FakeTrackerController()
+    tracker.ready_to_track = True
+    app.controllers[RobotState.TRACK] = tracker
+    app.ctx.request_rc = InternalJoystick(tracker_mode=TrackerMode.DISABLED)
+    monkeypatch.setattr(app_module.time, "monotonic", lambda: 12.5)
+
+    app._update_controllers()
+
+    assert tracker.observations == [(None, 12.5, False)]
+    assert not app.ctx.tracker_ready
+    assert not app.ctx.tracker_start_requested
