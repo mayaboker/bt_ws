@@ -163,6 +163,10 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.TRK_PITCH_DEG))
 
     @property
+    def trk_pitch_rate(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_PITCH_RATE))
+
+    @property
     def trk_yaw_kp(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.TRK_YAW_KP))
 

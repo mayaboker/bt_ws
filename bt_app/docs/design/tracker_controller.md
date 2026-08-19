@@ -138,17 +138,22 @@ The initial deadband is `0.03` normalized image units.
 
 ### Pitch
 
-Before measured-velocity control is introduced, pitch is a constant physical
-angle:
+Before measured-velocity control is introduced, pitch slews from level flight
+toward a fixed physical angle:
 
 ```text
 pitch_command = -10 degrees
 ```
 
 Negative pitch means nose-down/forward. `BetaflightRcMapper.angle_to_rc()` uses
-the configured Betaflight angle limit. On the active simulator branch, forward
-pitch maps below RC midpoint (`-10 degrees` at a `60 degree` limit maps to
-approximately `1417`). The command is always bounded to `[1000, 2000]`.
+the configured Betaflight angle limit. The tracker applies its vehicle-specific
+inverted pitch mapping, so forward pitch maps above RC midpoint (`-10 degrees`
+at a `60 degree` limit maps to approximately `1583`). Other angle-mapper users
+retain the default direction. The command is always bounded to `[1000, 2000]`.
+TRACK starts at `0 degrees` and advances toward the target at
+`TRK_PITCH_RATE`. With the initial `5 degrees/s` rate, the transition to
+`-10 degrees` takes two seconds. Runtime target changes use the same slew rate.
+Tilt-compensated throttle is calculated from the current ramped pitch.
 
 ### Yaw
 
@@ -234,15 +239,19 @@ does not read the ZMQ receiver thread directly.
 
 ### TRACKING
 
-Each new valid frame updates pitch, yaw, and throttle. Between frames, the
-controller returns the previous complete command. Velocity fields in
-`TargetEstimate` are ignored in this milestone.
+Each new valid frame updates the visual yaw and throttle corrections. The
+time-based pitch slew advances on application updates while the latest target
+remains valid; once it reaches its target, duplicate frames return the previous
+complete command. Velocity fields in `TargetEstimate` are ignored in this
+milestone.
 
-If an estimate is invalid or older than `0.25 s`, `observe()` requests an exit
-before state resolution. The state machine enters `ALT_HOLD` in the same loop;
-its altitude setpoint is initialized from the current altitude for a bumpless
-handoff. A direct invalid `update()` still returns neutral pitch/yaw and hover
-throttle rather than raising.
+An invalid estimate freezes the last valid command, including the pitch ramp,
+until the last valid estimate becomes older than `0.25 s`. A valid estimate
+within that grace period resumes tracking from the frozen pitch. At timeout,
+`observe()` requests an exit before state resolution. The state machine enters
+`ALT_HOLD` in the same loop; its altitude setpoint is initialized from the
+current altitude for a bumpless handoff. A timeout still returns neutral
+pitch/yaw and hover throttle rather than raising.
 
 ### COMMIT
 
@@ -291,12 +300,13 @@ original deadline despite parameter updates.
 | Parameter | Default | Meaning |
 | --- | ---: | --- |
 | `TRK_PITCH_DEG` | `-10.0` | Fixed forward pitch angle |
+| `TRK_PITCH_RATE` | `5.0` | Pitch slew rate in degrees per second |
 | `TRK_YAW_KP` | `15.0` | Yaw-rate gain in deg/s per normalized error |
 | `TRK_YAW_MAX` | `20.0` | Absolute yaw-rate limit in deg/s |
 | `TRK_THR_KP` | `100.0` | Throttle gain in RC units per normalized error |
 | `TRK_THR_MAX` | `100.0` | Absolute throttle correction limit in RC units |
 | `TRK_DEADBAND` | `0.03` | Image-error deadband |
-| `TRK_TIMEOUT_S` | `0.25` | Maximum estimate age |
+| `TRK_TIMEOUT_S` | `0.25` | Maximum time since the last valid estimate |
 | `TRK_LOCK_FRAMES` | `3` | Consecutive frames required for entry |
 | `TRK_COMMIT_M` | `1.0` | Forward depth that enters COMMIT |
 | `TRK_COMMIT_S` | `1.0` | Maximum frozen-command duration |
@@ -325,7 +335,8 @@ Future implementation tests must cover:
 - deadband behavior and RC bounds;
 - duplicate frames holding the previous command;
 - entry only after three fresh distinct frames;
-- invalid or stale target returning a safe handoff and exiting TRACK;
+- brief invalid target holding the last command and resuming without a pitch jump;
+- invalid or stale target exceeding the grace period exiting TRACK safely;
 - commit at `depth_m <= 1.0` and exact preservation of every RC channel;
 - visual and parameter updates being ignored during COMMIT;
 - one-second commit timeout and SF edge re-entry gate;

@@ -28,6 +28,7 @@ class FakeParameters:
         self.on_parameter_changed = FakeEvent()
         self.values = {
             ParameterKey.TRK_PITCH_DEG: -10.0,
+            ParameterKey.TRK_PITCH_RATE: 5.0,
             ParameterKey.TRK_YAW_KP: 15.0,
             ParameterKey.TRK_YAW_MAX: 20.0,
             ParameterKey.TRK_THR_KP: 100.0,
@@ -108,17 +109,29 @@ def test_acquisition_requires_three_distinct_fresh_frames():
     assert controller.ready_to_track
 
 
-def test_centered_target_commands_forward_pitch_and_hover_compensation():
+def test_centered_target_smoothly_commands_forward_pitch_and_hover_compensation():
     controller = TrackerController(FakeParameters())
     acquire(controller)
 
-    result = controller.update(now_s=0.0)
+    initial = controller.update(now_s=0.0)
+    controller.observe(
+        estimate(4, received_at_s=1.0), now_s=1.0, mode_selected=True
+    )
+    halfway = controller.update(now_s=1.0)
+    controller.observe(
+        estimate(5, received_at_s=2.0), now_s=2.0, mode_selected=True
+    )
+    result = controller.update(now_s=2.0)
 
+    assert initial.pitch_command_deg == 0.0
+    assert initial.channels[RCChannel.PITCH] == RC_MID
+    assert halfway.pitch_command_deg == -5.0
     assert result.valid
     assert result.phase == TrackerPhase.TRACKING
     assert len(result.channels) == 8
     assert result.channels[RCChannel.ROLL] == RC_MID
-    assert result.channels[RCChannel.PITCH] == 1417
+    assert halfway.channels[RCChannel.PITCH] == 1542
+    assert result.channels[RCChannel.PITCH] == 1583
     assert result.channels[RCChannel.THROTTLE] == 1508
     assert result.channels[RCChannel.YAW] == RC_MID
     assert result.channels[RCChannel.ARM] == RC_MAX
@@ -129,7 +142,13 @@ def test_image_errors_command_bounded_yaw_and_throttle():
     controller = TrackerController(FakeParameters())
     acquire(controller, target=estimate(error_x=1.0, error_y=-1.0))
 
-    result = controller.update(now_s=0.0)
+    controller.update(now_s=0.0)
+    controller.observe(
+        estimate(4, received_at_s=2.0, error_x=1.0, error_y=-1.0),
+        now_s=2.0,
+        mode_selected=True,
+    )
+    result = controller.update(now_s=2.0)
 
     assert result.yaw_rate_dps == pytest.approx(14.55)
     assert result.throttle_correction_rc == -97.0
@@ -147,18 +166,81 @@ def test_deadband_removes_small_image_error():
     assert result.throttle_correction_rc == 0.0
 
 
-def test_invalid_or_stale_observation_requests_exit_and_returns_safe_result():
+def test_invalid_observation_holds_last_command_during_timeout_grace():
     controller = TrackerController(FakeParameters())
     acquire(controller)
+    previous = controller.update(now_s=0.0)
     controller.observe(estimate(4, valid=False), now_s=0.1, mode_selected=True)
 
     result = controller.update(now_s=0.1)
+
+    assert not controller.exit_requested
+    assert result is previous
+
+
+def test_invalid_observation_exits_after_last_valid_estimate_times_out():
+    controller = TrackerController(FakeParameters())
+    acquire(controller)
+    controller.update(now_s=0.0)
+    controller.observe(estimate(4, valid=False), now_s=0.1, mode_selected=True)
+    controller.observe(estimate(5, valid=False), now_s=0.26, mode_selected=True)
+
+    result = controller.update(now_s=0.26)
 
     assert controller.exit_requested
     assert not result.valid
     assert result.channels[RCChannel.PITCH] == RC_MID
     assert result.channels[RCChannel.YAW] == RC_MID
     assert result.channels[RCChannel.THROTTLE] == 1500
+
+
+def test_missing_observations_exit_when_last_valid_estimate_becomes_stale():
+    controller = TrackerController(FakeParameters())
+    acquire(controller)
+    controller.update(now_s=0.0)
+
+    controller.observe(estimate(3), now_s=0.26, mode_selected=True)
+    result = controller.update(now_s=0.26)
+
+    assert controller.exit_requested
+    assert not result.valid
+
+
+def test_valid_observation_resumes_pitch_ramp_without_loss_time_jump():
+    controller = TrackerController(FakeParameters())
+    acquire(controller)
+    controller.update(now_s=0.0)
+    before_loss = controller.update(now_s=0.1)
+    controller.observe(estimate(4, valid=False), now_s=0.15, mode_selected=True)
+    assert controller.update(now_s=0.2) is before_loss
+
+    controller.observe(
+        estimate(5, received_at_s=0.21),
+        now_s=0.21,
+        mode_selected=True,
+    )
+    recovered = controller.update(now_s=0.21)
+
+    assert recovered.valid
+    assert recovered.pitch_command_deg == pytest.approx(-0.55)
+
+
+def test_live_pitch_target_change_uses_same_slew_rate():
+    parameters = FakeParameters()
+    controller = TrackerController(parameters)
+    acquire(controller)
+    controller.update(now_s=0.0)
+    controller.observe(
+        estimate(4, received_at_s=2.0), now_s=2.0, mode_selected=True
+    )
+    at_target = controller.update(now_s=2.0)
+    assert at_target.pitch_command_deg == -10.0
+
+    parameters.on_parameter_changed.emit(ParameterKey.TRK_PITCH_DEG, -20.0)
+    controller.observe(estimate(5, received_at_s=3.0), now_s=3.0, mode_selected=True)
+    updated = controller.update(now_s=3.0)
+
+    assert updated.pitch_command_deg == -15.0
 
 
 def test_commit_freezes_exact_command_and_times_out_to_safe_result():
@@ -213,5 +295,7 @@ def test_invalid_live_configuration_keeps_previous_snapshot():
     controller.observe(estimate(4, received_at_s=0.1), now_s=0.1, mode_selected=True)
     updated = controller.update(now_s=0.1)
 
-    assert updated.channels[RCChannel.PITCH] == original.channels[RCChannel.PITCH]
+    assert original.pitch_command_deg == 0.0
+    assert updated.pitch_command_deg == -0.5
+    assert updated.channels[RCChannel.PITCH] == 1504
     assert math.isfinite(updated.pitch_command_deg)

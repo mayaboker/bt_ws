@@ -43,6 +43,7 @@ class ParameterKey:
     OBJ_HEIGHT_M: Final[Literal['OBJ_HEIGHT_M']] = 'OBJ_HEIGHT_M'
     VIS_SPEED_MPS: Final[Literal['VIS_SPEED_MPS']] = 'VIS_SPEED_MPS'
     TRK_PITCH_DEG: Final[Literal['TRK_PITCH_DEG']] = 'TRK_PITCH_DEG'
+    TRK_PITCH_RATE: Final[Literal['TRK_PITCH_RATE']] = 'TRK_PITCH_RATE'
     TRK_YAW_KP: Final[Literal['TRK_YAW_KP']] = 'TRK_YAW_KP'
     TRK_YAW_MAX: Final[Literal['TRK_YAW_MAX']] = 'TRK_YAW_MAX'
     TRK_THR_KP: Final[Literal['TRK_THR_KP']] = 'TRK_THR_KP'
@@ -92,6 +93,7 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'OBJ_HEIGHT_M',
     'VIS_SPEED_MPS',
     'TRK_PITCH_DEG',
+    'TRK_PITCH_RATE',
     'TRK_YAW_KP',
     'TRK_YAW_MAX',
     'TRK_THR_KP',

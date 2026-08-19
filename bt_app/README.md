@@ -37,6 +37,19 @@ lands, and disarms. It is intended for SITL only. Run `--help` to override the
 UDP endpoints, timeouts, RC rate, five-second ALT_HOLD dwell, slow-descent
 throttle, or touchdown altitude.
 
+To continue from automatic takeoff into red-target tracking, start `bt-gst` and
+`bt-app` with the detector visible, then run:
+
+```bash
+uv run python example/send_rc_takeoff_tracker.py
+```
+
+The script selects tracker1 and retries momentary SF pulses until `TRACK` is
+observed. It waits for the tracker to return automatically to `ALT_HOLD`, then
+lands and disarms through MANUAL mode. Tracker entry and tracking timeouts first
+disable tracking and attempt the same controlled landing before reporting
+failure. Run `--help` to configure the pulse duration and both timeouts.
+
 To test a purely manual climb to 3 m before entering ALT_HOLD for 10 seconds,
 then return to MANUAL for landing and disarm, run:
 

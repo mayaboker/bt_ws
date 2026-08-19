@@ -25,6 +25,7 @@ class TrackerPhase(StrEnum):
 @dataclass(frozen=True, slots=True)
 class TrackerConfig:
     pitch_deg: float
+    pitch_rate_deg_s: float
     yaw_kp: float
     yaw_max_dps: float
     throttle_kp: float
@@ -41,6 +42,7 @@ class TrackerConfig:
     def __post_init__(self) -> None:
         numeric = (
             self.pitch_deg,
+            self.pitch_rate_deg_s,
             self.yaw_kp,
             self.yaw_max_dps,
             self.throttle_kp,
@@ -57,6 +59,8 @@ class TrackerConfig:
             raise ValueError("tracker configuration must be finite")
         if self.pitch_deg > 0 or abs(self.pitch_deg) > self.angle_limit_deg:
             raise ValueError("tracker pitch must be forward and within angle limit")
+        if self.pitch_rate_deg_s <= 0:
+            raise ValueError("tracker pitch rate must be positive")
         if self.yaw_kp < 0 or self.yaw_max_dps < 0:
             raise ValueError("tracker yaw values must be nonnegative")
         if self.throttle_kp < 0 or self.throttle_max_rc < 0:
@@ -76,6 +80,7 @@ class TrackerConfig:
     def from_parameters(cls, parameters: Parameters) -> "TrackerConfig":
         return cls(
             pitch_deg=parameters.get(ParameterKey.TRK_PITCH_DEG),
+            pitch_rate_deg_s=parameters.get(ParameterKey.TRK_PITCH_RATE),
             yaw_kp=parameters.get(ParameterKey.TRK_YAW_KP),
             yaw_max_dps=parameters.get(ParameterKey.TRK_YAW_MAX),
             throttle_kp=parameters.get(ParameterKey.TRK_THR_KP),
@@ -106,6 +111,7 @@ class TrackerControlResult:
 
 _PARAMETER_FIELDS = {
     ParameterKey.TRK_PITCH_DEG: "pitch_deg",
+    ParameterKey.TRK_PITCH_RATE: "pitch_rate_deg_s",
     ParameterKey.TRK_YAW_KP: "yaw_kp",
     ParameterKey.TRK_YAW_MAX: "yaw_max_dps",
     ParameterKey.TRK_THR_KP: "throttle_kp",
@@ -139,6 +145,9 @@ class TrackerController:
         self._commit_deadline_s: float | None = None
         self._last_result: TrackerControlResult | None = None
         self._frozen_result: TrackerControlResult | None = None
+        self._command_pitch_deg = 0.0
+        self._last_pitch_update_s: float | None = None
+        self._observation_valid = False
         parameters.on_parameter_changed.subscribe(self.on_parameter_changed)
 
     @property
@@ -184,9 +193,11 @@ class TrackerController:
         fresh = self._is_fresh_valid(estimate, now_s)
         if self._active:
             if not fresh:
-                self._latest_estimate = estimate
-                self._exit_requested = True
+                self._observation_valid = False
+                if not self._is_fresh_valid(self._latest_estimate, now_s):
+                    self._exit_requested = True
                 return False
+            self._observation_valid = True
             self._latest_estimate = estimate
             return False
 
@@ -213,6 +224,9 @@ class TrackerController:
         self._last_command_frame_id = None
         self._last_result = None
         self._frozen_result = None
+        self._command_pitch_deg = 0.0
+        self._last_pitch_update_s = None
+        self._observation_valid = True
 
     def stop_tracking(self) -> None:
         self._active = False
@@ -222,6 +236,9 @@ class TrackerController:
         self._last_command_frame_id = None
         self._last_result = None
         self._frozen_result = None
+        self._command_pitch_deg = 0.0
+        self._last_pitch_update_s = None
+        self._observation_valid = False
         self._clear_acquisition()
 
     def update(self, *, now_s: float) -> TrackerControlResult:
@@ -247,13 +264,27 @@ class TrackerController:
         if estimate is None:
             self._exit_requested = True
             return self._safe_result(config, "target estimate is unavailable")
+
+        if not self._observation_valid:
+            self._last_pitch_update_s = now_s
+            if self._last_result is not None:
+                return self._last_result
+            return self._safe_result(config, "target estimate is temporarily invalid")
+
+        previous_pitch_deg = self._command_pitch_deg
+        self._command_pitch_deg = self._slew_pitch(config, now_s)
         if (
             estimate.frame_id == self._last_command_frame_id
             and self._last_result is not None
+            and self._command_pitch_deg == previous_pitch_deg
         ):
             return self._last_result
 
-        result = self._tracking_result(estimate, config)
+        result = self._tracking_result(
+            estimate,
+            config,
+            pitch_command_deg=self._command_pitch_deg,
+        )
         self._last_command_frame_id = estimate.frame_id
         if estimate.depth_m is not None and estimate.depth_m <= config.commit_depth_m:
             self._phase = TrackerPhase.COMMIT
@@ -277,6 +308,8 @@ class TrackerController:
         self,
         estimate: TargetEstimate,
         config: TrackerConfig,
+        *,
+        pitch_command_deg: float,
     ) -> TrackerControlResult:
         if estimate.error_x is None or estimate.error_y is None:
             raise ValueError("valid target estimate is missing center errors")
@@ -296,12 +329,13 @@ class TrackerController:
             yaw_rate_full_stick_dps=config.yaw_stick_rate_dps
         )
         pitch_rc = mapper.angle_to_rc(
-            config.pitch_deg,
+            pitch_command_deg,
             angle_limit_deg=config.angle_limit_deg,
+            sign=-1.0,
         )
         hover_fraction = (config.hover_baseline_rc - RC_MIN) / (RC_MAX - RC_MIN)
         throttle_ff = RC_MIN + (RC_MAX - RC_MIN) * hover_fraction / max(
-            math.cos(math.radians(config.pitch_deg)),
+            math.cos(math.radians(pitch_command_deg)),
             0.35,
         )
         channels = self._channels(
@@ -314,11 +348,26 @@ class TrackerController:
             phase=TrackerPhase.TRACKING,
             error_x=estimate.error_x,
             error_y=estimate.error_y,
-            pitch_command_deg=config.pitch_deg,
+            pitch_command_deg=pitch_command_deg,
             yaw_rate_dps=yaw_rate,
             throttle_correction_rc=throttle_correction,
             valid=True,
         )
+
+    def _slew_pitch(self, config: TrackerConfig, now_s: float) -> float:
+        if self._last_pitch_update_s is None:
+            self._last_pitch_update_s = now_s
+            return self._command_pitch_deg
+
+        dt_s = max(0.0, now_s - self._last_pitch_update_s)
+        self._last_pitch_update_s = now_s
+        maximum_step = config.pitch_rate_deg_s * dt_s
+        target = config.pitch_deg
+        if self._command_pitch_deg < target:
+            return min(target, self._command_pitch_deg + maximum_step)
+        if self._command_pitch_deg > target:
+            return max(target, self._command_pitch_deg - maximum_step)
+        return self._command_pitch_deg
 
     def _safe_result(self, config: TrackerConfig, reason: str) -> TrackerControlResult:
         return TrackerControlResult(

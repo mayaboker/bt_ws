@@ -195,6 +195,10 @@ parameters:
     type: float
     default: -10.0
     limits: {min: -30.0, max: 0.0}
+  TRK_PITCH_RATE:
+    type: float
+    default: 5.0
+    limits: {min: 0.1, max: 90.0}
   TRK_YAW_KP:
     type: float
     default: 15.0
