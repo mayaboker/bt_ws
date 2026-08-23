@@ -1,5 +1,8 @@
 # Red-target tracker controller
 
+For the proposed GPS-free cascaded velocity architecture, see
+[Cascaded visual tracker redesign](tracker_cascade_redesign.md).
+
 ## Objective
 
 The tracker controller guides the drone toward a red target while keeping the
@@ -18,6 +21,9 @@ does not change the trajectory.
 This document describes the implemented POC and its deferred production work.
 
 ## System boundary and data flow
+
+For the application TRACK state, acquisition flags, and internal phase
+transitions, see [Tracker states and phases](tracker_states_and_phases.md).
 
 The GStreamer process publishes `TrackerResultMessage`. The existing visual
 bridge and distance-estimator service convert it into a controller-facing
