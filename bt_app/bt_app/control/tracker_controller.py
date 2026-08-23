@@ -56,12 +56,20 @@ TRACKER_CSV_HEADER = (
     "drone_vertical_speed_age_s",
     "drone_vertical_speed_valid",
     "vertical_speed_requested_m_s",
+    "vertical_speed_limit_m_s",
     "vertical_speed_target_m_s",
     "vertical_speed_setpoint_m_s",
     "vertical_speed_error_m_s",
     "throttle_visual_correction_rc",
     "throttle_damping_correction_rc",
     "throttle_correction_rc",
+    "terminal_ready",
+    "terminal_block_reason",
+    "terminal_ready_elapsed_s",
+    "terminal_elapsed_s",
+    "live_vertical_speed_m_s",
+    "live_vertical_speed_age_s",
+    "live_vertical_speed_valid",
     "ch1_roll",
     "ch2_pitch",
     "ch3_throttle",
@@ -78,12 +86,20 @@ TRACKER_CSV_HEADER = (
     "trk_vertical_speed_kd",
     "trk_vertical_speed_max_m_s",
     "trk_vertical_speed_accel_m_s2",
+    "trk_vertical_speed_near_m_s",
+    "trk_vertical_speed_taper_start_m",
+    "trk_vertical_speed_taper_end_m",
+    "trk_vertical_speed_brake_m_s2",
     "trk_throttle_max_rc",
     "trk_deadband",
     "trk_timeout_s",
     "trk_lock_frames",
     "trk_commit_depth_m",
     "trk_commit_s",
+    "trk_commit_xy",
+    "trk_commit_vertical_speed_m_s",
+    "trk_commit_hold_s",
+    "trk_terminal_timeout_s",
     "bf_angle_limit_deg",
     "hover_baseline_rc",
     "bf_yaw_rate_dps",
@@ -96,6 +112,7 @@ _VERTICAL_SPEED_TIMEOUT_S = 0.30
 
 class TrackerPhase(StrEnum):
     TRACKING = "tracking"
+    TERMINAL = "terminal"
     COMMIT = "commit"
 
 
@@ -109,12 +126,20 @@ class TrackerConfig:
     vertical_speed_kd: float
     vertical_speed_max_m_s: float
     vertical_speed_accel_m_s2: float
+    vertical_speed_near_m_s: float
+    vertical_speed_taper_start_m: float
+    vertical_speed_taper_end_m: float
+    vertical_speed_brake_m_s2: float
     throttle_max_rc: float
     deadband: float
     timeout_s: float
     lock_frames: int
     commit_depth_m: float
     commit_s: float
+    commit_xy: float
+    commit_vertical_speed_m_s: float
+    commit_hold_s: float
+    terminal_timeout_s: float
     angle_limit_deg: float
     hover_baseline_rc: float
     yaw_stick_rate_dps: float
@@ -129,11 +154,19 @@ class TrackerConfig:
             self.vertical_speed_kd,
             self.vertical_speed_max_m_s,
             self.vertical_speed_accel_m_s2,
+            self.vertical_speed_near_m_s,
+            self.vertical_speed_taper_start_m,
+            self.vertical_speed_taper_end_m,
+            self.vertical_speed_brake_m_s2,
             self.throttle_max_rc,
             self.deadband,
             self.timeout_s,
             self.commit_depth_m,
             self.commit_s,
+            self.commit_xy,
+            self.commit_vertical_speed_m_s,
+            self.commit_hold_s,
+            self.terminal_timeout_s,
             self.angle_limit_deg,
             self.hover_baseline_rc,
             self.yaw_stick_rate_dps,
@@ -151,15 +184,32 @@ class TrackerConfig:
             or self.vertical_speed_kd <= 0
             or self.vertical_speed_max_m_s <= 0
             or self.vertical_speed_accel_m_s2 <= 0
+            or self.vertical_speed_near_m_s <= 0
+            or self.vertical_speed_brake_m_s2 <= 0
             or self.throttle_max_rc < 0
         ):
             raise ValueError("tracker throttle values must be nonnegative")
+        if self.vertical_speed_near_m_s > self.vertical_speed_max_m_s:
+            raise ValueError("tracker near vertical speed cannot exceed far speed")
+        if not (
+            self.vertical_speed_taper_start_m
+            > self.vertical_speed_taper_end_m
+            >= self.commit_depth_m
+        ):
+            raise ValueError("tracker vertical-speed taper depths are invalid")
         if not 0 <= self.deadband < 1:
             raise ValueError("tracker deadband must be in [0, 1)")
         if self.timeout_s <= 0 or self.lock_frames <= 0:
             raise ValueError("tracker timeout and lock frames must be positive")
         if self.commit_depth_m <= 0 or self.commit_s < 0:
             raise ValueError("tracker commit values are invalid")
+        if (
+            not 0 <= self.commit_xy < 1
+            or self.commit_vertical_speed_m_s < 0
+            or self.commit_hold_s < 0
+            or self.terminal_timeout_s <= 0
+        ):
+            raise ValueError("tracker terminal values are invalid")
         if self.angle_limit_deg <= 0 or self.yaw_stick_rate_dps <= 0:
             raise ValueError("flight-controller mapping limits must be positive")
         if not RC_MIN <= self.hover_baseline_rc <= RC_MAX:
@@ -176,12 +226,22 @@ class TrackerConfig:
             vertical_speed_kd=parameters.get(ParameterKey.TRK_VZ_KD),
             vertical_speed_max_m_s=parameters.get(ParameterKey.TRK_VZ_MAX),
             vertical_speed_accel_m_s2=parameters.get(ParameterKey.TRK_VZ_ACCEL),
+            vertical_speed_near_m_s=parameters.get(ParameterKey.TRK_VZ_NEAR),
+            vertical_speed_taper_start_m=parameters.get(
+                ParameterKey.TRK_VZ_TAPER_S
+            ),
+            vertical_speed_taper_end_m=parameters.get(ParameterKey.TRK_VZ_TAPER_E),
+            vertical_speed_brake_m_s2=parameters.get(ParameterKey.TRK_VZ_BRAKE),
             throttle_max_rc=parameters.get(ParameterKey.TRK_THR_MAX),
             deadband=parameters.get(ParameterKey.TRK_DEADBAND),
             timeout_s=parameters.get(ParameterKey.TRK_TIMEOUT_S),
             lock_frames=parameters.get(ParameterKey.TRK_LOCK_FRAMES),
             commit_depth_m=parameters.get(ParameterKey.TRK_COMMIT_M),
             commit_s=parameters.get(ParameterKey.TRK_COMMIT_S),
+            commit_xy=parameters.get(ParameterKey.TRK_COMMIT_XY),
+            commit_vertical_speed_m_s=parameters.get(ParameterKey.TRK_COMMIT_VZ),
+            commit_hold_s=parameters.get(ParameterKey.TRK_COMMIT_HOLD),
+            terminal_timeout_s=parameters.get(ParameterKey.TRK_TERM_TIMEOUT),
             angle_limit_deg=parameters.get(ParameterKey.BF_ANGLE_LIMIT),
             hover_baseline_rc=parameters.get(ParameterKey.HOV_BASELINE),
             yaw_stick_rate_dps=parameters.get(ParameterKey.BF_YAW_RATE),
@@ -200,12 +260,17 @@ class TrackerControlResult:
     drone_vertical_speed_age_s: float | None
     drone_vertical_speed_valid: bool
     vertical_speed_requested_m_s: float | None
+    vertical_speed_limit_m_s: float | None
     vertical_speed_target_m_s: float | None
     vertical_speed_setpoint_m_s: float | None
     vertical_speed_error_m_s: float | None
     throttle_visual_correction_rc: float
     throttle_damping_correction_rc: float
     throttle_correction_rc: float
+    terminal_ready: bool
+    terminal_block_reason: str | None
+    terminal_ready_elapsed_s: float | None
+    terminal_elapsed_s: float | None
     valid: bool
     reason: str | None = None
 
@@ -219,12 +284,20 @@ _PARAMETER_FIELDS = {
     ParameterKey.TRK_VZ_KD: "vertical_speed_kd",
     ParameterKey.TRK_VZ_MAX: "vertical_speed_max_m_s",
     ParameterKey.TRK_VZ_ACCEL: "vertical_speed_accel_m_s2",
+    ParameterKey.TRK_VZ_NEAR: "vertical_speed_near_m_s",
+    ParameterKey.TRK_VZ_TAPER_S: "vertical_speed_taper_start_m",
+    ParameterKey.TRK_VZ_TAPER_E: "vertical_speed_taper_end_m",
+    ParameterKey.TRK_VZ_BRAKE: "vertical_speed_brake_m_s2",
     ParameterKey.TRK_THR_MAX: "throttle_max_rc",
     ParameterKey.TRK_DEADBAND: "deadband",
     ParameterKey.TRK_TIMEOUT_S: "timeout_s",
     ParameterKey.TRK_LOCK_FRAMES: "lock_frames",
     ParameterKey.TRK_COMMIT_M: "commit_depth_m",
     ParameterKey.TRK_COMMIT_S: "commit_s",
+    ParameterKey.TRK_COMMIT_XY: "commit_xy",
+    ParameterKey.TRK_COMMIT_VZ: "commit_vertical_speed_m_s",
+    ParameterKey.TRK_COMMIT_HOLD: "commit_hold_s",
+    ParameterKey.TRK_TERM_TIMEOUT: "terminal_timeout_s",
     ParameterKey.BF_ANGLE_LIMIT: "angle_limit_deg",
     ParameterKey.HOV_BASELINE: "hover_baseline_rc",
     ParameterKey.BF_YAW_RATE: "yaw_stick_rate_dps",
@@ -252,12 +325,17 @@ class TrackerController:
         self._completion_latched = False
         self._phase = TrackerPhase.TRACKING
         self._commit_deadline_s: float | None = None
+        self._terminal_started_at_s: float | None = None
+        self._terminal_ready_since_s: float | None = None
         self._last_result: TrackerControlResult | None = None
         self._frozen_result: TrackerControlResult | None = None
         self._command_pitch_deg = 0.0
         self._last_pitch_update_s: float | None = None
         self._vertical_speed_setpoint_m_s: float | None = None
         self._last_vertical_speed_setpoint_update_s: float | None = None
+        self._live_vertical_speed_m_s: float | None = None
+        self._live_vertical_speed_age_s: float | None = None
+        self._live_vertical_speed_valid = False
         self._approach_initial_depth_m: float | None = None
         self._approach_start_depth_m: float | None = None
         self._approach_closest_depth_m: float | None = None
@@ -327,6 +405,8 @@ class TrackerController:
         if self._active:
             if not fresh:
                 self._observation_valid = False
+                if self._phase == TrackerPhase.TERMINAL:
+                    self._terminal_ready_since_s = None
                 if not self._is_fresh_valid(self._latest_estimate, now_s):
                     self._exit_requested = True
                 return False
@@ -368,6 +448,8 @@ class TrackerController:
         self._ready_to_track = False
         self._phase = TrackerPhase.TRACKING
         self._commit_deadline_s = None
+        self._terminal_started_at_s = None
+        self._terminal_ready_since_s = None
         self._last_result = None
         self._frozen_result = None
         self._command_pitch_deg = 0.0
@@ -398,12 +480,17 @@ class TrackerController:
         self._exit_requested = False
         self._phase = TrackerPhase.TRACKING
         self._commit_deadline_s = None
+        self._terminal_started_at_s = None
+        self._terminal_ready_since_s = None
         self._last_result = None
         self._frozen_result = None
         self._command_pitch_deg = 0.0
         self._last_pitch_update_s = None
         self._vertical_speed_setpoint_m_s = None
         self._last_vertical_speed_setpoint_update_s = None
+        self._live_vertical_speed_m_s = None
+        self._live_vertical_speed_age_s = None
+        self._live_vertical_speed_valid = False
         self._approach_initial_depth_m = None
         self._approach_start_depth_m = None
         self._approach_closest_depth_m = None
@@ -422,6 +509,17 @@ class TrackerController:
         if not self._active:
             return self._safe_result(config, "tracker controller is inactive")
 
+        vertical_speed, vertical_speed_age_s, vertical_speed_valid = (
+            self._validate_vertical_speed(
+                now_s=now_s,
+                vertical_speed_m_s=vertical_speed_m_s,
+                sample_time_s=vertical_speed_sample_time_s,
+            )
+        )
+        self._live_vertical_speed_m_s = vertical_speed
+        self._live_vertical_speed_age_s = vertical_speed_age_s
+        self._live_vertical_speed_valid = vertical_speed_valid
+
         if self._phase == TrackerPhase.COMMIT:
             if (
                 self._commit_deadline_s is not None
@@ -435,13 +533,6 @@ class TrackerController:
             if self._frozen_result is not None:
                 return self._record_result(self._frozen_result, now_s, config)
 
-        vertical_speed, vertical_speed_age_s, vertical_speed_valid = (
-            self._validate_vertical_speed(
-                now_s=now_s,
-                vertical_speed_m_s=vertical_speed_m_s,
-                sample_time_s=vertical_speed_sample_time_s,
-            )
-        )
         if not vertical_speed_valid or vertical_speed is None:
             self._exit_requested = True
             stale_result = replace(
@@ -472,7 +563,20 @@ class TrackerController:
                 config,
             )
 
+        if (
+            self._phase == TrackerPhase.TERMINAL
+            and self._terminal_started_at_s is not None
+            and now_s - self._terminal_started_at_s >= config.terminal_timeout_s
+        ):
+            self._exit_requested = True
+            return self._record_result(
+                self._safe_result(config, "terminal stabilization timeout"),
+                now_s,
+                config,
+            )
+
         if not self._observation_valid:
+            self._terminal_ready_since_s = None
             self._last_pitch_update_s = now_s
             self._last_vertical_speed_setpoint_update_s = now_s
             if self._last_result is not None:
@@ -483,7 +587,18 @@ class TrackerController:
                 config,
             )
 
+        if (
+            self._phase == TrackerPhase.TRACKING
+            and estimate.depth_m is not None
+            and estimate.depth_m <= config.commit_depth_m
+        ):
+            self._phase = TrackerPhase.TERMINAL
+            self._terminal_started_at_s = now_s
+            self._terminal_ready_since_s = None
+
         target_pitch_deg = self._approach_pitch_target(estimate, config)
+        if self._phase == TrackerPhase.TERMINAL:
+            target_pitch_deg = _APPROACH_TERMINAL_PITCH_DEG
         self._command_pitch_deg = self._slew_pitch(
             config,
             now_s,
@@ -497,12 +612,17 @@ class TrackerController:
             vertical_speed_m_s=vertical_speed,
             vertical_speed_age_s=vertical_speed_age_s,
             vertical_speed_valid=vertical_speed_valid,
+            force_stop=self._phase == TrackerPhase.TERMINAL,
         )
-        if estimate.depth_m is not None and estimate.depth_m <= config.commit_depth_m:
-            self._phase = TrackerPhase.COMMIT
-            self._commit_deadline_s = now_s + config.commit_s
-            result = replace(result, phase=TrackerPhase.COMMIT)
-            self._frozen_result = result
+        result = replace(result, phase=self._phase)
+        if self._phase == TrackerPhase.TERMINAL:
+            result = self._terminal_result(
+                result,
+                config,
+                estimate=estimate,
+                vertical_speed_m_s=vertical_speed,
+                now_s=now_s,
+            )
         self._last_result = result
         return self._record_result(result, now_s, config)
 
@@ -526,6 +646,7 @@ class TrackerController:
         vertical_speed_m_s: float | None,
         vertical_speed_age_s: float | None,
         vertical_speed_valid: bool,
+        force_stop: bool = False,
     ) -> TrackerControlResult:
         if estimate.error_x is None or estimate.error_y is None:
             raise ValueError("valid target estimate is missing center errors")
@@ -541,11 +662,14 @@ class TrackerController:
         vertical_speed_requested = (
             config.throttle_kp / config.vertical_speed_kd * error_y
         )
+        vertical_speed_limit = self._vertical_speed_limit(config, estimate.depth_m)
         vertical_speed_target = clamp(
             vertical_speed_requested,
-            -config.vertical_speed_max_m_s,
-            config.vertical_speed_max_m_s,
+            -vertical_speed_limit,
+            vertical_speed_limit,
         )
+        if force_stop:
+            vertical_speed_target = 0.0
         vertical_speed_setpoint = self._slew_vertical_speed_setpoint(
             config,
             now_s,
@@ -592,14 +716,64 @@ class TrackerController:
             drone_vertical_speed_age_s=vertical_speed_age_s,
             drone_vertical_speed_valid=vertical_speed_valid,
             vertical_speed_requested_m_s=vertical_speed_requested,
+            vertical_speed_limit_m_s=vertical_speed_limit,
             vertical_speed_target_m_s=vertical_speed_target,
             vertical_speed_setpoint_m_s=vertical_speed_setpoint,
             vertical_speed_error_m_s=vertical_speed_error,
             throttle_visual_correction_rc=throttle_visual_correction,
             throttle_damping_correction_rc=throttle_damping_correction,
             throttle_correction_rc=throttle_correction,
+            terminal_ready=False,
+            terminal_block_reason=None,
+            terminal_ready_elapsed_s=None,
+            terminal_elapsed_s=None,
             valid=True,
         )
+
+    def _terminal_result(
+        self,
+        result: TrackerControlResult,
+        config: TrackerConfig,
+        *,
+        estimate: TargetEstimate,
+        vertical_speed_m_s: float,
+        now_s: float,
+    ) -> TrackerControlResult:
+        block_reason: str | None = None
+        if estimate.error_x is None or abs(estimate.error_x) > config.commit_xy:
+            block_reason = "horizontal alignment"
+        elif estimate.error_y is None or abs(estimate.error_y) > config.commit_xy:
+            block_reason = "vertical alignment"
+        elif abs(vertical_speed_m_s) > config.commit_vertical_speed_m_s:
+            block_reason = "vertical speed"
+
+        if block_reason is None:
+            if self._terminal_ready_since_s is None:
+                self._terminal_ready_since_s = now_s
+            ready_elapsed_s = now_s - self._terminal_ready_since_s
+        else:
+            self._terminal_ready_since_s = None
+            ready_elapsed_s = 0.0
+
+        terminal_elapsed_s = (
+            0.0
+            if self._terminal_started_at_s is None
+            else now_s - self._terminal_started_at_s
+        )
+        ready = block_reason is None and ready_elapsed_s >= config.commit_hold_s
+        result = replace(
+            result,
+            terminal_ready=ready,
+            terminal_block_reason=block_reason,
+            terminal_ready_elapsed_s=ready_elapsed_s,
+            terminal_elapsed_s=terminal_elapsed_s,
+        )
+        if ready:
+            self._phase = TrackerPhase.COMMIT
+            self._commit_deadline_s = now_s + config.commit_s
+            result = replace(result, phase=TrackerPhase.COMMIT)
+            self._frozen_result = result
+        return result
 
     def _approach_pitch_target(
         self,
@@ -679,21 +853,65 @@ class TrackerController:
             current = 0.0
             previous_time_s = now_s
 
-        maximum_step = config.vertical_speed_accel_m_s2 * max(
-            0.0,
-            now_s - previous_time_s,
-        )
-        if current < target_m_s:
-            current = min(target_m_s, current + maximum_step)
-        elif current > target_m_s:
-            current = max(target_m_s, current - maximum_step)
-        current = clamp(
-            current,
-            -config.vertical_speed_max_m_s,
-            config.vertical_speed_max_m_s,
-        )
+        dt_s = max(0.0, now_s - previous_time_s)
+        if current * target_m_s < 0.0:
+            time_to_zero_s = abs(current) / config.vertical_speed_brake_m_s2
+            if dt_s <= time_to_zero_s:
+                current = self._move_toward(
+                    current,
+                    0.0,
+                    config.vertical_speed_brake_m_s2 * dt_s,
+                )
+            else:
+                current = self._move_toward(
+                    0.0,
+                    target_m_s,
+                    config.vertical_speed_accel_m_s2 * (dt_s - time_to_zero_s),
+                )
+        else:
+            rate_m_s2 = (
+                config.vertical_speed_brake_m_s2
+                if abs(target_m_s) < abs(current)
+                else config.vertical_speed_accel_m_s2
+            )
+            current = self._move_toward(current, target_m_s, rate_m_s2 * dt_s)
         self._vertical_speed_setpoint_m_s = current
         self._last_vertical_speed_setpoint_update_s = now_s
+        return current
+
+    def _vertical_speed_limit(
+        self,
+        config: TrackerConfig,
+        depth_m: float | None,
+    ) -> float:
+        scheduled_depth_m = self._approach_closest_depth_m
+        if scheduled_depth_m is None:
+            scheduled_depth_m = depth_m
+        if scheduled_depth_m is None:
+            return config.vertical_speed_max_m_s
+        if scheduled_depth_m >= config.vertical_speed_taper_start_m:
+            return config.vertical_speed_max_m_s
+        if scheduled_depth_m <= config.vertical_speed_taper_end_m:
+            return config.vertical_speed_near_m_s
+        progress = (
+            config.vertical_speed_taper_start_m - scheduled_depth_m
+        ) / (
+            config.vertical_speed_taper_start_m
+            - config.vertical_speed_taper_end_m
+        )
+        smooth_progress = (
+            6.0 * progress**5 - 15.0 * progress**4 + 10.0 * progress**3
+        )
+        return config.vertical_speed_max_m_s + (
+            config.vertical_speed_near_m_s - config.vertical_speed_max_m_s
+        ) * smooth_progress
+
+    @staticmethod
+    def _move_toward(current: float, target: float, maximum_step: float) -> float:
+        if current < target:
+            return min(target, current + maximum_step)
+        if current > target:
+            return max(target, current - maximum_step)
         return current
 
     @staticmethod
@@ -731,12 +949,17 @@ class TrackerController:
             drone_vertical_speed_age_s=None,
             drone_vertical_speed_valid=False,
             vertical_speed_requested_m_s=None,
+            vertical_speed_limit_m_s=None,
             vertical_speed_target_m_s=None,
             vertical_speed_setpoint_m_s=self._vertical_speed_setpoint_m_s,
             vertical_speed_error_m_s=None,
             throttle_visual_correction_rc=0.0,
             throttle_damping_correction_rc=0.0,
             throttle_correction_rc=0.0,
+            terminal_ready=False,
+            terminal_block_reason=None,
+            terminal_ready_elapsed_s=None,
+            terminal_elapsed_s=None,
             valid=False,
             reason=reason,
         )
@@ -805,6 +1028,7 @@ class TrackerController:
             "drone_vertical_speed_age_s": result.drone_vertical_speed_age_s,
             "drone_vertical_speed_valid": result.drone_vertical_speed_valid,
             "vertical_speed_requested_m_s": result.vertical_speed_requested_m_s,
+            "vertical_speed_limit_m_s": result.vertical_speed_limit_m_s,
             "vertical_speed_target_m_s": result.vertical_speed_target_m_s,
             "vertical_speed_setpoint_m_s": result.vertical_speed_setpoint_m_s,
             "vertical_speed_error_m_s": result.vertical_speed_error_m_s,
@@ -815,6 +1039,13 @@ class TrackerController:
                 result.throttle_damping_correction_rc
             ),
             "throttle_correction_rc": result.throttle_correction_rc,
+            "terminal_ready": result.terminal_ready,
+            "terminal_block_reason": result.terminal_block_reason,
+            "terminal_ready_elapsed_s": result.terminal_ready_elapsed_s,
+            "terminal_elapsed_s": result.terminal_elapsed_s,
+            "live_vertical_speed_m_s": self._live_vertical_speed_m_s,
+            "live_vertical_speed_age_s": self._live_vertical_speed_age_s,
+            "live_vertical_speed_valid": self._live_vertical_speed_valid,
             "ch1_roll": channels[0],
             "ch2_pitch": channels[1],
             "ch3_throttle": channels[2],
@@ -831,12 +1062,22 @@ class TrackerController:
             "trk_vertical_speed_kd": config.vertical_speed_kd,
             "trk_vertical_speed_max_m_s": config.vertical_speed_max_m_s,
             "trk_vertical_speed_accel_m_s2": config.vertical_speed_accel_m_s2,
+            "trk_vertical_speed_near_m_s": config.vertical_speed_near_m_s,
+            "trk_vertical_speed_taper_start_m": (
+                config.vertical_speed_taper_start_m
+            ),
+            "trk_vertical_speed_taper_end_m": config.vertical_speed_taper_end_m,
+            "trk_vertical_speed_brake_m_s2": config.vertical_speed_brake_m_s2,
             "trk_throttle_max_rc": config.throttle_max_rc,
             "trk_deadband": config.deadband,
             "trk_timeout_s": config.timeout_s,
             "trk_lock_frames": config.lock_frames,
             "trk_commit_depth_m": config.commit_depth_m,
             "trk_commit_s": config.commit_s,
+            "trk_commit_xy": config.commit_xy,
+            "trk_commit_vertical_speed_m_s": config.commit_vertical_speed_m_s,
+            "trk_commit_hold_s": config.commit_hold_s,
+            "trk_terminal_timeout_s": config.terminal_timeout_s,
             "bf_angle_limit_deg": config.angle_limit_deg,
             "hover_baseline_rc": config.hover_baseline_rc,
             "bf_yaw_rate_dps": config.yaw_stick_rate_dps,

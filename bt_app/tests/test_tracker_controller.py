@@ -36,12 +36,20 @@ class FakeParameters:
             ParameterKey.TRK_VZ_KD: 20.0,
             ParameterKey.TRK_VZ_MAX: 1.0,
             ParameterKey.TRK_VZ_ACCEL: 0.75,
+            ParameterKey.TRK_VZ_NEAR: 0.5,
+            ParameterKey.TRK_VZ_TAPER_S: 6.0,
+            ParameterKey.TRK_VZ_TAPER_E: 2.0,
+            ParameterKey.TRK_VZ_BRAKE: 1.5,
             ParameterKey.TRK_THR_MAX: 100.0,
             ParameterKey.TRK_DEADBAND: 0.03,
             ParameterKey.TRK_TIMEOUT_S: 0.25,
             ParameterKey.TRK_LOCK_FRAMES: 3,
             ParameterKey.TRK_COMMIT_M: 1.0,
             ParameterKey.TRK_COMMIT_S: 1.0,
+            ParameterKey.TRK_COMMIT_XY: 0.1,
+            ParameterKey.TRK_COMMIT_VZ: 0.5,
+            ParameterKey.TRK_COMMIT_HOLD: 0.25,
+            ParameterKey.TRK_TERM_TIMEOUT: 2.0,
             ParameterKey.BF_ANGLE_LIMIT: 60.0,
             ParameterKey.HOV_BASELINE: 1500,
             ParameterKey.BF_YAW_RATE: 67.0,
@@ -55,7 +63,7 @@ def estimate(
     frame_id=1,
     *,
     received_at_s=0.0,
-    depth_m=5.0,
+    depth_m=10.0,
     error_x=0.0,
     error_y=0.0,
     valid=True,
@@ -195,7 +203,7 @@ def test_pitch_profile_eases_from_cruise_to_terminal_over_depth():
     assert taper_start.pitch_command_deg == -10.0
     assert taper_midpoint.pitch_command_deg == -7.5
     assert taper_end.pitch_command_deg == -5.0
-    assert taper_end.phase == TrackerPhase.COMMIT
+    assert taper_end.phase == TrackerPhase.TERMINAL
 
 
 def test_pitch_profile_progress_does_not_reverse_when_depth_increases():
@@ -319,7 +327,56 @@ def test_vertical_speed_setpoint_is_capped_and_acceleration_limited():
     assert second.vertical_speed_setpoint_m_s == pytest.approx(0.6)
 
 
-def test_vertical_speed_setpoint_reversal_obeys_same_acceleration_limit():
+def test_vertical_speed_limit_tapers_with_closest_depth():
+    controller = TrackerController(FakeParameters())
+    acquire(controller, target=estimate(depth_m=10.0, error_y=-1.0))
+
+    far = update_controller(controller, now_s=0.0)
+    controller.observe(
+        estimate(4, received_at_s=1.0, depth_m=4.0, error_y=-1.0),
+        now_s=1.0,
+        mode_selected=True,
+    )
+    midpoint = update_controller(controller, now_s=1.0)
+    controller.observe(
+        estimate(5, received_at_s=2.0, depth_m=2.0, error_y=-1.0),
+        now_s=2.0,
+        mode_selected=True,
+    )
+    near = update_controller(controller, now_s=2.0)
+    controller.observe(
+        estimate(6, received_at_s=3.0, depth_m=5.0, error_y=-1.0),
+        now_s=3.0,
+        mode_selected=True,
+    )
+    noisy_increase = update_controller(controller, now_s=3.0)
+
+    assert far.vertical_speed_limit_m_s == 1.0
+    assert midpoint.vertical_speed_limit_m_s == pytest.approx(0.75)
+    assert near.vertical_speed_limit_m_s == 0.5
+    assert noisy_increase.vertical_speed_limit_m_s == 0.5
+
+
+def test_vertical_speed_setpoint_brakes_faster_than_it_accelerates():
+    controller = TrackerController(FakeParameters())
+    acquire(
+        controller,
+        target=estimate(error_y=-1.0),
+        vertical_speed_m_s=-1.0,
+    )
+    controller.observe(
+        estimate(4, received_at_s=0.2, error_y=0.0),
+        now_s=0.2,
+        mode_selected=True,
+    )
+
+    braking = update_controller(controller, now_s=0.2)
+
+    assert braking.vertical_speed_target_m_s == 0.0
+    assert braking.vertical_speed_setpoint_m_s == pytest.approx(-0.7)
+
+
+def test_vertical_speed_setpoint_reversal_brakes_to_zero_before_reversing():
     controller = TrackerController(FakeParameters())
     acquire(controller, target=estimate(error_y=1.0))
     controller.observe(
@@ -337,7 +394,7 @@ def test_vertical_speed_setpoint_reversal_obeys_same_acceleration_limit():
     reversing = update_controller(controller, now_s=1.2)
 
     assert reversing.vertical_speed_target_m_s == -1.0
-    assert reversing.vertical_speed_setpoint_m_s == pytest.approx(0.3)
+    assert reversing.vertical_speed_setpoint_m_s == pytest.approx(0.0)
 
 
 def test_tracking_start_requires_fresh_vertical_speed():
@@ -558,19 +615,31 @@ def test_commit_freezes_exact_command_and_times_out_to_safe_result():
     controller = TrackerController(parameters)
     acquire(
         controller,
-        target=estimate(depth_m=0.8, error_x=0.2, error_y=0.1),
+        target=estimate(depth_m=0.8, error_x=0.05, error_y=0.05),
     )
 
-    frozen = update_controller(controller,
+    terminal = update_controller(controller,
         now_s=0.0,
-        vertical_speed_m_s=1.0,
+        vertical_speed_m_s=0.0,
         vertical_speed_sample_time_s=0.0,
     )
-    assert frozen.phase == TrackerPhase.COMMIT
-    assert frozen.throttle_damping_correction_rc == -20.0
+    assert terminal.phase == TrackerPhase.TERMINAL
     controller.observe(
-        estimate(4, received_at_s=0.2, depth_m=0.5, error_x=-1.0, error_y=-1.0),
-        now_s=0.2,
+        estimate(4, received_at_s=0.25, depth_m=0.8, error_x=0.05, error_y=0.05),
+        now_s=0.25,
+        mode_selected=True,
+    )
+    frozen = update_controller(
+        controller,
+        now_s=0.25,
+        vertical_speed_m_s=0.0,
+        vertical_speed_sample_time_s=0.25,
+    )
+    assert frozen.phase == TrackerPhase.COMMIT
+    assert frozen.terminal_ready
+    controller.observe(
+        estimate(5, received_at_s=0.5, depth_m=0.5, error_x=-1.0, error_y=-1.0),
+        now_s=0.5,
         mode_selected=True,
     )
     parameters.on_parameter_changed.emit(ParameterKey.TRK_PITCH_DEG, -20.0)
@@ -578,17 +647,75 @@ def test_commit_freezes_exact_command_and_times_out_to_safe_result():
 
     assert (
         update_controller(controller,
-            now_s=0.5,
+            now_s=0.75,
             vertical_speed_m_s=-1.0,
-            vertical_speed_sample_time_s=0.5,
+            vertical_speed_sample_time_s=0.75,
         )
         is frozen
     )
-    expired = update_controller(controller, now_s=1.0)
+    expired = update_controller(controller, now_s=1.25)
     assert not expired.valid
     assert expired.channels[RCChannel.PITCH] == RC_MID
     assert controller.exit_requested
     assert controller.completion_latched
+
+
+def test_terminal_gate_resets_hold_when_alignment_becomes_unsafe():
+    controller = TrackerController(FakeParameters())
+    acquire(
+        controller,
+        target=estimate(depth_m=0.8, error_x=0.05, error_y=0.05),
+    )
+    first = update_controller(controller, now_s=0.0)
+    assert first.phase == TrackerPhase.TERMINAL
+
+    controller.observe(
+        estimate(4, received_at_s=0.2, depth_m=0.8, error_x=0.2, error_y=0.05),
+        now_s=0.2,
+        mode_selected=True,
+    )
+    blocked = update_controller(controller, now_s=0.2)
+    assert blocked.terminal_block_reason == "horizontal alignment"
+
+    controller.observe(
+        estimate(5, received_at_s=0.3, depth_m=0.8, error_x=0.05, error_y=0.05),
+        now_s=0.3,
+        mode_selected=True,
+    )
+    restarted = update_controller(controller, now_s=0.3)
+    assert restarted.phase == TrackerPhase.TERMINAL
+    controller.observe(
+        estimate(6, received_at_s=0.55, depth_m=0.8, error_x=0.05, error_y=0.05),
+        now_s=0.55,
+        mode_selected=True,
+    )
+    ready = update_controller(controller, now_s=0.55)
+    assert ready.phase == TrackerPhase.COMMIT
+
+
+def test_terminal_gate_rejects_high_vertical_speed_and_times_out_safely():
+    controller = TrackerController(FakeParameters())
+    acquire(controller, target=estimate(depth_m=0.8))
+
+    terminal = update_controller(controller, now_s=0.0, vertical_speed_m_s=-1.0)
+    assert terminal.phase == TrackerPhase.TERMINAL
+    assert terminal.terminal_block_reason == "vertical speed"
+    controller.observe(
+        estimate(4, received_at_s=2.0, depth_m=0.8),
+        now_s=2.0,
+        mode_selected=True,
+    )
+    timed_out = update_controller(
+        controller,
+        now_s=2.0,
+        vertical_speed_m_s=-1.0,
+    )
+
+    assert not timed_out.valid
+    assert timed_out.reason == "terminal stabilization timeout"
+    assert timed_out.channels[RCChannel.PITCH] == RC_MID
+    assert timed_out.channels[RCChannel.THROTTLE] == 1500
+    assert controller.exit_requested
 
 
 def test_completed_session_can_reacquire_while_mode_remains_selected():
@@ -661,6 +788,7 @@ def test_csv_is_buffered_until_track_exit_and_contains_every_update(tmp_path):
     assert rows[0]["drone_vertical_speed_age_s"] == "0.0"
     assert rows[0]["drone_vertical_speed_valid"] == "True"
     assert rows[0]["vertical_speed_requested_m_s"] == "0.0"
+    assert rows[0]["vertical_speed_limit_m_s"] == "1.0"
     assert rows[0]["vertical_speed_target_m_s"] == "0.0"
     assert rows[0]["vertical_speed_setpoint_m_s"] == "0.0"
     assert rows[0]["vertical_speed_error_m_s"] == "-0.4"
@@ -670,6 +798,12 @@ def test_csv_is_buffered_until_track_exit_and_contains_every_update(tmp_path):
     assert rows[0]["trk_vertical_speed_kd"] == "20.0"
     assert rows[0]["trk_vertical_speed_max_m_s"] == "1.0"
     assert rows[0]["trk_vertical_speed_accel_m_s2"] == "0.75"
+    assert rows[0]["trk_vertical_speed_near_m_s"] == "0.5"
+    assert rows[0]["trk_vertical_speed_taper_start_m"] == "6.0"
+    assert rows[0]["trk_vertical_speed_taper_end_m"] == "2.0"
+    assert rows[0]["trk_vertical_speed_brake_m_s2"] == "1.5"
+    assert rows[0]["live_vertical_speed_m_s"] == "0.4"
+    assert rows[0]["live_vertical_speed_valid"] == "True"
 
 
 def test_csv_distinguishes_lost_observation_from_held_control_estimate(tmp_path):
@@ -691,6 +825,27 @@ def test_csv_distinguishes_lost_observation_from_held_control_estimate(tmp_path)
     assert lost["control_dx_norm"] == "0.4"
     assert lost["control_dy_norm"] == "-0.2"
     assert lost["result_valid"] == "True"
+
+
+def test_csv_logs_live_vertical_speed_while_commit_command_is_frozen(tmp_path):
+    path = tmp_path / "tracker_controller.csv"
+    controller = TrackerController(FakeParameters(), csv_path=path)
+    acquire(controller, target=estimate(depth_m=0.8))
+    update_controller(controller, now_s=0.0, vertical_speed_m_s=0.0)
+    controller.observe(
+        estimate(4, received_at_s=0.25, depth_m=0.8),
+        now_s=0.25,
+        mode_selected=True,
+    )
+    frozen = update_controller(controller, now_s=0.25, vertical_speed_m_s=0.0)
+    assert frozen.phase == TrackerPhase.COMMIT
+    update_controller(controller, now_s=0.5, vertical_speed_m_s=-0.4)
+    controller.stop_tracking(end_reason="test")
+
+    commit_row = read_csv(path)[-1]
+    assert commit_row["drone_vertical_speed_m_s"] == "0.0"
+    assert commit_row["live_vertical_speed_m_s"] == "-0.4"
+    assert commit_row["live_vertical_speed_valid"] == "True"
 
 
 def test_new_tracking_session_overwrites_previous_csv(tmp_path):

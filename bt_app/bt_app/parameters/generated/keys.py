@@ -50,12 +50,20 @@ class ParameterKey:
     TRK_VZ_KD: Final[Literal['TRK_VZ_KD']] = 'TRK_VZ_KD'
     TRK_VZ_MAX: Final[Literal['TRK_VZ_MAX']] = 'TRK_VZ_MAX'
     TRK_VZ_ACCEL: Final[Literal['TRK_VZ_ACCEL']] = 'TRK_VZ_ACCEL'
+    TRK_VZ_NEAR: Final[Literal['TRK_VZ_NEAR']] = 'TRK_VZ_NEAR'
+    TRK_VZ_TAPER_S: Final[Literal['TRK_VZ_TAPER_S']] = 'TRK_VZ_TAPER_S'
+    TRK_VZ_TAPER_E: Final[Literal['TRK_VZ_TAPER_E']] = 'TRK_VZ_TAPER_E'
+    TRK_VZ_BRAKE: Final[Literal['TRK_VZ_BRAKE']] = 'TRK_VZ_BRAKE'
     TRK_THR_MAX: Final[Literal['TRK_THR_MAX']] = 'TRK_THR_MAX'
     TRK_DEADBAND: Final[Literal['TRK_DEADBAND']] = 'TRK_DEADBAND'
     TRK_TIMEOUT_S: Final[Literal['TRK_TIMEOUT_S']] = 'TRK_TIMEOUT_S'
     TRK_LOCK_FRAMES: Final[Literal['TRK_LOCK_FRAMES']] = 'TRK_LOCK_FRAMES'
     TRK_COMMIT_M: Final[Literal['TRK_COMMIT_M']] = 'TRK_COMMIT_M'
     TRK_COMMIT_S: Final[Literal['TRK_COMMIT_S']] = 'TRK_COMMIT_S'
+    TRK_COMMIT_XY: Final[Literal['TRK_COMMIT_XY']] = 'TRK_COMMIT_XY'
+    TRK_COMMIT_VZ: Final[Literal['TRK_COMMIT_VZ']] = 'TRK_COMMIT_VZ'
+    TRK_COMMIT_HOLD: Final[Literal['TRK_COMMIT_HOLD']] = 'TRK_COMMIT_HOLD'
+    TRK_TERM_TIMEOUT: Final[Literal['TRK_TERM_TIMEOUT']] = 'TRK_TERM_TIMEOUT'
     BF_ANGLE_LIMIT: Final[Literal['BF_ANGLE_LIMIT']] = 'BF_ANGLE_LIMIT'
 
 
@@ -103,11 +111,19 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'TRK_VZ_KD',
     'TRK_VZ_MAX',
     'TRK_VZ_ACCEL',
+    'TRK_VZ_NEAR',
+    'TRK_VZ_TAPER_S',
+    'TRK_VZ_TAPER_E',
+    'TRK_VZ_BRAKE',
     'TRK_THR_MAX',
     'TRK_DEADBAND',
     'TRK_TIMEOUT_S',
     'TRK_LOCK_FRAMES',
     'TRK_COMMIT_M',
     'TRK_COMMIT_S',
+    'TRK_COMMIT_XY',
+    'TRK_COMMIT_VZ',
+    'TRK_COMMIT_HOLD',
+    'TRK_TERM_TIMEOUT',
     'BF_ANGLE_LIMIT',
 )

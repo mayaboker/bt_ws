@@ -191,6 +191,22 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.TRK_VZ_ACCEL))
 
     @property
+    def trk_vz_near(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_VZ_NEAR))
+
+    @property
+    def trk_vz_taper_s(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_VZ_TAPER_S))
+
+    @property
+    def trk_vz_taper_e(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_VZ_TAPER_E))
+
+    @property
+    def trk_vz_brake(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_VZ_BRAKE))
+
+    @property
     def trk_thr_max(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.TRK_THR_MAX))
 
@@ -213,6 +229,22 @@ class TypedParameters:
     @property
     def trk_commit_s(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.TRK_COMMIT_S))
+
+    @property
+    def trk_commit_xy(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_COMMIT_XY))
+
+    @property
+    def trk_commit_vz(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_COMMIT_VZ))
+
+    @property
+    def trk_commit_hold(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_COMMIT_HOLD))
+
+    @property
+    def trk_term_timeout(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_TERM_TIMEOUT))
 
     @property
     def bf_angle_limit(self) -> float:

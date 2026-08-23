@@ -109,8 +109,9 @@ TrackerController.update(now_s) -> TrackerControlResult
 ```
 
 `TrackerControlResult` contains the complete eight-channel RC command, current
-phase (`TRACKING` or `COMMIT`), image errors, requested pitch, yaw rate, throttle
-correction, validity, and an optional reason. `reset()` clears acquisition,
+phase (`TRACKING`, `TERMINAL`, or `COMMIT`), image errors, requested pitch, yaw
+rate, vertical-speed limit and corrections, terminal readiness diagnostics,
+validity, and an optional reason. `reset()` clears acquisition, terminal and
 commit timing, the frozen command, and completion state.
 
 Only distinct frame IDs advance acquisition or update the tracking command.
@@ -204,8 +205,11 @@ hover_fraction = (HOV_BASELINE - 1000) / 1000
 throttle_ff = 1000 + 1000 * hover_fraction / cos(pitch_command)
 
 raw_vz = (TRK_THR_KP / TRK_VZ_KD) * deadband(error_y, TRK_DEADBAND)
-target_vz = clamp(raw_vz, -TRK_VZ_MAX, +TRK_VZ_MAX)
-setpoint_vz = slew(setpoint_vz, target_vz, TRK_VZ_ACCEL)
+effective_limit = smooth_range_limit(closest_depth, TRK_VZ_MAX, TRK_VZ_NEAR)
+target_vz = clamp(raw_vz, -effective_limit, +effective_limit)
+setpoint_vz = asymmetric_slew(
+    setpoint_vz, target_vz, TRK_VZ_ACCEL, TRK_VZ_BRAKE
+)
 
 visual_correction = TRK_VZ_KD * setpoint_vz
 damping_correction = -TRK_VZ_KD * measured_vertical_speed
@@ -249,18 +253,20 @@ flowchart TB
     TKP --> TSUM
     TSUM --> THROTTLE["THROTTLE RC"]
 
-    DEPTH --> COMMIT{"depth <= 1.0 m?"}
+    DEPTH --> TERMINAL{"depth <= 1.0 m?"}
     PITCH --> COMMAND["complete RC command"]
     YAW --> COMMAND
     THROTTLE --> COMMAND
-    COMMIT -->|no| COMMAND
-    COMMIT -->|yes| FREEZE["freeze complete command"]
+    TERMINAL -->|no| COMMAND
+    TERMINAL -->|yes| GATE{"alignment + speed safe?"}
+    GATE -->|no| COMMAND
+    GATE -->|yes| FREEZE["freeze complete command"]
 ```
 
-## Acquisition, tracking, and commit
+## Acquisition, tracking, terminal braking, and commit
 
-Add a dedicated `RobotState.TRACK`. `TRACKING` and `COMMIT` are internal
-controller phases rather than additional application states.
+Add a dedicated `RobotState.TRACK`. `TRACKING`, `TERMINAL`, and `COMMIT` are
+internal controller phases rather than additional application states.
 
 ### Entry
 
@@ -290,10 +296,19 @@ within that grace period resumes tracking from the frozen pitch. At timeout,
 current altitude for a bumpless handoff. A timeout still returns neutral
 pitch/yaw and hover throttle rather than raising.
 
+### TERMINAL
+
+At valid filtered `depth_m <= 1.0`, latch `TERMINAL`, retain the terminal pitch
+profile and yaw alignment, and force the vertical-speed target to zero. Enter
+COMMIT only after `abs(dx) <= 0.10`, `abs(dy) <= 0.10`, and
+`abs(measured_vz) <= 0.50 m/s` remain true for 0.25 s. Invalid observations or
+a failed condition reset the readiness timer. Failure to stabilize within two
+seconds returns the safe handoff command and requests ALT_HOLD.
+
 ### COMMIT
 
-When valid filtered `depth_m <= 1.0`, copy the complete current RC command and
-enter `COMMIT`. During COMMIT:
+After the terminal gate passes, copy the complete current RC command and enter
+`COMMIT`. During COMMIT:
 
 - return the exact frozen command on every application tick;
 - ignore new visual estimates and controller parameter changes;
@@ -310,7 +325,9 @@ stateDiagram-v2
     [*] --> ALT_HOLD
 
     ALT_HOLD --> TRACKING: tracker selected\n3 fresh valid frames\nSF rising edge
-    TRACKING --> COMMIT: depth <= 1.0 m
+    TRACKING --> TERMINAL: depth <= 1.0 m
+    TERMINAL --> COMMIT: aligned and |vz| <= 0.5 m/s\ncontinuously for 0.25 s
+    TERMINAL --> ALT_HOLD: 2.0 s stabilization timeout\nor invalid/stale feedback
     TRACKING --> ALT_HOLD: target invalid/stale\nor tracker disabled
     TRACKING --> MANUAL: manual override
     TRACKING --> FAILSAFE: joystick failsafe
@@ -342,14 +359,22 @@ original deadline despite parameter updates.
 | `TRK_YAW_MAX` | `20.0` | Absolute yaw-rate limit in deg/s |
 | `TRK_THR_KP` | `100.0` | Outer visual gain used with `TRK_VZ_KD` to derive requested speed |
 | `TRK_VZ_KD` | `30.0` | Inner vertical-speed error gain in RC units per m/s |
-| `TRK_VZ_MAX` | `1.25` | Absolute vertical-speed target limit in m/s |
+| `TRK_VZ_MAX` | `1.75` | Far-range absolute vertical-speed target limit in m/s |
 | `TRK_VZ_ACCEL` | `0.75` | Vertical-speed setpoint slew limit in m/s squared |
+| `TRK_VZ_NEAR` | `0.5` | Absolute vertical-speed limit at and below the taper end |
+| `TRK_VZ_TAPER_S` | `4.0` | Depth where the speed-limit taper begins |
+| `TRK_VZ_TAPER_E` | `2.0` | Depth where the near speed limit is reached |
+| `TRK_VZ_BRAKE` | `1.5` | Setpoint braking rate toward zero in m/s squared |
 | `TRK_THR_MAX` | `100.0` | Absolute throttle correction limit in RC units |
 | `TRK_DEADBAND` | `0.03` | Image-error deadband |
 | `TRK_TIMEOUT_S` | `0.25` | Maximum time since the last valid estimate |
 | `TRK_LOCK_FRAMES` | `3` | Consecutive frames required for entry |
 | `TRK_COMMIT_M` | `1.0` | Forward depth that enters COMMIT |
 | `TRK_COMMIT_S` | `1.0` | Maximum frozen-command duration |
+| `TRK_COMMIT_XY` | `0.1` | Maximum absolute camera error allowed for COMMIT |
+| `TRK_COMMIT_VZ` | `0.5` | Maximum absolute vertical speed allowed for COMMIT |
+| `TRK_COMMIT_HOLD` | `0.25` | Continuous safe-condition time required for COMMIT |
+| `TRK_TERM_TIMEOUT` | `2.0` | Maximum TERMINAL stabilization time before safe exit |
 | `BF_ANGLE_LIMIT` | `60.0` | Betaflight angle represented by full RC stick |
 
 `HOV_BASELINE` and `BF_YAW_RATE` remain the shared hover and yaw-mapping
@@ -379,7 +404,10 @@ Future implementation tests must cover:
 - entry only after three fresh distinct frames;
 - brief invalid target holding the last command and resuming without a pitch jump;
 - invalid or stale target exceeding the grace period exiting TRACK safely;
-- commit at `depth_m <= 1.0` and exact preservation of every RC channel;
+- terminal braking and monotonic range-based speed limiting;
+- commit only after continuously safe alignment and vertical speed;
+- terminal timeout returning the safe handoff command;
+- exact preservation of every RC channel during COMMIT;
 - visual and parameter updates being ignored during COMMIT;
 - one-second commit timeout and SF edge re-entry gate;
 - failsafe and manual overrides taking priority in both phases;
@@ -387,8 +415,9 @@ Future implementation tests must cover:
 - state entry/exit resetting acquisition, timers, and frozen commands.
 
 The first flight acceptance test succeeds when the simulator enters TRACK,
-keeps the red target near camera center during a low-speed approach, freezes the
-last command at one metre, returns to ALT_HOLD after one second, and cannot
+keeps the red target near camera center during a low-speed approach, brakes at
+one metre, freezes only a safely gated command, returns to ALT_HOLD after one
+second, and cannot
 re-enter TRACK until SF is released and pressed again after target lock.
 
 ## Deferred work
@@ -396,5 +425,5 @@ re-enter TRACK until SF is released and pressed again after target lock.
 - measured forward/vertical velocity feedback;
 - collision or impact confirmation;
 - roll/lateral control;
-- adaptive pitch or distance-based deceleration;
+- adaptive pitch;
 - wind, camera distortion, target motion, and production recovery behavior.
