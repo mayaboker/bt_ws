@@ -179,6 +179,18 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.TRK_THR_KP))
 
     @property
+    def trk_vz_kd(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_VZ_KD))
+
+    @property
+    def trk_vz_max(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_VZ_MAX))
+
+    @property
+    def trk_vz_accel(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_VZ_ACCEL))
+
+    @property
     def trk_thr_max(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.TRK_THR_MAX))
 

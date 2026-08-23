@@ -47,6 +47,9 @@ class ParameterKey:
     TRK_YAW_KP: Final[Literal['TRK_YAW_KP']] = 'TRK_YAW_KP'
     TRK_YAW_MAX: Final[Literal['TRK_YAW_MAX']] = 'TRK_YAW_MAX'
     TRK_THR_KP: Final[Literal['TRK_THR_KP']] = 'TRK_THR_KP'
+    TRK_VZ_KD: Final[Literal['TRK_VZ_KD']] = 'TRK_VZ_KD'
+    TRK_VZ_MAX: Final[Literal['TRK_VZ_MAX']] = 'TRK_VZ_MAX'
+    TRK_VZ_ACCEL: Final[Literal['TRK_VZ_ACCEL']] = 'TRK_VZ_ACCEL'
     TRK_THR_MAX: Final[Literal['TRK_THR_MAX']] = 'TRK_THR_MAX'
     TRK_DEADBAND: Final[Literal['TRK_DEADBAND']] = 'TRK_DEADBAND'
     TRK_TIMEOUT_S: Final[Literal['TRK_TIMEOUT_S']] = 'TRK_TIMEOUT_S'
@@ -97,6 +100,9 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'TRK_YAW_KP',
     'TRK_YAW_MAX',
     'TRK_THR_KP',
+    'TRK_VZ_KD',
+    'TRK_VZ_MAX',
+    'TRK_VZ_ACCEL',
     'TRK_THR_MAX',
     'TRK_DEADBAND',
     'TRK_TIMEOUT_S',

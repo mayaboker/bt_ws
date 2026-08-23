@@ -9,6 +9,7 @@ import threading
 from enum import Enum, auto
 
 from bt_app.control import (
+    DEFAULT_TRACKER_CSV_PATH,
     FailSafeController,
     TakeoffController,
     ARMController,
@@ -168,7 +169,10 @@ class App:
         self.controllers[RobotState.ALT_HOLD] = HoverYawController(parameters)
 
         # red-target visual controller
-        self.controllers[RobotState.TRACK] = TrackerController(parameters)
+        self.controllers[RobotState.TRACK] = TrackerController(
+            parameters,
+            csv_path=DEFAULT_TRACKER_CSV_PATH,
+        )
 
     # def register_joy_interrupt(self, joy_adapter):
     #     joy_adapter.register_interrupt(AETR1234.AUX4, JoyInterrupt.TAKEOFF_REQUEST)
@@ -194,7 +198,8 @@ class App:
             self.controllers[RobotState.ARM].reset()
 
         if prev == RobotState.TRACK and next != RobotState.TRACK:
-            self.controllers[RobotState.TRACK].stop_tracking()
+            tracker = self.controllers[RobotState.TRACK]
+            tracker.stop_tracking(end_reason=self._tracker_end_reason(tracker, next))
             self._tracker_result = None
             self.ctx.tracker_ready = False
             self.ctx.tracker_exit_requested = False
@@ -249,7 +254,11 @@ class App:
                 )
 
             case RobotState.TRACK:
-                self.controllers[RobotState.TRACK].start_tracking()
+                self.controllers[RobotState.TRACK].start_tracking(
+                    now_s=self._tracker_now_s,
+                    vertical_speed_m_s=self.ctx.drone_vertical_speed,
+                    vertical_speed_sample_time_s=self.ctx.drone_alt_received_at_s,
+                )
                 self._tracker_result = None
                 self.ctx.tracker_ready = False
                 self.ctx.tracker_exit_requested = False
@@ -271,6 +280,19 @@ class App:
 
         if prev == RobotState.MANUAL and next != RobotState.IDLE:
             self._require_services().manual_land.reset()
+
+    def _tracker_end_reason(self, tracker, next_state: RobotState) -> str:
+        if next_state == RobotState.FAILSAFE:
+            return "failsafe"
+        if next_state == RobotState.MANUAL:
+            return "manual_override"
+        if getattr(tracker, "completion_latched", False):
+            return "commit_complete"
+        if not self.ctx.request_rc.is_tracker_selected():
+            return "tracker_disabled"
+        if getattr(tracker, "exit_requested", False):
+            return "target_lost_or_stale"
+        return f"state_transition_{next_state.name.lower()}"
 
     #region joystick handlers
     def __handle_joy_rc(self, event: RcChannelsOverrideEvent):
@@ -503,7 +525,12 @@ class App:
                 now_s=self._tracker_now_s,
                 mode_selected=self.ctx.request_rc.is_tracker_selected(),
             )
-            self.ctx.tracker_ready = tracker.ready_to_track
+            vertical_speed_ready = tracker.vertical_speed_is_fresh(
+                now_s=self._tracker_now_s,
+                vertical_speed_m_s=self.ctx.drone_vertical_speed,
+                sample_time_s=self.ctx.drone_alt_received_at_s,
+            )
+            self.ctx.tracker_ready = tracker.ready_to_track and vertical_speed_ready
             self.ctx.tracker_start_requested = all(
                 [
                     self.ctx.tracker_start_requested,
@@ -514,7 +541,11 @@ class App:
                 ]
             )
             if self.ctx.state == RobotState.TRACK:
-                self._tracker_result = tracker.update(now_s=self._tracker_now_s)
+                self._tracker_result = tracker.update(
+                    now_s=self._tracker_now_s,
+                    vertical_speed_m_s=self.ctx.drone_vertical_speed,
+                    vertical_speed_sample_time_s=self.ctx.drone_alt_received_at_s,
+                )
                 self.ctx.tracker_exit_requested = tracker.exit_requested
             else:
                 self._tracker_result = None
@@ -597,7 +628,9 @@ class App:
     def tracker_handler(self) -> list[int]:
         if self._tracker_result is None:
             self._tracker_result = self.controllers[RobotState.TRACK].update(
-                now_s=self._tracker_now_s
+                now_s=self._tracker_now_s,
+                vertical_speed_m_s=self.ctx.drone_vertical_speed,
+                vertical_speed_sample_time_s=self.ctx.drone_alt_received_at_s,
             )
         self.ctx.tracker_exit_requested = self.controllers[
             RobotState.TRACK

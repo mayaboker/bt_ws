@@ -43,6 +43,28 @@ The tracker controller runs synchronously in the existing 50 Hz application
 loop. ZMQ reception continues on its existing receiver thread; it only replaces
 the immutable latest estimate. No additional controller thread is needed.
 
+## Buffered controller trace
+
+Each TRACK session buffers one analysis row for every controller update. The
+trace separates the newest observed target result from the last valid estimate
+that drives a held command during visual-loss grace. It includes monotonic
+timing, target geometry, desired `vx_m_s`/`vy_m_s`, controller internals, active
+parameters, phase and exit flags, measured FC vertical speed and freshness,
+the raw/capped/slew-limited vertical-speed requests, velocity error,
+visual/damping throttle terms, and all eight proposed RC channels.
+
+No file I/O occurs while TRACK is actively producing commands. When TRACK
+exits, `stop_tracking()` synchronously overwrites
+`logs/tracker_controller.csv` through an atomic temporary-file replacement.
+The App supplies an end reason such as target loss, commit completion, tracker
+disable, manual override, or failsafe. Export failures are logged without
+preventing the requested state transition.
+
+The trace intentionally records proposed controller output rather than final
+sanitized/dispatched RC. Vertical speed is measured FC telemetry, but horizontal
+velocity and position remain unavailable, so the trace still cannot establish
+the drone's actual trajectory.
+
 ## Proposed interfaces
 
 `TargetEstimate` needs the normalized target-center errors in addition to its
@@ -172,16 +194,24 @@ A target to the right produces a right-turn request. The existing
 
 ### Throttle
 
-Vertical image error adds a bounded correction around hover throttle. First,
-compensate for the fixed pitch so the vertical thrust component remains near
+Vertical image error creates a bounded, acceleration-limited vertical-speed
+setpoint. Measured upward-positive FC vertical speed closes the inner loop.
+First, compensate for pitch so the vertical thrust component remains near
 hover:
 
 ```text
 hover_fraction = (HOV_BASELINE - 1000) / 1000
 throttle_ff = 1000 + 1000 * hover_fraction / cos(pitch_command)
 
+raw_vz = (TRK_THR_KP / TRK_VZ_KD) * deadband(error_y, TRK_DEADBAND)
+target_vz = clamp(raw_vz, -TRK_VZ_MAX, +TRK_VZ_MAX)
+setpoint_vz = slew(setpoint_vz, target_vz, TRK_VZ_ACCEL)
+
+visual_correction = TRK_VZ_KD * setpoint_vz
+damping_correction = -TRK_VZ_KD * measured_vertical_speed
+
 throttle_correction = clamp(
-    TRK_THR_KP * deadband(error_y, TRK_DEADBAND),
+    visual_correction + damping_correction,
     -TRK_THR_MAX,
     +TRK_THR_MAX,
 )
@@ -189,8 +219,11 @@ throttle_correction = clamp(
 throttle = clamp(throttle_ff + throttle_correction, 1000, 2000)
 ```
 
-A target above center increases throttle; a target below center decreases it.
-Roll stays at `1500`. ARM and ANGLE remain high while TRACK owns the command.
+A target above center requests upward speed; a target below center requests
+downward speed. TRACK requires finite vertical-speed telemetry aged from 0 to
+0.30 s both at entry and while active. Missing or stale telemetry blocks entry
+or requests an ALT_HOLD exit. Roll stays at `1500`. ARM and ANGLE remain high
+while TRACK owns the command.
 
 ```mermaid
 flowchart TB
@@ -198,7 +231,8 @@ flowchart TB
     OBS --> EY["error_y"]
     OBS --> DEPTH["filtered optical depth"]
 
-    FIXED["fixed -10 deg"] --> PMAP["angle-to-RC mapping"]
+    DEPTH --> PROFILE["quintic pitch profile"]
+    PROFILE --> PMAP["angle-to-RC mapping"]
     PMAP --> PITCH["PITCH RC"]
 
     EX --> YDB["deadband"]
@@ -207,7 +241,10 @@ flowchart TB
     YMAP --> YAW["YAW RC"]
 
     EY --> TDB["deadband"]
-    TDB --> TKP["P gain + correction limit"]
+    TDB --> VTARGET["speed cap + setpoint slew"]
+    VZ["fresh FC vertical speed"] --> VERROR["vertical-speed error"]
+    VTARGET --> VERROR
+    VERROR --> TKP["inner velocity gain"]
     HOVER["hover baseline / cos(pitch)"] --> TSUM["sum + RC clamp"]
     TKP --> TSUM
     TSUM --> THROTTLE["THROTTLE RC"]
@@ -303,7 +340,10 @@ original deadline despite parameter updates.
 | `TRK_PITCH_RATE` | `5.0` | Pitch slew rate in degrees per second |
 | `TRK_YAW_KP` | `15.0` | Yaw-rate gain in deg/s per normalized error |
 | `TRK_YAW_MAX` | `20.0` | Absolute yaw-rate limit in deg/s |
-| `TRK_THR_KP` | `100.0` | Throttle gain in RC units per normalized error |
+| `TRK_THR_KP` | `100.0` | Outer visual gain used with `TRK_VZ_KD` to derive requested speed |
+| `TRK_VZ_KD` | `30.0` | Inner vertical-speed error gain in RC units per m/s |
+| `TRK_VZ_MAX` | `1.25` | Absolute vertical-speed target limit in m/s |
+| `TRK_VZ_ACCEL` | `0.75` | Vertical-speed setpoint slew limit in m/s squared |
 | `TRK_THR_MAX` | `100.0` | Absolute throttle correction limit in RC units |
 | `TRK_DEADBAND` | `0.03` | Image-error deadband |
 | `TRK_TIMEOUT_S` | `0.25` | Maximum time since the last valid estimate |
@@ -323,7 +363,7 @@ parameters. All generated MAVLink parameter names remain within 16 characters.
    RC mapping, and deterministic tests.
 3. Add `RobotState.TRACK`, guards, App routing, altitude-hold handoff,
    completion latching, and integration tests.
-4. Tune in simulation at low pitch before adding measured-velocity feedback.
+4. Add measured vertical-speed damping and log its individual throttle term.
 
 ## Test and acceptance matrix
 
@@ -332,6 +372,8 @@ Future implementation tests must cover:
 - centered target: fixed forward pitch, neutral yaw, tilt-compensated throttle;
 - target right/left: correctly signed and bounded yaw;
 - target above/below: correctly signed and bounded throttle correction;
+- upward/downward motion: correctly signed vertical-speed damping;
+- stale or invalid vertical speed: visual control continues without damping;
 - deadband behavior and RC bounds;
 - duplicate frames holding the previous command;
 - entry only after three fresh distinct frames;

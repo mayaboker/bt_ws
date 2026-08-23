@@ -109,21 +109,32 @@ class FakeTrackerController:
         self.ready_to_track = False
         self.exit_requested = False
         self.started = 0
+        self.start_calls = []
         self.stopped = 0
+        self.end_reasons = []
+        self.completion_latched = False
         self.observations = []
+        self.update_calls = []
+        self.vertical_speed_fresh = True
 
     def observe(self, estimate, *, now_s, mode_selected):
         self.observations.append((estimate, now_s, mode_selected))
         if not mode_selected:
             self.ready_to_track = False
 
-    def start_tracking(self):
+    def vertical_speed_is_fresh(self, **kwargs):
+        return self.vertical_speed_fresh
+
+    def start_tracking(self, **kwargs):
         self.started += 1
+        self.start_calls.append(kwargs)
 
-    def stop_tracking(self):
+    def stop_tracking(self, *, end_reason="unknown"):
         self.stopped += 1
+        self.end_reasons.append(end_reason)
 
-    def update(self, *, now_s):
+    def update(self, **kwargs):
+        self.update_calls.append(kwargs)
         return SimpleNamespace(channels=self.channels)
 
 
@@ -459,10 +470,20 @@ def test_track_rc_handler_routes_cached_immutable_command():
     tracker = FakeTrackerController([1500, 1417, 1508, 1500, 2000, 2000, 1000, 1000])
     app.controllers[RobotState.TRACK] = tracker
     app.ctx.state = RobotState.TRACK
+    app.ctx.drone_vertical_speed = -0.4
+    app.ctx.drone_alt_received_at_s = 10.0
+    app._tracker_now_s = 10.1
 
     channels = app._resolve_rc()
 
     assert channels == list(tracker.channels)
+    assert tracker.update_calls == [
+        {
+            "now_s": 10.1,
+            "vertical_speed_m_s": -0.4,
+            "vertical_speed_sample_time_s": 10.0,
+        }
+    ]
 
 
 def test_track_to_alt_hold_stops_tracker_and_seeds_current_altitude():
@@ -478,12 +499,34 @@ def test_track_to_alt_hold_stops_tracker_and_seeds_current_altitude():
     app._handle_before_state_changed(RobotState.TRACK, RobotState.ALT_HOLD)
 
     assert tracker.stopped == 1
+    assert tracker.end_reasons == ["tracker_disabled"]
     assert hover.reset_setpoint_kwargs == {
         "setpoint": 6.5,
         "altitude_sample_time_s": 10.0,
         "vertical_speed_m_s": -0.2,
         "require_throttle_center": False,
     }
+
+
+def test_tracker_end_reason_distinguishes_controller_and_override_exits():
+    app = make_app_with_context()
+    tracker = FakeTrackerController()
+    app.ctx.request_rc = InternalJoystick(tracker_mode=TrackerMode.TRACKER1)
+
+    tracker.exit_requested = True
+    assert app._tracker_end_reason(tracker, RobotState.ALT_HOLD) == (
+        "target_lost_or_stale"
+    )
+
+    tracker.completion_latched = True
+    assert app._tracker_end_reason(tracker, RobotState.ALT_HOLD) == "commit_complete"
+    assert app._tracker_end_reason(tracker, RobotState.MANUAL) == "manual_override"
+    assert app._tracker_end_reason(tracker, RobotState.FAILSAFE) == "failsafe"
+
+    app.ctx.request_rc = InternalJoystick()
+    assert app._tracker_end_reason(tracker, RobotState.ALT_HOLD) == "commit_complete"
+    tracker.completion_latched = False
+    assert app._tracker_end_reason(tracker, RobotState.ALT_HOLD) == "tracker_disabled"
 
 
 def test_app_prepares_tracker_from_one_latest_estimate_snapshot(monkeypatch):
@@ -493,6 +536,9 @@ def test_app_prepares_tracker_from_one_latest_estimate_snapshot(monkeypatch):
     observation = object()
     app.controllers[RobotState.TRACK] = tracker
     app.services.distance_estimator.latest_estimate = observation
+    app.ctx.state = RobotState.TRACK
+    app.ctx.drone_vertical_speed = -0.4
+    app.ctx.drone_alt_received_at_s = 12.4
     app.ctx.request_rc = InternalJoystick(
         manual=RC_MID,
         tracker_mode=TrackerMode.TRACKER1,
@@ -503,6 +549,13 @@ def test_app_prepares_tracker_from_one_latest_estimate_snapshot(monkeypatch):
 
     assert tracker.observations == [(observation, 12.5, True)]
     assert app.ctx.tracker_ready
+    assert tracker.update_calls == [
+        {
+            "now_s": 12.5,
+            "vertical_speed_m_s": -0.4,
+            "vertical_speed_sample_time_s": 12.4,
+        }
+    ]
 
 
 def test_tracker_enable_requires_observed_low_before_startup_high():
@@ -589,6 +642,48 @@ def test_ready_tracker_accepts_sf_edge_in_armed_alt_hold(monkeypatch):
     app._update_controllers()
 
     assert app.ctx.tracker_start_requested
+
+
+def test_ready_tracker_rejects_entry_without_fresh_vertical_speed(monkeypatch):
+    app = make_app_with_context()
+    tracker = FakeTrackerController()
+    tracker.ready_to_track = True
+    tracker.vertical_speed_fresh = False
+    app.controllers[RobotState.TRACK] = tracker
+    app.ctx.state = RobotState.ALT_HOLD
+    app.ctx.armed = True
+    app.ctx.request_rc = InternalJoystick(
+        manual=RC_MID,
+        tracker_mode=TrackerMode.TRACKER1,
+        tracker_enable=RC_MIN,
+    )
+    app._prepare_tracker_switches()
+    app.ctx.request_rc = app.ctx.request_rc._replace(tracker_enable=RC_MAX)
+    monkeypatch.setattr(app_module.time, "monotonic", lambda: 12.5)
+
+    app._update_controllers()
+
+    assert not app.ctx.tracker_ready
+    assert not app.ctx.tracker_start_requested
+
+
+def test_track_entry_seeds_controller_with_current_vertical_speed():
+    app = make_app_with_context()
+    tracker = FakeTrackerController()
+    app.controllers[RobotState.TRACK] = tracker
+    app.ctx.drone_vertical_speed = -0.4
+    app.ctx.drone_alt_received_at_s = 12.4
+    app._tracker_now_s = 12.5
+
+    app._handle_before_state_changed(RobotState.ALT_HOLD, RobotState.TRACK)
+
+    assert tracker.start_calls == [
+        {
+            "now_s": 12.5,
+            "vertical_speed_m_s": -0.4,
+            "vertical_speed_sample_time_s": 12.4,
+        }
+    ]
 
 
 def test_tracker_disabled_cancels_ready_acquisition(monkeypatch):
