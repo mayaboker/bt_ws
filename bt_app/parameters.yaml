@@ -271,6 +271,14 @@ parameters:
     type: float
     default: 3.0
     limits: {min: 0.0, max: 100.0}
+  TTC_VY_KD:
+    type: float
+    default: 10.0
+    limits: {min: 0.0, max: 200.0}
+  TTC_AZ_ALPHA:
+    type: float
+    default: 0.2
+    limits: {min: 0.0, max: 1.0}
   TTC_VY_I_MAX:
     type: float
     default: 40.0
@@ -321,7 +329,7 @@ parameters:
     limits: {min: 0.1, max: 10.0}
   TRK_VZ_ACCEL:
     type: float
-    default: 0.75
+    default: 0.5
     limits: {min: 0.1, max: 20.0}
   TRK_VZ_NEAR:
     type: float

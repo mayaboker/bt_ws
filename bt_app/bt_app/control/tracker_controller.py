@@ -21,6 +21,7 @@ from bt_app.services import TrackerObservation
 
 DEFAULT_TRACKER_CSV_PATH = Path("logs/tracker_controller.csv")
 _VERTICAL_SPEED_TIMEOUT_S = 0.30
+_VERTICAL_ACCEL_LIMIT_M_S2 = 5.0
 
 
 class TrackerPhase(StrEnum):
@@ -51,6 +52,8 @@ class TrackerConfig:
     vertical_alignment_kp: float
     vertical_velocity_kp: float
     vertical_velocity_ki: float
+    vertical_velocity_kd: float
+    vertical_accel_filter_alpha: float
     vertical_integral_max_rc: float
     vertical_accel_limit_m_s2: float
     throttle_max_correction_rc: float
@@ -93,6 +96,8 @@ class TrackerConfig:
             vertical_alignment_kp=parameters.get(ParameterKey.TTC_DY_KP),
             vertical_velocity_kp=parameters.get(ParameterKey.TTC_VY_KP),
             vertical_velocity_ki=parameters.get(ParameterKey.TTC_VY_KI),
+            vertical_velocity_kd=parameters.get(ParameterKey.TTC_VY_KD),
+            vertical_accel_filter_alpha=parameters.get(ParameterKey.TTC_AZ_ALPHA),
             vertical_integral_max_rc=parameters.get(ParameterKey.TTC_VY_I_MAX),
             vertical_accel_limit_m_s2=parameters.get(ParameterKey.TRK_VZ_ACCEL),
             throttle_max_correction_rc=parameters.get(ParameterKey.TTC_THR_MAX),
@@ -130,6 +135,10 @@ class TrackerConfig:
             raise ValueError("TTC vertical limits must include descent and hover")
         if self.vertical_velocity_ki < 0.0 or self.vertical_integral_max_rc < 0.0:
             raise ValueError("TTC vertical integral settings must be nonnegative")
+        if self.vertical_velocity_kd < 0.0:
+            raise ValueError("TTC vertical acceleration gain must be nonnegative")
+        if not 0.0 <= self.vertical_accel_filter_alpha <= 1.0:
+            raise ValueError("TTC acceleration filter alpha must be in [0, 1]")
         if self.lock_frames < 2 or self.commit_frames < 1:
             raise ValueError("TTC acquisition and commit frame counts are invalid")
         if not 0.0 < self.commit_fill_fraction <= 1.0:
@@ -255,6 +264,9 @@ class LoopDiagnostics:
     vertical_distance_m: float = 0.0
     vertical_nominal_m_s: float = 0.0
     vertical_alignment_m_s: float = 0.0
+    raw_vertical_accel_m_s2: float = 0.0
+    filtered_vertical_accel_m_s2: float = 0.0
+    throttle_d_rc: float = 0.0
     bbox_fill: float = 0.0
 
 
@@ -270,7 +282,8 @@ TRACKER_CSV_HEADER = (
     "vertical_nominal_m_s", "vertical_alignment_m_s", "vertical_target_m_s",
     "vertical_setpoint_m_s",
     "vario_m_s", "vario_age_s", "vertical_error_m_s", "throttle_p_rc",
-    "throttle_i_rc",
+    "throttle_i_rc", "raw_vertical_accel_m_s2",
+    "filtered_vertical_accel_m_s2", "throttle_d_rc",
     "tilt_hover_rc", "throttle_command_rc", "yaw_rate_dps", "commit_count",
     "commit_block_reason", "exit_requested", "exit_reason", "result_valid",
     "result_reason", "ch1_roll", "ch2_pitch", "ch3_throttle", "ch4_yaw",
@@ -311,6 +324,10 @@ class TrackerController:
         self._vertical_speed_m_s: float | None = None
         self._vertical_setpoint_m_s: float | None = None
         self._vertical_integral_rc = 0.0
+        self._previous_vario_m_s: float | None = None
+        self._previous_vario_time_s: float | None = None
+        self._raw_vertical_accel_m_s2 = 0.0
+        self._filtered_vertical_accel_m_s2 = 0.0
         self._altitude_sample_time_s: float | None = None
         self._diagnostics = LoopDiagnostics()
         self._csv_path = None if csv_path is None else Path(csv_path)
@@ -446,6 +463,10 @@ class TrackerController:
         self._pitch_command_deg = config.pitch_initial_deg
         self._vertical_setpoint_m_s = vertical_speed_m_s
         self._vertical_integral_rc = 0.0
+        self._previous_vario_m_s = vertical_speed_m_s
+        self._previous_vario_time_s = vertical_speed_sample_time_s
+        self._raw_vertical_accel_m_s2 = 0.0
+        self._filtered_vertical_accel_m_s2 = 0.0
         self._last_update_s = now_s
         self._rows = []
         self._log_started_s = None
@@ -463,6 +484,10 @@ class TrackerController:
         self._pitch_command_deg = 0.0
         self._vertical_setpoint_m_s = None
         self._vertical_integral_rc = 0.0
+        self._previous_vario_m_s = None
+        self._previous_vario_time_s = None
+        self._raw_vertical_accel_m_s2 = 0.0
+        self._filtered_vertical_accel_m_s2 = 0.0
         self._last_update_s = None
         self._clear_acquisition()
 
@@ -492,6 +517,11 @@ class TrackerController:
         if not speed_valid or speed is None or self._altitude_m is None:
             self._request_exit("altitude or vario stale")
             return self._record(self._safe_result(config, "altitude or vario stale"), now_s)
+        self._update_vertical_acceleration(
+            speed,
+            vertical_speed_sample_time_s,
+            config,
+        )
         observation = self._latest_valid_observation
         if observation is None or now_s - observation.received_at_s > config.target_timeout_s:
             self._request_exit("tracker observation stale")
@@ -560,13 +590,14 @@ class TrackerController:
         self._vertical_setpoint_m_s = vertical_setpoint
         vertical_error = vertical_setpoint - vario
         throttle_p = config.vertical_velocity_kp * vertical_error
+        throttle_d = -config.vertical_velocity_kd * self._filtered_vertical_accel_m_s2
         integral_candidate = clamp(
             self._vertical_integral_rc
             + config.vertical_velocity_ki * vertical_error * dt_s,
             -config.vertical_integral_max_rc,
             config.vertical_integral_max_rc,
         )
-        correction_candidate = throttle_p + integral_candidate
+        correction_candidate = throttle_p + integral_candidate + throttle_d
         correction_limit = config.throttle_max_correction_rc
         integration_reduces_saturation = (
             correction_candidate > correction_limit and vertical_error < 0.0
@@ -579,7 +610,7 @@ class TrackerController:
         ):
             self._vertical_integral_rc = integral_candidate
         throttle_correction = clamp(
-            throttle_p + self._vertical_integral_rc,
+            throttle_p + self._vertical_integral_rc + throttle_d,
             -correction_limit,
             correction_limit,
         )
@@ -632,6 +663,9 @@ class TrackerController:
             vertical_distance_m=vertical_distance,
             vertical_nominal_m_s=vertical_nominal,
             vertical_alignment_m_s=vertical_alignment,
+            raw_vertical_accel_m_s2=self._raw_vertical_accel_m_s2,
+            filtered_vertical_accel_m_s2=self._filtered_vertical_accel_m_s2,
+            throttle_d_rc=throttle_d,
             bbox_fill=fill,
         )
         control_result = TrackerControlResult(
@@ -709,6 +743,36 @@ class TrackerController:
         age_s = now_s - sample_time_s
         valid = math.isfinite(speed) and 0.0 <= age_s <= _VERTICAL_SPEED_TIMEOUT_S
         return (float(speed) if valid else None), age_s, valid
+
+    def _update_vertical_acceleration(
+        self,
+        speed_m_s: float,
+        sample_time_s: float | None,
+        config: TrackerConfig,
+    ) -> None:
+        if sample_time_s is None:
+            return
+        previous_time = self._previous_vario_time_s
+        previous_speed = self._previous_vario_m_s
+        if previous_time is None or previous_speed is None:
+            self._previous_vario_time_s = sample_time_s
+            self._previous_vario_m_s = speed_m_s
+            return
+        if sample_time_s <= previous_time:
+            return
+        dt_s = sample_time_s - previous_time
+        raw_accel = clamp(
+            (speed_m_s - previous_speed) / dt_s,
+            -_VERTICAL_ACCEL_LIMIT_M_S2,
+            _VERTICAL_ACCEL_LIMIT_M_S2,
+        )
+        self._raw_vertical_accel_m_s2 = raw_accel
+        alpha = config.vertical_accel_filter_alpha
+        self._filtered_vertical_accel_m_s2 += alpha * (
+            raw_accel - self._filtered_vertical_accel_m_s2
+        )
+        self._previous_vario_time_s = sample_time_s
+        self._previous_vario_m_s = speed_m_s
 
     def _request_exit(self, reason: str) -> None:
         if not self._exit_requested:
@@ -820,6 +884,9 @@ class TrackerController:
             "vertical_error_m_s": result.vertical_speed_error_m_s,
             "throttle_p_rc": result.throttle_damping_correction_rc,
             "throttle_i_rc": self._vertical_integral_rc,
+            "raw_vertical_accel_m_s2": d.raw_vertical_accel_m_s2,
+            "filtered_vertical_accel_m_s2": d.filtered_vertical_accel_m_s2,
+            "throttle_d_rc": d.throttle_d_rc,
             "tilt_hover_rc": (
                 None
                 if result.vertical_speed_error_m_s is None

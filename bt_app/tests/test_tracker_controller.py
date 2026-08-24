@@ -43,8 +43,10 @@ class FakeParameters:
             ParameterKey.TTC_DY_KP: 1.0,
             ParameterKey.TTC_VY_KP: 20.0,
             ParameterKey.TTC_VY_KI: 3.0,
+            ParameterKey.TTC_VY_KD: 10.0,
+            ParameterKey.TTC_AZ_ALPHA: 0.2,
             ParameterKey.TTC_VY_I_MAX: 40.0,
-            ParameterKey.TRK_VZ_ACCEL: 0.75,
+            ParameterKey.TRK_VZ_ACCEL: 0.5,
             ParameterKey.TTC_THR_MAX: 100.0,
             ParameterKey.TTC_FILL: 0.6,
             ParameterKey.TTC_ALIGN: 0.15,
@@ -142,7 +144,7 @@ def test_control_uses_ttc_pitch_vertical_speed_and_yaw():
     assert result.phase == TrackerPhase.TRACKING
     assert result.pitch_command_deg == pytest.approx(-5.2)
     assert result.vertical_speed_target_m_s == pytest.approx(-1.25)
-    assert result.vertical_speed_setpoint_m_s == pytest.approx(-0.03)
+    assert result.vertical_speed_setpoint_m_s == pytest.approx(-0.02)
     assert result.channels[RCChannel.PITCH] > RC_MID
     assert 1655 <= result.channels[RCChannel.THROTTLE] <= 1670
     assert result.channels[RCChannel.YAW] > RC_MID
@@ -187,6 +189,24 @@ def test_vertical_integral_accumulates_slowly_behind_slew_limiter():
 
     assert result.throttle_correction_rc < result.throttle_damping_correction_rc
     assert result.throttle_correction_rc > -2.0
+
+
+def test_vertical_acceleration_damping_updates_only_on_new_vario_sample():
+    controller = TrackerController(FakeParameters())
+    acquire(controller)
+    controller.update(
+        now_s=0.30,
+        vertical_speed_m_s=0.0,
+        vertical_speed_sample_time_s=0.28,
+    )
+    result = controller.update(
+        now_s=0.32,
+        vertical_speed_m_s=-1.0,
+        vertical_speed_sample_time_s=0.32,
+    )
+
+    assert result.throttle_damping_correction_rc == pytest.approx(19.6)
+    assert result.throttle_correction_rc > result.throttle_damping_correction_rc
 
 
 def test_stale_camera_or_vario_requests_exit():

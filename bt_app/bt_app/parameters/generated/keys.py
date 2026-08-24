@@ -62,6 +62,8 @@ class ParameterKey:
     TTC_DY_KP: Final[Literal['TTC_DY_KP']] = 'TTC_DY_KP'
     TTC_VY_KP: Final[Literal['TTC_VY_KP']] = 'TTC_VY_KP'
     TTC_VY_KI: Final[Literal['TTC_VY_KI']] = 'TTC_VY_KI'
+    TTC_VY_KD: Final[Literal['TTC_VY_KD']] = 'TTC_VY_KD'
+    TTC_AZ_ALPHA: Final[Literal['TTC_AZ_ALPHA']] = 'TTC_AZ_ALPHA'
     TTC_VY_I_MAX: Final[Literal['TTC_VY_I_MAX']] = 'TTC_VY_I_MAX'
     TTC_THR_MAX: Final[Literal['TTC_THR_MAX']] = 'TTC_THR_MAX'
     TTC_FILL: Final[Literal['TTC_FILL']] = 'TTC_FILL'
@@ -148,6 +150,8 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'TTC_DY_KP',
     'TTC_VY_KP',
     'TTC_VY_KI',
+    'TTC_VY_KD',
+    'TTC_AZ_ALPHA',
     'TTC_VY_I_MAX',
     'TTC_THR_MAX',
     'TTC_FILL',

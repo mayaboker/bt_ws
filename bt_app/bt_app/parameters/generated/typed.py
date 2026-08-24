@@ -239,6 +239,14 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.TTC_VY_KI))
 
     @property
+    def ttc_vy_kd(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_VY_KD))
+
+    @property
+    def ttc_az_alpha(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_AZ_ALPHA))
+
+    @property
     def ttc_vy_i_max(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.TTC_VY_I_MAX))
 

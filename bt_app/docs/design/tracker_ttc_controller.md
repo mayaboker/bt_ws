@@ -42,16 +42,26 @@ vertical_nominal = vertical_distance / ttc_target
 vertical_target = clamp(vertical_nominal + deadband(dy), -5, +2)
 vertical_setpoint = slew(vertical_setpoint, vertical_target, TRK_VZ_ACCEL)
 vertical_error = vertical_setpoint - vario
-throttle = tilt_compensated_hover + clamp(20 * vertical_error + integral, -100, +100)
+acceleration = low_pass(clamp(delta(vario) / delta(telemetry_time), -5, +5))
+throttle = tilt_compensated_hover + clamp(
+    20 * vertical_error + integral - 10 * acceleration,
+    -100,
+    +100,
+)
 ```
 
 The vertical setpoint starts at the measured vario when TRACK begins and is
-rate-limited by `TRK_VZ_ACCEL` (0.75 m/s² by default). This prevents a target
+rate-limited by `TRK_VZ_ACCEL` (0.5 m/s² by default). This prevents a target
 appearing low in the image from creating an immediate multi-m/s descent step.
 The velocity loop adds a slow integral correction (`TTC_VY_KI=3`) to remove
 persistent speed error. It is limited to 40 RC (`TTC_VY_I_MAX`), uses
 conditional anti-windup at the total correction limit, and resets at every
 TRACK start and stop.
+
+Acceleration damping updates only when a distinct vario timestamp arrives.
+Raw acceleration is clamped to ±5 m/s² and low-pass filtered with
+`TTC_AZ_ALPHA=0.2`; `TTC_VY_KD=10` then brakes developing vertical momentum
+before the velocity error reverses.
 
 Yaw remains a bounded proportional controller on normalized horizontal image error. Roll stays centered.
 
