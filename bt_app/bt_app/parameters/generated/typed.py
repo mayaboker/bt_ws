@@ -159,6 +159,106 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.VIS_SPEED_MPS))
 
     @property
+    def ttc_pit_init(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_PIT_INIT))
+
+    @property
+    def ttc_pit_min(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_PIT_MIN))
+
+    @property
+    def ttc_pit_slew(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_PIT_SLEW))
+
+    @property
+    def ttc_inv_kp(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_INV_KP))
+
+    @property
+    def ttc_scale_a(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_SCALE_A))
+
+    @property
+    def ttc_scale_b(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_SCALE_B))
+
+    @property
+    def ttc_inv_max(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_INV_MAX))
+
+    @property
+    def ttc_log_max(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_LOG_MAX))
+
+    @property
+    def ttc_lock_fr(self) -> int:
+        return cast(int, self._parameters.get(ParameterKey.TTC_LOCK_FR))
+
+    @property
+    def ttc_lock_s(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_LOCK_S))
+
+    @property
+    def ttc_timeout(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_TIMEOUT))
+
+    @property
+    def ttc_scale_jmp(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_SCALE_JMP))
+
+    @property
+    def tgt_height_m(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TGT_HEIGHT_M))
+
+    @property
+    def ttc_vy_nom(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_VY_NOM))
+
+    @property
+    def ttc_vy_min(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_VY_MIN))
+
+    @property
+    def ttc_vy_max(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_VY_MAX))
+
+    @property
+    def ttc_min_s(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_MIN_S))
+
+    @property
+    def ttc_dy_kp(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_DY_KP))
+
+    @property
+    def ttc_vy_kp(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_VY_KP))
+
+    @property
+    def ttc_vy_ki(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_VY_KI))
+
+    @property
+    def ttc_vy_i_max(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_VY_I_MAX))
+
+    @property
+    def ttc_thr_max(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_THR_MAX))
+
+    @property
+    def ttc_fill(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_FILL))
+
+    @property
+    def ttc_align(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_ALIGN))
+
+    @property
+    def ttc_commit_fr(self) -> int:
+        return cast(int, self._parameters.get(ParameterKey.TTC_COMMIT_FR))
+
+    @property
     def trk_pitch_deg(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.TRK_PITCH_DEG))
 

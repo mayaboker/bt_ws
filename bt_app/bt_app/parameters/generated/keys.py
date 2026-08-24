@@ -42,6 +42,31 @@ class ParameterKey:
     OBJ_WIDTH_M: Final[Literal['OBJ_WIDTH_M']] = 'OBJ_WIDTH_M'
     OBJ_HEIGHT_M: Final[Literal['OBJ_HEIGHT_M']] = 'OBJ_HEIGHT_M'
     VIS_SPEED_MPS: Final[Literal['VIS_SPEED_MPS']] = 'VIS_SPEED_MPS'
+    TTC_PIT_INIT: Final[Literal['TTC_PIT_INIT']] = 'TTC_PIT_INIT'
+    TTC_PIT_MIN: Final[Literal['TTC_PIT_MIN']] = 'TTC_PIT_MIN'
+    TTC_PIT_SLEW: Final[Literal['TTC_PIT_SLEW']] = 'TTC_PIT_SLEW'
+    TTC_INV_KP: Final[Literal['TTC_INV_KP']] = 'TTC_INV_KP'
+    TTC_SCALE_A: Final[Literal['TTC_SCALE_A']] = 'TTC_SCALE_A'
+    TTC_SCALE_B: Final[Literal['TTC_SCALE_B']] = 'TTC_SCALE_B'
+    TTC_INV_MAX: Final[Literal['TTC_INV_MAX']] = 'TTC_INV_MAX'
+    TTC_LOG_MAX: Final[Literal['TTC_LOG_MAX']] = 'TTC_LOG_MAX'
+    TTC_LOCK_FR: Final[Literal['TTC_LOCK_FR']] = 'TTC_LOCK_FR'
+    TTC_LOCK_S: Final[Literal['TTC_LOCK_S']] = 'TTC_LOCK_S'
+    TTC_TIMEOUT: Final[Literal['TTC_TIMEOUT']] = 'TTC_TIMEOUT'
+    TTC_SCALE_JMP: Final[Literal['TTC_SCALE_JMP']] = 'TTC_SCALE_JMP'
+    TGT_HEIGHT_M: Final[Literal['TGT_HEIGHT_M']] = 'TGT_HEIGHT_M'
+    TTC_VY_NOM: Final[Literal['TTC_VY_NOM']] = 'TTC_VY_NOM'
+    TTC_VY_MIN: Final[Literal['TTC_VY_MIN']] = 'TTC_VY_MIN'
+    TTC_VY_MAX: Final[Literal['TTC_VY_MAX']] = 'TTC_VY_MAX'
+    TTC_MIN_S: Final[Literal['TTC_MIN_S']] = 'TTC_MIN_S'
+    TTC_DY_KP: Final[Literal['TTC_DY_KP']] = 'TTC_DY_KP'
+    TTC_VY_KP: Final[Literal['TTC_VY_KP']] = 'TTC_VY_KP'
+    TTC_VY_KI: Final[Literal['TTC_VY_KI']] = 'TTC_VY_KI'
+    TTC_VY_I_MAX: Final[Literal['TTC_VY_I_MAX']] = 'TTC_VY_I_MAX'
+    TTC_THR_MAX: Final[Literal['TTC_THR_MAX']] = 'TTC_THR_MAX'
+    TTC_FILL: Final[Literal['TTC_FILL']] = 'TTC_FILL'
+    TTC_ALIGN: Final[Literal['TTC_ALIGN']] = 'TTC_ALIGN'
+    TTC_COMMIT_FR: Final[Literal['TTC_COMMIT_FR']] = 'TTC_COMMIT_FR'
     TRK_PITCH_DEG: Final[Literal['TRK_PITCH_DEG']] = 'TRK_PITCH_DEG'
     TRK_PITCH_RATE: Final[Literal['TRK_PITCH_RATE']] = 'TRK_PITCH_RATE'
     TRK_YAW_KP: Final[Literal['TRK_YAW_KP']] = 'TRK_YAW_KP'
@@ -103,6 +128,31 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'OBJ_WIDTH_M',
     'OBJ_HEIGHT_M',
     'VIS_SPEED_MPS',
+    'TTC_PIT_INIT',
+    'TTC_PIT_MIN',
+    'TTC_PIT_SLEW',
+    'TTC_INV_KP',
+    'TTC_SCALE_A',
+    'TTC_SCALE_B',
+    'TTC_INV_MAX',
+    'TTC_LOG_MAX',
+    'TTC_LOCK_FR',
+    'TTC_LOCK_S',
+    'TTC_TIMEOUT',
+    'TTC_SCALE_JMP',
+    'TGT_HEIGHT_M',
+    'TTC_VY_NOM',
+    'TTC_VY_MIN',
+    'TTC_VY_MAX',
+    'TTC_MIN_S',
+    'TTC_DY_KP',
+    'TTC_VY_KP',
+    'TTC_VY_KI',
+    'TTC_VY_I_MAX',
+    'TTC_THR_MAX',
+    'TTC_FILL',
+    'TTC_ALIGN',
+    'TTC_COMMIT_FR',
     'TRK_PITCH_DEG',
     'TRK_PITCH_RATE',
     'TRK_YAW_KP',

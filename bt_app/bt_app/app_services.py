@@ -14,7 +14,7 @@ from bt_app.msp import MspTransportDependencyError
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.parameters import Parameters
 from bt_app.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
-from bt_app.services import DistanceEstimatorService, ManualLandService
+from bt_app.services import ManualLandService, TrackerResultStore
 from bt_app.vehicle_config import DroneSink, VehicleConfig
 from bt_app.visual_bridge import VisualBridgeManager
 from bt_joy.server.mavlink import (
@@ -42,7 +42,7 @@ class AppServices:
         mavlink: MavlinkService,
         rc_recorder: RcStateRecorder | NullRcStateRecorder,
         manual_land: ManualLandService,
-        distance_estimator: DistanceEstimatorService,
+        tracker_results: TrackerResultStore,
     ) -> None:
         self.config = config
         self.parameters = parameters
@@ -52,7 +52,7 @@ class AppServices:
         self.mavlink = mavlink
         self.rc_recorder = rc_recorder
         self.manual_land = manual_land
-        self.distance_estimator = distance_estimator
+        self.tracker_results = tracker_results
         self._started: list[tuple[str, object]] = []
 
     @classmethod
@@ -68,13 +68,8 @@ class AppServices:
     ) -> "AppServices":
         parameters = cls._load_parameters(config.config_name)
         visual_bridge = VisualBridgeManager(config.visual_zmq_endpoint)
-        try:
-            distance_estimator = DistanceEstimatorService.from_parameters(parameters)
-        except (KeyError, TypeError, ValueError) as exc:
-            raise AppStartupError(
-                f"Invalid visual distance estimator configuration: {exc}"
-            ) from exc
-        visual_bridge.subscribe(distance_estimator.process_tracker_result)
+        tracker_results = TrackerResultStore()
+        visual_bridge.subscribe(tracker_results.process_tracker_result)
         drone = MSPAdapter(config)
         joystick = MavlinkListenerService(
             config=MavlinkServerConfig(
@@ -119,7 +114,7 @@ class AppServices:
             mavlink=mavlink,
             rc_recorder=recorder,
             manual_land=manual_land,
-            distance_estimator=distance_estimator,
+            tracker_results=tracker_results,
         )
 
     @staticmethod

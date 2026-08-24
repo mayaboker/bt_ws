@@ -117,7 +117,7 @@ class FakeTrackerController:
         self.update_calls = []
         self.vertical_speed_fresh = True
 
-    def observe(self, estimate, *, now_s, mode_selected):
+    def observe(self, estimate, *, now_s, mode_selected, **_telemetry):
         self.observations.append((estimate, now_s, mode_selected))
         if not mode_selected:
             self.ready_to_track = False
@@ -150,7 +150,7 @@ def make_app_with_context():
         parameters=FakeParams(),
         mavlink=FakeMavlinkService(),
         manual_land=FakeManualLandService(),
-        distance_estimator=SimpleNamespace(latest_estimate=None),
+        tracker_results=SimpleNamespace(latest_observation=None),
     )
     return app
 
@@ -535,7 +535,7 @@ def test_app_prepares_tracker_from_one_latest_estimate_snapshot(monkeypatch):
     tracker.ready_to_track = True
     observation = object()
     app.controllers[RobotState.TRACK] = tracker
-    app.services.distance_estimator.latest_estimate = observation
+    app.services.tracker_results.latest_observation = observation
     app.ctx.state = RobotState.TRACK
     app.ctx.drone_vertical_speed = -0.4
     app.ctx.drone_alt_received_at_s = 12.4

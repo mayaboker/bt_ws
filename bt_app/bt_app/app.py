@@ -519,11 +519,14 @@ class App:
         if tracker is not None:
             self._tracker_now_s = time.monotonic()
             self._prepare_tracker_switches()
-            estimate = self._require_services().distance_estimator.latest_estimate
+            estimate = self._require_services().tracker_results.latest_observation
             tracker.observe(
                 estimate,
                 now_s=self._tracker_now_s,
                 mode_selected=self.ctx.request_rc.is_tracker_selected(),
+                altitude_m=self.ctx.drone_alt,
+                vertical_speed_m_s=self.ctx.drone_vertical_speed,
+                altitude_sample_time_s=self.ctx.drone_alt_received_at_s,
             )
             vertical_speed_ready = tracker.vertical_speed_is_fresh(
                 now_s=self._tracker_now_s,
