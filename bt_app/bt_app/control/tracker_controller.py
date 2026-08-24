@@ -500,8 +500,22 @@ class TrackerController:
         self._last_update_s = now_s
         self._rows = []
         self._log_started_s = None
+        log.info(
+            "TTC tracker phase: acquisition -> align; pitch_deg={:.2f} "
+            "horizontal_gate={:.3f} required_frames={} vario_m_s={:.3f}",
+            config.alignment_pitch_deg,
+            config.horizontal_alignment_threshold,
+            config.alignment_frames,
+            vertical_speed_m_s,
+        )
 
     def stop_tracking(self, *, end_reason: str = "unknown") -> None:
+        if self._active:
+            log.info(
+                "TTC tracker phase: {} -> stopped; reason={}",
+                self._phase.value,
+                end_reason,
+            )
         self._export_log(end_reason)
         self._active = False
         self._exit_requested = False
@@ -583,6 +597,14 @@ class TrackerController:
                 self._phase = TrackerPhase.TRACKING
                 # Do not treat scale changes during staging as forward closing.
                 self._filter.rate_hz = 0.0
+                log.info(
+                    "TTC tracker phase: align -> tracking; dx={:.3f} dy={:.3f} "
+                    "altitude_m={:.2f} aligned_frames={}",
+                    dx,
+                    dy,
+                    self._altitude_m,
+                    self._alignment_count,
+                )
         inverse_measured = clamp(
             max(0.0, self._filter.rate_hz),
             0.0,
@@ -747,6 +769,15 @@ class TrackerController:
             self._commit_deadline_s = now_s + config.commit_duration_s
             control_result = replace(control_result, phase=TrackerPhase.COMMIT)
             self._frozen_result = control_result
+            log.info(
+                "TTC tracker phase: tracking -> commit; fill={:.3f} "
+                "ttc_s={:.3f} dx={:.3f} dy={:.3f} duration_s={:.2f}",
+                fill,
+                measured_ttc,
+                dx,
+                dy,
+                config.commit_duration_s,
+            )
         return control_result
 
     @staticmethod

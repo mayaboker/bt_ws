@@ -396,6 +396,8 @@ Parameter-change callbacks rebuild and validate an immutable `TrackerConfig`. Ea
 
 ## Diagnostics and CSV flow
 
+The runtime logger emits one concise message for every lifecycle transition: acquisition to alignment, alignment to tracking, tracking to commit, and the active phase to stopped. Transition messages include the measurements and thresholds that caused the change; phase state is not printed on every control-loop iteration.
+
 When a CSV path is configured, each active `update(...)` appends a row in memory. The row contains:
 
 - raw tracker identity, timing, bbox, and validity;
