@@ -379,6 +379,9 @@ class App:
             self.ctx.drone_roll_deg = float(attitude.get("roll_deg", 0.0))
             self.ctx.drone_pitch_deg = float(attitude.get("pitch_deg", 0.0))
             self.ctx.drone_heading_deg = float(attitude.get("heading_deg", 0.0))
+            self.ctx.drone_attitude_received_at_s = float(
+                attitude.get("received_at_s", 0.0)
+            )
         ## read last drone rc
         rc = drone.get_rc()
         if rc:
@@ -527,6 +530,10 @@ class App:
                 altitude_m=self.ctx.drone_alt,
                 vertical_speed_m_s=self.ctx.drone_vertical_speed,
                 altitude_sample_time_s=self.ctx.drone_alt_received_at_s,
+                roll_deg=self.ctx.drone_roll_deg,
+                pitch_deg=self.ctx.drone_pitch_deg,
+                heading_deg=self.ctx.drone_heading_deg,
+                attitude_sample_time_s=self.ctx.drone_attitude_received_at_s,
             )
             vertical_speed_ready = tracker.vertical_speed_is_fresh(
                 now_s=self._tracker_now_s,

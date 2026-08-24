@@ -69,6 +69,9 @@ class ParameterKey:
     TTC_FILL: Final[Literal['TTC_FILL']] = 'TTC_FILL'
     TTC_ALIGN: Final[Literal['TTC_ALIGN']] = 'TTC_ALIGN'
     TTC_COMMIT_FR: Final[Literal['TTC_COMMIT_FR']] = 'TTC_COMMIT_FR'
+    TTC_ALN_PIT: Final[Literal['TTC_ALN_PIT']] = 'TTC_ALN_PIT'
+    TTC_ALN_XY: Final[Literal['TTC_ALN_XY']] = 'TTC_ALN_XY'
+    TTC_ALN_FR: Final[Literal['TTC_ALN_FR']] = 'TTC_ALN_FR'
     TRK_PITCH_DEG: Final[Literal['TRK_PITCH_DEG']] = 'TRK_PITCH_DEG'
     TRK_PITCH_RATE: Final[Literal['TRK_PITCH_RATE']] = 'TRK_PITCH_RATE'
     TRK_YAW_KP: Final[Literal['TRK_YAW_KP']] = 'TRK_YAW_KP'
@@ -157,6 +160,9 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'TTC_FILL',
     'TTC_ALIGN',
     'TTC_COMMIT_FR',
+    'TTC_ALN_PIT',
+    'TTC_ALN_XY',
+    'TTC_ALN_FR',
     'TRK_PITCH_DEG',
     'TRK_PITCH_RATE',
     'TRK_YAW_KP',

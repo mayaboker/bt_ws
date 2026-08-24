@@ -267,6 +267,18 @@ class TypedParameters:
         return cast(int, self._parameters.get(ParameterKey.TTC_COMMIT_FR))
 
     @property
+    def ttc_aln_pit(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_ALN_PIT))
+
+    @property
+    def ttc_aln_xy(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_ALN_XY))
+
+    @property
+    def ttc_aln_fr(self) -> int:
+        return cast(int, self._parameters.get(ParameterKey.TTC_ALN_FR))
+
+    @property
     def trk_pitch_deg(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.TRK_PITCH_DEG))
 

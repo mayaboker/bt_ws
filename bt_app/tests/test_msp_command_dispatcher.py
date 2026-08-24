@@ -34,7 +34,10 @@ def test_read_attitude_command_updates_latest_attitude():
 
     result = ReadAttitudeCommand().execute(dispatcher)
 
-    assert result == {"roll_deg": 1.5, "pitch_deg": -2.5, "heading_deg": 90}
+    assert result["roll_deg"] == 1.5
+    assert result["pitch_deg"] == -2.5
+    assert result["heading_deg"] == 90
+    assert result["received_at_s"] >= 0.0
     assert dispatcher.last_attitude == result
     assert callback_results == [result]
 

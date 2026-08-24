@@ -39,6 +39,7 @@ bt-gz-camera = "bt_app.sensors.gz_camera:cli"
 bt-optical-flow-tracker = "bt_app.trackers.optical_flow_tracker:main"
 bt-gz-rtf = "bt_app.sensors.gz_rtf_monitor:main"
 bt-msp-alt-hold = "bt_app.msp.alt_hold_test:main"
+bt-pitch-effect = "bt_app.diagnostics.pitch_rotation_effect:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

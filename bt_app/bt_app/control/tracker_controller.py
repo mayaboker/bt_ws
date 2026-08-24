@@ -25,6 +25,7 @@ _VERTICAL_ACCEL_LIMIT_M_S2 = 5.0
 
 
 class TrackerPhase(StrEnum):
+    ALIGN = "align"
     TRACKING = "tracking"
     TERMINAL = "terminal"  # Retained for API compatibility; TTC uses COMMIT directly.
     COMMIT = "commit"
@@ -60,6 +61,9 @@ class TrackerConfig:
     commit_fill_fraction: float
     commit_alignment: float
     commit_frames: int
+    alignment_pitch_deg: float
+    horizontal_alignment_threshold: float
+    alignment_frames: int
     commit_ttc_s: float
     commit_duration_s: float
     yaw_kp: float
@@ -104,6 +108,9 @@ class TrackerConfig:
             commit_fill_fraction=parameters.get(ParameterKey.TTC_FILL),
             commit_alignment=parameters.get(ParameterKey.TTC_ALIGN),
             commit_frames=parameters.get(ParameterKey.TTC_COMMIT_FR),
+            alignment_pitch_deg=parameters.get(ParameterKey.TTC_ALN_PIT),
+            horizontal_alignment_threshold=parameters.get(ParameterKey.TTC_ALN_XY),
+            alignment_frames=parameters.get(ParameterKey.TTC_ALN_FR),
             commit_ttc_s=parameters.get(ParameterKey.TTC_MIN_S),
             commit_duration_s=parameters.get(ParameterKey.TRK_COMMIT_S),
             yaw_kp=parameters.get(ParameterKey.TRK_YAW_KP),
@@ -141,6 +148,13 @@ class TrackerConfig:
             raise ValueError("TTC acceleration filter alpha must be in [0, 1]")
         if self.lock_frames < 2 or self.commit_frames < 1:
             raise ValueError("TTC acquisition and commit frame counts are invalid")
+        if (
+            self.alignment_frames < 1
+            or not 0.0 < self.horizontal_alignment_threshold <= 1.0
+        ):
+            raise ValueError("TTC alignment acquisition settings are invalid")
+        if not self.pitch_minimum_deg <= self.alignment_pitch_deg <= 0.0:
+            raise ValueError("TTC alignment pitch must be inside pitch limits")
         if not 0.0 < self.commit_fill_fraction <= 1.0:
             raise ValueError("TTC commit fill must be in (0, 1]")
 
@@ -277,6 +291,7 @@ TRACKER_CSV_HEADER = (
     "bbox_width", "bbox_height", "dx_norm", "dy_norm", "bbox_fill",
     "scale_px", "log_scale", "scale_innovation", "scale_reason",
     "filtered_log_scale_rate_hz", "inverse_ttc_measured_hz", "measured_ttc_s",
+    "roll_deg", "pitch_deg", "heading_deg", "attitude_age_s",
     "altitude_m", "vertical_distance_m", "target_ttc_s", "inverse_ttc_target_hz",
     "pitch_initial_deg", "pitch_raw_deg", "pitch_command_deg",
     "vertical_nominal_m_s", "vertical_alignment_m_s", "vertical_target_m_s",
@@ -284,7 +299,8 @@ TRACKER_CSV_HEADER = (
     "vario_m_s", "vario_age_s", "vertical_error_m_s", "throttle_p_rc",
     "throttle_i_rc", "raw_vertical_accel_m_s2",
     "filtered_vertical_accel_m_s2", "throttle_d_rc",
-    "tilt_hover_rc", "throttle_command_rc", "yaw_rate_dps", "commit_count",
+    "tilt_hover_rc", "throttle_command_rc", "yaw_rate_dps", "alignment_count",
+    "commit_count",
     "commit_block_reason", "exit_requested", "exit_reason", "result_valid",
     "result_reason", "ch1_roll", "ch2_pitch", "ch3_throttle", "ch4_yaw",
     "ch5_arm", "ch6_angle", "ch7_aux3", "ch8_aux4",
@@ -316,6 +332,7 @@ class TrackerController:
         self._completion_latched = False
         self._phase = TrackerPhase.TRACKING
         self._commit_count = 0
+        self._alignment_count = 0
         self._commit_deadline_s: float | None = None
         self._frozen_result: TrackerControlResult | None = None
         self._pitch_command_deg = 0.0
@@ -329,6 +346,10 @@ class TrackerController:
         self._raw_vertical_accel_m_s2 = 0.0
         self._filtered_vertical_accel_m_s2 = 0.0
         self._altitude_sample_time_s: float | None = None
+        self._roll_deg: float | None = None
+        self._attitude_pitch_deg: float | None = None
+        self._heading_deg: float | None = None
+        self._attitude_sample_time_s: float | None = None
         self._diagnostics = LoopDiagnostics()
         self._csv_path = None if csv_path is None else Path(csv_path)
         self._rows: list[dict[str, object]] = []
@@ -386,11 +407,19 @@ class TrackerController:
         altitude_m: float | None = None,
         vertical_speed_m_s: float | None = None,
         altitude_sample_time_s: float | None = None,
+        roll_deg: float | None = None,
+        pitch_deg: float | None = None,
+        heading_deg: float | None = None,
+        attitude_sample_time_s: float | None = None,
     ) -> bool:
         self._latest_observation = observation
         self._altitude_m = altitude_m
         self._vertical_speed_m_s = vertical_speed_m_s
         self._altitude_sample_time_s = altitude_sample_time_s
+        self._roll_deg = roll_deg
+        self._attitude_pitch_deg = pitch_deg
+        self._heading_deg = heading_deg
+        self._attitude_sample_time_s = attitude_sample_time_s
         if not mode_selected:
             if self._active:
                 self._request_exit("tracker deselected")
@@ -456,11 +485,12 @@ class TrackerController:
         self._exit_requested = False
         self._exit_reason = None
         self._completion_latched = False
-        self._phase = TrackerPhase.TRACKING
+        self._phase = TrackerPhase.ALIGN
         self._commit_count = 0
+        self._alignment_count = 0
         self._commit_deadline_s = None
         self._frozen_result = None
-        self._pitch_command_deg = config.pitch_initial_deg
+        self._pitch_command_deg = config.alignment_pitch_deg
         self._vertical_setpoint_m_s = vertical_speed_m_s
         self._vertical_integral_rc = 0.0
         self._previous_vario_m_s = vertical_speed_m_s
@@ -479,6 +509,7 @@ class TrackerController:
         self._completion_latched = False
         self._phase = TrackerPhase.TRACKING
         self._commit_count = 0
+        self._alignment_count = 0
         self._commit_deadline_s = None
         self._frozen_result = None
         self._pitch_command_deg = 0.0
@@ -542,6 +573,16 @@ class TrackerController:
     ) -> TrackerControlResult:
         result = observation.result
         dx, dy = self._normalized_errors(result, config)
+        live_frame = self._last_scale_update.accepted and self._last_scale_update.new_frame
+        if self._phase == TrackerPhase.ALIGN and self._last_scale_update.new_frame:
+            if live_frame and abs(dx) <= config.horizontal_alignment_threshold:
+                self._alignment_count += 1
+            else:
+                self._alignment_count = 0
+            if self._alignment_count >= config.alignment_frames:
+                self._phase = TrackerPhase.TRACKING
+                # Do not treat scale changes during staging as forward closing.
+                self._filter.rate_hz = 0.0
         inverse_measured = clamp(
             max(0.0, self._filter.rate_hz),
             0.0,
@@ -558,9 +599,12 @@ class TrackerController:
             config.minimum_target_ttc_s,
         )
         inverse_target = 1.0 / target_ttc
-        pitch_raw = config.pitch_initial_deg - config.inverse_ttc_kp * (
-            inverse_target - inverse_measured
-        )
+        if self._phase == TrackerPhase.ALIGN:
+            pitch_raw = config.alignment_pitch_deg
+        else:
+            pitch_raw = config.pitch_initial_deg - config.inverse_ttc_kp * (
+                inverse_target - inverse_measured
+            )
         pitch_raw = clamp(pitch_raw, config.pitch_minimum_deg, 0.0)
         max_pitch_step = config.pitch_slew_deg_s * dt_s
         self._pitch_command_deg += clamp(
@@ -568,14 +612,21 @@ class TrackerController:
             -max_pitch_step,
             max_pitch_step,
         )
-        dy_deadbanded = self._deadband(dy, config.deadband)
-        vertical_nominal = vertical_distance / target_ttc
-        vertical_alignment = config.vertical_alignment_kp * dy_deadbanded
-        vertical_target = clamp(
-            vertical_nominal + vertical_alignment,
-            config.vertical_speed_min_m_s,
-            config.vertical_speed_max_m_s,
-        )
+        if self._phase == TrackerPhase.ALIGN:
+            # Staging must not spend altitude to center the target vertically.
+            # The existing vario PI-D loop therefore holds zero vertical speed.
+            vertical_nominal = 0.0
+            vertical_alignment = 0.0
+            vertical_target = 0.0
+        else:
+            dy_deadbanded = self._deadband(dy, config.deadband)
+            vertical_nominal = vertical_distance / target_ttc
+            vertical_alignment = config.vertical_alignment_kp * dy_deadbanded
+            vertical_target = clamp(
+                vertical_nominal + vertical_alignment,
+                config.vertical_speed_min_m_s,
+                config.vertical_speed_max_m_s,
+            )
         previous_vertical_setpoint = (
             vario
             if self._vertical_setpoint_m_s is None
@@ -639,11 +690,10 @@ class TrackerController:
             result.bbox_width / config.camera_width_px,
             result.bbox_height / config.camera_height_px,
         )
-        live_frame = self._last_scale_update.accepted and self._last_scale_update.new_frame
         commit_block = self._commit_block(
             config, fill=fill, measured_ttc=measured_ttc, dx=dx, dy=dy
         )
-        if self._last_scale_update.new_frame:
+        if self._phase == TrackerPhase.TRACKING and self._last_scale_update.new_frame:
             if live_frame and commit_block is None:
                 self._commit_count += 1
             else:
@@ -868,6 +918,14 @@ class TrackerController:
             "filtered_log_scale_rate_hz": self._filter.rate_hz,
             "inverse_ttc_measured_hz": d.inverse_ttc_measured_hz,
             "measured_ttc_s": d.measured_ttc_s,
+            "roll_deg": self._roll_deg,
+            "pitch_deg": self._attitude_pitch_deg,
+            "heading_deg": self._heading_deg,
+            "attitude_age_s": (
+                None
+                if self._attitude_sample_time_s is None
+                else now_s - self._attitude_sample_time_s
+            ),
             "altitude_m": self._altitude_m,
             "vertical_distance_m": d.vertical_distance_m,
             "target_ttc_s": d.target_ttc_s,
@@ -894,6 +952,7 @@ class TrackerController:
             ),
             "throttle_command_rc": channels[RCChannel.THROTTLE],
             "yaw_rate_dps": result.yaw_rate_dps,
+            "alignment_count": self._alignment_count,
             "commit_count": self._commit_count,
             "commit_block_reason": result.terminal_block_reason,
             "exit_requested": self._exit_requested,

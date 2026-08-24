@@ -103,6 +103,7 @@ class ReadAttitudeCommand(MspCommand):
 
     def execute(self, dispatcher: "MspCommandDispatcher") -> dict[str, float | int]:
         dispatcher.last_attitude = dispatcher.msp.read_attitude()
+        dispatcher.last_attitude["received_at_s"] = time.monotonic()
         if dispatcher.on_attitude is not None:
             dispatcher.on_attitude(dispatcher.last_attitude)
         return dispatcher.last_attitude
