@@ -554,7 +554,7 @@ def test_app_run_updates_sent_rc_before_dispatch(monkeypatch):
     app = make_running_app(drone=drone, recorder=recorder, mavlink=service)
 
     monkeypatch.setattr(App, "_App__update_state", lambda self: None)
-    monkeypatch.setattr(App, "_update_controllers", lambda self: None)
+    monkeypatch.setattr(App, "_prepare_controllers", lambda self: None)
     monkeypatch.setattr(App, "_notification_center", lambda self: None)
     monkeypatch.setattr(
         App,
@@ -589,7 +589,7 @@ def test_app_run_replaces_invalid_rc_channel_before_dispatch(monkeypatch):
     app = make_running_app(drone=drone, recorder=recorder, mavlink=service)
 
     monkeypatch.setattr(App, "_App__update_state", lambda self: None)
-    monkeypatch.setattr(App, "_update_controllers", lambda self: None)
+    monkeypatch.setattr(App, "_prepare_controllers", lambda self: None)
     monkeypatch.setattr(App, "_notification_center", lambda self: None)
     monkeypatch.setattr(
         App,
@@ -619,7 +619,7 @@ def test_app_stop_request_before_dispatch_prevents_rc_output(monkeypatch):
     app = make_running_app(drone=drone, recorder=recorder)
 
     monkeypatch.setattr(App, "_App__update_state", lambda self: None)
-    monkeypatch.setattr(App, "_update_controllers", lambda self: None)
+    monkeypatch.setattr(App, "_prepare_controllers", lambda self: None)
     monkeypatch.setattr(App, "_notification_center", lambda self: None)
 
     def stop_while_resolving(self):
@@ -709,7 +709,7 @@ def test_app_run_logs_context_after_loop_failure(monkeypatch):
 
     monkeypatch.setattr(app_module, "log", FakeLog())
     monkeypatch.setattr(App, "_App__update_state", lambda self: None)
-    monkeypatch.setattr(App, "_update_controllers", lambda self: None)
+    monkeypatch.setattr(App, "_prepare_controllers", lambda self: None)
     monkeypatch.setattr(App, "_notification_center", lambda self: None)
 
     with pytest.raises(RuntimeError, match="state machine failed"):
@@ -762,7 +762,7 @@ def test_app_run_uses_deadlines_and_skips_overrun_catchup(
 
     monkeypatch.setattr(app_module.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(App, "_App__update_state", lambda self: None)
-    monkeypatch.setattr(App, "_update_controllers", lambda self: None)
+    monkeypatch.setattr(App, "_prepare_controllers", lambda self: None)
     monkeypatch.setattr(App, "_notification_center", lambda self: None)
 
     def resolve_rc(_self):

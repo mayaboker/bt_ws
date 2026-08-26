@@ -543,6 +543,71 @@ class TrackerController:
         vertical_speed_m_s: float | None = None,
         vertical_speed_sample_time_s: float | None = None,
     ) -> TrackerControlResult:
+        """Advance the active tracker controller by one application-loop step.
+
+        ``observe()`` must run before this method so the controller has the newest
+        camera observation, altitude, and attitude diagnostics.  ``update()``
+        receives the current vario sample separately because vertical velocity is
+        feedback for the throttle PI-D loop and must be checked for freshness at
+        the instant the command is calculated.
+
+        The method performs the following flow:
+
+        1. Return neutral/hover channels when tracking is inactive.
+        2. While in ``COMMIT``, keep returning the frozen collision command until
+           its deadline, then request that the application leave TRACK.
+        3. Require an altitude value and validate the vario sample.  A missing
+           altitude or missing, stale, future-dated, or non-finite vario requests
+           a safe exit.
+        4. Update the filtered vertical-acceleration estimate only when a new
+           vario sample arrives.
+        5. Validate camera freshness.  A duplicate frame may reuse the previous
+           estimate, but it cannot advance alignment or commit counters.
+        6. Call ``_control()`` to handle ALIGN/TRACKING phase logic, optical TTC,
+           pitch and yaw commands, and the vertical PI-D throttle command.
+        7. Record the returned result in the in-memory CSV diagnostics buffer.
+
+        ``exit_requested`` is intentionally only a request.  The application
+        state machine owns the actual TRACK-to-ALT_HOLD transition and later
+        calls ``stop_tracking()`` to export diagnostics and reset this object.
+
+        Mermaid source for the control flow (rendering requires Mermaid support
+        in the documentation generator):
+
+        ```mermaid
+            flowchart TD
+                A[update] --> B{Controller active?}
+                B -- No --> C[Return safe hover result]
+                B -- Yes --> D{Phase is COMMIT?}
+                D -- Yes --> E[Hold frozen RC command]
+                E --> F{Commit deadline reached?}
+                F -- Yes --> G[Request TRACK exit]
+                F -- No --> H[Record result]
+                G --> H
+                D -- No --> I{Vario and altitude fresh?}
+                I -- No --> J[Request exit and safe hover]
+                J --> H
+                I -- Yes --> K[Update vertical acceleration]
+                K --> L{Camera observation fresh?}
+                L -- No --> M[Request exit and safe hover]
+                M --> H
+                L -- Yes --> N[_control: phase, TTC, pitch, yaw, throttle]
+                N --> H
+                H --> O[Return TrackerControlResult]
+        ```
+
+        Args:
+            now_s: Current local monotonic time for freshness checks and loop dt.
+            vertical_speed_m_s: Latest vario velocity in metres per second;
+                positive is upward and negative is descent.
+            vertical_speed_sample_time_s: Local monotonic receive time belonging
+                to ``vertical_speed_m_s``.
+
+        Returns:
+            The complete eight-channel RC request plus controller diagnostics.
+            Inspect ``valid`` before using active control values; invalid results
+            contain safe centered pitch/yaw and hover throttle.
+        """
         config = self._config_snapshot()
         if not self._active:
             return self._safe_result(config, "tracker controller is inactive")

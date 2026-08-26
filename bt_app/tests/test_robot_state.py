@@ -143,7 +143,6 @@ def make_app_with_context():
     app.ctx = Context()
     app.controllers = {}
     app._tracker_now_s = 0.0
-    app._tracker_result = None
     app._tracker_enable_was_low = False
     app._selected_tracker_mode = TrackerMode.DISABLED
     app.services = SimpleNamespace(
@@ -465,7 +464,7 @@ def test_tracker_disabled_exits_track_without_controller_exit_request():
     assert ctx.state == RobotState.ALT_HOLD
 
 
-def test_track_rc_handler_routes_cached_immutable_command():
+def test_track_rc_handler_updates_once_and_routes_immutable_command():
     app = make_app_with_context()
     tracker = FakeTrackerController([1500, 1417, 1508, 1500, 2000, 2000, 1000, 1000])
     app.controllers[RobotState.TRACK] = tracker
@@ -473,6 +472,7 @@ def test_track_rc_handler_routes_cached_immutable_command():
     app.ctx.drone_vertical_speed = -0.4
     app.ctx.drone_alt_received_at_s = 10.0
     app._tracker_now_s = 10.1
+    tracker.exit_requested = True
 
     channels = app._resolve_rc()
 
@@ -484,6 +484,30 @@ def test_track_rc_handler_routes_cached_immutable_command():
             "vertical_speed_sample_time_s": 10.0,
         }
     ]
+    assert app.ctx.tracker_exit_requested
+
+
+def test_tracker_controller_exit_is_consumed_by_next_state_resolution():
+    app = make_app_with_context()
+    tracker = FakeTrackerController()
+    tracker.exit_requested = True
+    app.controllers[RobotState.TRACK] = tracker
+    app.ctx.state = RobotState.TRACK
+    app.ctx.armed = True
+    app.ctx.request_rc = InternalJoystick(
+        manual=RC_MID,
+        tracker_mode=TrackerMode.TRACKER1,
+    )
+    app._tracker_now_s = 10.1
+
+    app.tracker_handler()
+    assert app.ctx.state == RobotState.TRACK
+
+    machine = Robot_StateMachine(app.ctx, VehicleConfig())
+    machine.machine.set_state(RobotState.TRACK)
+    machine.resolve()
+
+    assert app.ctx.state == RobotState.ALT_HOLD
 
 
 def test_track_to_alt_hold_stops_tracker_and_seeds_current_altitude():
@@ -545,17 +569,11 @@ def test_app_prepares_tracker_from_one_latest_estimate_snapshot(monkeypatch):
     )
     monkeypatch.setattr(app_module.time, "monotonic", lambda: 12.5)
 
-    app._update_controllers()
+    app._prepare_controllers()
 
     assert tracker.observations == [(observation, 12.5, True)]
     assert app.ctx.tracker_ready
-    assert tracker.update_calls == [
-        {
-            "now_s": 12.5,
-            "vertical_speed_m_s": -0.4,
-            "vertical_speed_sample_time_s": 12.4,
-        }
-    ]
+    assert tracker.update_calls == []
 
 
 def test_tracker_enable_requires_observed_low_before_startup_high():
@@ -618,7 +636,7 @@ def test_tracker_enable_edge_is_ignored_when_tracker_is_not_ready(monkeypatch):
     app.ctx.request_rc = app.ctx.request_rc._replace(tracker_enable=RC_MAX)
     monkeypatch.setattr(app_module.time, "monotonic", lambda: 12.5)
 
-    app._update_controllers()
+    app._prepare_controllers()
 
     assert not app.ctx.tracker_start_requested
 
@@ -639,7 +657,7 @@ def test_ready_tracker_accepts_sf_edge_in_armed_alt_hold(monkeypatch):
     app.ctx.request_rc = app.ctx.request_rc._replace(tracker_enable=RC_MAX)
     monkeypatch.setattr(app_module.time, "monotonic", lambda: 12.5)
 
-    app._update_controllers()
+    app._prepare_controllers()
 
     assert app.ctx.tracker_start_requested
 
@@ -661,7 +679,7 @@ def test_ready_tracker_rejects_entry_without_fresh_vertical_speed(monkeypatch):
     app.ctx.request_rc = app.ctx.request_rc._replace(tracker_enable=RC_MAX)
     monkeypatch.setattr(app_module.time, "monotonic", lambda: 12.5)
 
-    app._update_controllers()
+    app._prepare_controllers()
 
     assert not app.ctx.tracker_ready
     assert not app.ctx.tracker_start_requested
@@ -694,7 +712,7 @@ def test_tracker_disabled_cancels_ready_acquisition(monkeypatch):
     app.ctx.request_rc = InternalJoystick(tracker_mode=TrackerMode.DISABLED)
     monkeypatch.setattr(app_module.time, "monotonic", lambda: 12.5)
 
-    app._update_controllers()
+    app._prepare_controllers()
 
     assert tracker.observations == [(None, 12.5, False)]
     assert not app.ctx.tracker_ready

@@ -16,7 +16,6 @@ from bt_app.control import (
     HoverYawController,
     MavlinkListenerError,
     TrackerController,
-    TrackerControlResult,
 )
 from bt_app.sm import Robot_StateMachine
 from bt_app.context import Context, DEFAULT_RC_CHANNELS
@@ -77,7 +76,6 @@ class App:
         self.controllers = {}
         self.services: AppServices | None = None
         self._tracker_now_s = 0.0
-        self._tracker_result: TrackerControlResult | None = None
         self._tracker_enable_was_low = False
         self._selected_tracker_mode = TrackerMode.DISABLED
 
@@ -200,7 +198,6 @@ class App:
         if prev == RobotState.TRACK and next != RobotState.TRACK:
             tracker = self.controllers[RobotState.TRACK]
             tracker.stop_tracking(end_reason=self._tracker_end_reason(tracker, next))
-            self._tracker_result = None
             self.ctx.tracker_ready = False
             self.ctx.tracker_exit_requested = False
 
@@ -259,7 +256,6 @@ class App:
                     vertical_speed_m_s=self.ctx.drone_vertical_speed,
                     vertical_speed_sample_time_s=self.ctx.drone_alt_received_at_s,
                 )
-                self._tracker_result = None
                 self.ctx.tracker_ready = False
                 self.ctx.tracker_exit_requested = False
                 log.info(
@@ -514,9 +510,12 @@ class App:
 
         # log.info(self.ctx)
 
-    def _update_controllers(self):
-        """
-        update/keep the controllers with the current context
+    def _prepare_controllers(self) -> None:
+        """Observe tracker inputs and prepare state-transition conditions.
+
+        Active controller commands are deliberately not calculated here.  After
+        the state machine resolves, ``_resolve_rc()`` updates exactly the
+        controller belonging to the selected state.
         """
         tracker = self.controllers.get(RobotState.TRACK)
         if tracker is not None:
@@ -550,15 +549,7 @@ class App:
                     self.ctx.tracker_ready,
                 ]
             )
-            if self.ctx.state == RobotState.TRACK:
-                self._tracker_result = tracker.update(
-                    now_s=self._tracker_now_s,
-                    vertical_speed_m_s=self.ctx.drone_vertical_speed,
-                    vertical_speed_sample_time_s=self.ctx.drone_alt_received_at_s,
-                )
-                self.ctx.tracker_exit_requested = tracker.exit_requested
-            else:
-                self._tracker_result = None
+            if self.ctx.state != RobotState.TRACK:
                 self.ctx.tracker_exit_requested = False
 
         if self.ctx.drone_rc is not None:
@@ -636,16 +627,21 @@ class App:
         return self.controllers[RobotState.ARM].update()
 
     def tracker_handler(self) -> list[int]:
-        if self._tracker_result is None:
-            self._tracker_result = self.controllers[RobotState.TRACK].update(
-                now_s=self._tracker_now_s,
-                vertical_speed_m_s=self.ctx.drone_vertical_speed,
-                vertical_speed_sample_time_s=self.ctx.drone_alt_received_at_s,
-            )
-        self.ctx.tracker_exit_requested = self.controllers[
-            RobotState.TRACK
-        ].exit_requested
-        return list(self._tracker_result.channels)
+        """Update TRACK once and return its RC channels.
+
+        A controller-generated exit is stored in the context and resolved on the
+        next 50 Hz loop.  Stale/lost-target results already contain safe hover
+        RC; commit completion keeps its intentionally frozen command for that
+        final iteration.
+        """
+        tracker_controller = self.controllers[RobotState.TRACK]
+        result = tracker_controller.update(
+            now_s=self._tracker_now_s,
+            vertical_speed_m_s=self.ctx.drone_vertical_speed,
+            vertical_speed_sample_time_s=self.ctx.drone_alt_received_at_s,
+        )
+        self.ctx.tracker_exit_requested = tracker_controller.exit_requested
+        return list(result.channels)
     #TODO: move to arm controller 
 
     def _make_disarm_channels(self) -> list[int]:
@@ -701,10 +697,16 @@ class App:
     def run(self):
         """Run the RC control loop until a stop is requested.
 
-        Each iteration updates application state and controllers, resolves and
-        sanitizes the active controller's RC channels, records them, and sends
-        them to the flight controller.  A stop request is checked again before
-        recording and dispatch so shutdown cannot emit one final RC command.
+        Each iteration updates application state, prepares controller transition
+        inputs, resolves the state machine, and updates exactly one active
+        controller.  Its RC channels are sanitized, recorded, and sent to the
+        flight controller.  A stop request is checked again before recording and
+        dispatch so shutdown cannot emit one final RC command.
+
+        Exit requests discovered by the active controller are resolved on the
+        next iteration (at most one 50 Hz period later).  Stale/lost-target
+        results return safe hover channels during that final iteration; commit
+        completion retains its frozen command.
 
         Exceptions from the loop are allowed to propagate, but all initialized
         services are given a chance to stop before this method returns or
@@ -722,7 +724,7 @@ class App:
                 self._raise_if_msp_failed()
                 self._dispatch_pending_joystick_events()
                 self.__update_state()
-                self._update_controllers()
+                self._prepare_controllers()
                 self._notification_center()
                 # resolve state machine state
                 self.robot_sm.resolve()
