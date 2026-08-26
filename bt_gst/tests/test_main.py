@@ -91,6 +91,28 @@ def test_detector_pipeline_contains_plugin_and_overlay_without_appsink() -> None
     assert "appsink" not in pipeline
 
 
+def test_detector_accepts_wrapped_red_hue_range() -> None:
+    config = validate_config(
+        AppConfig(
+            source=SimulationSourceConfig("/camera"),
+            detector=DetectorConfig(
+                enabled=True,
+                low_h=170,
+                low_s=80,
+                low_v=60,
+                high_h=10,
+                minimum_area=10,
+            ),
+        )
+    )
+
+    pipeline = build_pipeline_description(config)
+
+    assert "low-h=170" in pipeline
+    assert "high-h=10" in pipeline
+    assert "minimum-area=10" in pipeline
+
+
 def test_loads_and_resolves_zmq_config(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

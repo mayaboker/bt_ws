@@ -49,7 +49,9 @@ gst-launch-1.0 -v \
 
 - `detection-enabled`: enables or disables red detection.
 - `low-h`, `low-s`, `low-v`: lower HSV threshold.
-- `high-h`, `high-s`, `high-v`: upper HSV threshold.
+- `high-h`, `high-s`, `high-v`: upper HSV threshold. Hue is circular; setting
+  `low-h` greater than `high-h` selects a wrapped interval such as `170..10`
+  for both OpenCV red hue bands.
 - `selector-state`: `0` disabled, `1` selecting, `2` locked.
 - `selector-center-x`, `selector-center-y`: normalized selector center.
 - `selector-width`, `selector-height`: selector dimensions in pixels.

@@ -85,6 +85,7 @@ class DetectorConfig:
     high_h: int = 10
     high_s: int = 255
     high_v: int = 255
+    minimum_area: int = 150
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,7 @@ class DetectorConfigOverrides:
     high_h: int | None = None
     high_s: int | None = None
     high_v: int | None = None
+    minimum_area: int | None = None
 
 
 @dataclass(frozen=True)
@@ -204,6 +206,7 @@ def app_config_overrides_from_mapping(raw_config: dict[str, Any]) -> AppConfigOv
             high_h=_optional_int(raw_detector, "high_h"),
             high_s=_optional_int(raw_detector, "high_s"),
             high_v=_optional_int(raw_detector, "high_v"),
+            minimum_area=_optional_int(raw_detector, "minimum_area"),
         )
 
     raw_zmq = raw_config.get("zmq")
@@ -321,6 +324,11 @@ def _resolve_detector_config(
         high_h=override.high_h if override.high_h is not None else current.high_h,
         high_s=override.high_s if override.high_s is not None else current.high_s,
         high_v=override.high_v if override.high_v is not None else current.high_v,
+        minimum_area=(
+            override.minimum_area
+            if override.minimum_area is not None
+            else current.minimum_area
+        ),
     )
 
 
@@ -460,7 +468,13 @@ def _validate_detector_config(detector: DetectorConfig) -> None:
             raise ConfigError(f"detector.{field} must be an int")
         if not 0 <= value <= maximum:
             raise ConfigError(f"detector.{field} must be between 0 and {maximum}")
-    for low, high in (("low_h", "high_h"), ("low_s", "high_s"), ("low_v", "high_v")):
+    if isinstance(detector.minimum_area, bool) or not isinstance(detector.minimum_area, int):
+        raise ConfigError("detector.minimum_area must be an int")
+    if not 0 <= detector.minimum_area <= 10_000_000:
+        raise ConfigError("detector.minimum_area must be between 0 and 10000000")
+    # Hue is circular in OpenCV HSV. low_h > high_h intentionally selects a
+    # wraparound interval, for example 170..179 plus 0..10 for red.
+    for low, high in (("low_s", "high_s"), ("low_v", "high_v")):
         if getattr(detector, low) > getattr(detector, high):
             raise ConfigError(f"detector.{low} must not exceed detector.{high}")
 

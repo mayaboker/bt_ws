@@ -349,13 +349,36 @@ GstFlowReturn gst_controlled_red_detect_transform_ip(
   cv::cvtColor(rgb, hsv, cv::COLOR_RGB2HSV);
 
   cv::Mat mask;
-  cv::inRange(
-    hsv,
-    cv::Scalar(lowH, lowS, lowV),
-    cv::Scalar(highH, highS, highV),
-    mask);
+  if (lowH <= highH)
+  {
+    cv::inRange(
+      hsv,
+      cv::Scalar(lowH, lowS, lowV),
+      cv::Scalar(highH, highS, highV),
+      mask);
+  }
+  else
+  {
+    // OpenCV hue is circular. A wrapped range such as 170..10 covers both
+    // red lobes: 170..179 and 0..10.
+    cv::Mat upperHueMask;
+    cv::Mat lowerHueMask;
+    cv::inRange(
+      hsv,
+      cv::Scalar(lowH, lowS, lowV),
+      cv::Scalar(179, highS, highV),
+      upperHueMask);
+    cv::inRange(
+      hsv,
+      cv::Scalar(0, lowS, lowV),
+      cv::Scalar(highH, highS, highV),
+      lowerHueMask);
+    cv::bitwise_or(upperHueMask, lowerHueMask, mask);
+  }
 
-  const cv::Mat kernel = cv::Mat::ones(5, 5, CV_8U);
+  // Preserve distant targets that may be only a few pixels across. A 5x5
+  // opening erased them before contour filtering could apply minimum-area.
+  const cv::Mat kernel = cv::Mat::ones(3, 3, CV_8U);
   cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
   cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, kernel);
 

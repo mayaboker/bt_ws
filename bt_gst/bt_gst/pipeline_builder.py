@@ -59,7 +59,8 @@ def build_processing_pipeline_description(detector: DetectorConfig) -> str:
         "controlledreddetect name=red_detector "
         f"detection-enabled=true low-h={detector.low_h} low-s={detector.low_s} "
         f"low-v={detector.low_v} high-h={detector.high_h} "
-        f"high-s={detector.high_s} high-v={detector.high_v}"
+        f"high-s={detector.high_s} high-v={detector.high_v} "
+        f"minimum-area={detector.minimum_area}"
     )
     if not detector.overlay_enabled:
         return detector_description

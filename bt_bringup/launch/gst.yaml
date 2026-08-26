@@ -5,12 +5,13 @@ source:
 detector:
   enabled: true
   overlay_enabled: true
-  low_h: 0
-  low_s: 100
-  low_v: 100
+  low_h: 170
+  low_s: 80
+  low_v: 60
   high_h: 10
   high_s: 255
   high_v: 255
+  minimum_area: 10
 zmq:
   enabled: true
   endpoint: tcp://127.0.0.1:5556
