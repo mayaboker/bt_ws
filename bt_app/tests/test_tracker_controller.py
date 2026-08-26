@@ -26,6 +26,7 @@ class FakeParameters:
             ParameterKey.TTC_PIT_INIT: -5.0,
             ParameterKey.TTC_PIT_MIN: -15.0,
             ParameterKey.TTC_PIT_SLEW: 5.0,
+            ParameterKey.TTC_PIT_REC: 25.0,
             ParameterKey.TTC_INV_KP: 8.0,
             ParameterKey.TTC_SCALE_A: 0.35,
             ParameterKey.TTC_SCALE_B: 0.08,
@@ -41,6 +42,8 @@ class FakeParameters:
             ParameterKey.TTC_VY_MAX: 2.0,
             ParameterKey.TTC_MIN_S: 0.5,
             ParameterKey.TTC_DY_KP: 1.0,
+            ParameterKey.TTC_DY_VMAX: 0.5,
+            ParameterKey.TTC_DY_NEAR: 1.5,
             ParameterKey.TTC_VY_KP: 20.0,
             ParameterKey.TTC_VY_KI: 3.0,
             ParameterKey.TTC_VY_KD: 10.0,
@@ -49,6 +52,7 @@ class FakeParameters:
             ParameterKey.TRK_VZ_ACCEL: 0.5,
             ParameterKey.TTC_THR_MAX: 100.0,
             ParameterKey.TTC_FILL: 0.6,
+            ParameterKey.TTC_CLIP_FILL: 0.8,
             ParameterKey.TTC_ALIGN: 0.15,
             ParameterKey.TTC_COMMIT_FR: 5,
             ParameterKey.TTC_ALN_PIT: -5.0,
@@ -180,8 +184,8 @@ def test_alignment_blocks_ttc_approach_until_distinct_centered_frames():
 
     assert result.phase == TrackerPhase.ALIGN
     assert result.pitch_command_deg == pytest.approx(-5.0)
-    assert result.vertical_speed_target_m_s == pytest.approx(0.0)
-    assert result.vertical_speed_setpoint_m_s == pytest.approx(0.0)
+    assert result.vertical_speed_target_m_s > 0.0
+    assert result.vertical_speed_setpoint_m_s > 0.0
 
     for frame in range(14, 18):
         time_s = 0.48 + (frame - 13) * 0.04
@@ -231,6 +235,45 @@ def test_alignment_blocks_ttc_approach_until_distinct_centered_frames():
     assert final_result.phase == TrackerPhase.TRACKING
 
 
+def test_alignment_descends_when_target_is_below_camera_center():
+    controller = TrackerController(FakeParameters())
+    for frame in range(1, 9):
+        time_s = (frame - 1) * 0.04
+        controller.observe(
+            observation(frame, time_s),
+            now_s=time_s,
+            mode_selected=True,
+            altitude_m=10.0,
+            vertical_speed_m_s=0.0,
+            altitude_sample_time_s=time_s,
+        )
+    controller.start_tracking(
+        now_s=0.28,
+        vertical_speed_m_s=0.0,
+        vertical_speed_sample_time_s=0.28,
+    )
+    time_s = 0.32
+    controller.observe(
+        observation(9, time_s, x=30, y=380),
+        now_s=time_s,
+        mode_selected=True,
+        altitude_m=10.0,
+        vertical_speed_m_s=0.0,
+        altitude_sample_time_s=time_s,
+    )
+
+    result = controller.update(
+        now_s=time_s,
+        vertical_speed_m_s=0.0,
+        vertical_speed_sample_time_s=time_s,
+    )
+
+    assert result.phase == TrackerPhase.ALIGN
+    assert result.vertical_speed_target_m_s < 0.0
+    assert result.vertical_speed_setpoint_m_s < 0.0
+    assert result.channels[RCChannel.THROTTLE] < 1663
+
+
 def test_control_uses_ttc_pitch_vertical_speed_and_yaw():
     controller = TrackerController(FakeParameters())
     acquire(controller)
@@ -252,7 +295,7 @@ def test_control_uses_ttc_pitch_vertical_speed_and_yaw():
     assert result.valid
     assert result.phase == TrackerPhase.TRACKING
     assert result.pitch_command_deg == pytest.approx(-5.4)
-    assert result.vertical_speed_target_m_s == pytest.approx(-1.25)
+    assert result.vertical_speed_target_m_s == pytest.approx(-9.5 / 30.0)
     assert result.vertical_speed_setpoint_m_s == pytest.approx(-0.04)
     assert result.channels[RCChannel.PITCH] > RC_MID
     assert 1655 <= result.channels[RCChannel.THROTTLE] <= 1670
@@ -361,6 +404,125 @@ def test_stale_camera_or_vario_requests_exit():
     assert controller.exit_reason == "tracker observation stale"
 
 
+def test_fresh_clipped_bbox_remains_available_for_recovery_control():
+    controller = TrackerController(FakeParameters())
+    acquire(controller)
+    clipped = observation(14, 0.52, x=250, y=400, width=100, height=80)
+    controller.observe(
+        clipped,
+        now_s=0.52,
+        mode_selected=True,
+        altitude_m=10.0,
+        vertical_speed_m_s=0.0,
+        altitude_sample_time_s=0.52,
+    )
+
+    result = controller.update(
+        now_s=0.52,
+        vertical_speed_m_s=0.0,
+        vertical_speed_sample_time_s=0.52,
+    )
+
+    assert result.valid
+    assert not controller.exit_requested
+    assert result.error_y < 0.0
+    assert result.vertical_speed_target_m_s == pytest.approx(
+        -9.5 / 29.96 - (200.0 / 240.0 - 0.03)
+    )
+    assert -5.3 < result.pitch_command_deg < -5.0
+
+
+def test_pitch_relaxes_faster_than_forward_pitch_slew():
+    params = FakeParameters()
+    params.values[ParameterKey.TTC_PIT_INIT] = -15.0
+    params.values[ParameterKey.TTC_INV_KP] = 0.0
+    controller = TrackerController(params)
+    time_s = acquire(controller)
+    for frame in range(14, 65):
+        time_s += 0.04
+        controller.observe(
+            observation(frame, time_s),
+            now_s=time_s,
+            mode_selected=True,
+            altitude_m=10.0,
+            vertical_speed_m_s=0.0,
+            altitude_sample_time_s=time_s,
+        )
+        result = controller.update(
+            now_s=time_s,
+            vertical_speed_m_s=0.0,
+            vertical_speed_sample_time_s=time_s,
+        )
+    assert result.pitch_command_deg == pytest.approx(-15.0)
+
+    time_s += 0.04
+    controller.observe(
+        observation(65, time_s, y=340),
+        now_s=time_s,
+        mode_selected=True,
+        altitude_m=10.0,
+        vertical_speed_m_s=0.0,
+        altitude_sample_time_s=time_s,
+    )
+    recovering = controller.update(
+        now_s=time_s,
+        vertical_speed_m_s=0.0,
+        vertical_speed_sample_time_s=time_s,
+    )
+
+    assert recovering.pitch_command_deg == pytest.approx(-14.0)
+
+
+def test_clipped_scale_uses_counting_down_effective_ttc():
+    controller = TrackerController(FakeParameters())
+    acquire(controller)
+    controller._filter.rate_hz = 0.2
+    controller._filter.time_s = 0.50
+    controller.observe(
+        observation(14, 1.50, x=250, y=400, width=100, height=80),
+        now_s=1.50,
+        mode_selected=True,
+        altitude_m=10.0,
+        vertical_speed_m_s=0.0,
+        altitude_sample_time_s=1.50,
+    )
+
+    result = controller.update(
+        now_s=1.50,
+        vertical_speed_m_s=0.0,
+        vertical_speed_sample_time_s=1.50,
+    )
+
+    assert result.vertical_speed_requested_m_s == pytest.approx(-9.5 / 4.0)
+    assert controller._diagnostics.measured_ttc_s == pytest.approx(5.0)
+    assert controller._diagnostics.effective_ttc_s == pytest.approx(4.0)
+    assert controller._diagnostics.ttc_prediction_age_s == pytest.approx(1.0)
+
+
+def test_large_clipped_bbox_enters_commit_without_fresh_ttc():
+    controller = TrackerController(FakeParameters())
+    time_s = acquire(controller)
+    for frame in range(14, 19):
+        time_s += 0.04
+        controller.observe(
+            observation(frame, time_s, width=600, height=390, x=0, y=90),
+            now_s=time_s,
+            mode_selected=True,
+            altitude_m=1.0,
+            vertical_speed_m_s=-1.0,
+            altitude_sample_time_s=time_s,
+        )
+        result = controller.update(
+            now_s=time_s,
+            vertical_speed_m_s=-1.0,
+            vertical_speed_sample_time_s=time_s,
+        )
+
+    assert result.phase == TrackerPhase.COMMIT
+    assert result.terminal_ready
+    assert result.terminal_block_reason is None
+
+
 def test_tracking_stop_exports_ttc_diagnostics(tmp_path):
     path = tmp_path / "tracker.csv"
     controller = TrackerController(FakeParameters(), csv_path=path)
@@ -374,4 +536,6 @@ def test_tracking_stop_exports_ttc_diagnostics(tmp_path):
 
     text = path.read_text(encoding="utf-8")
     assert "inverse_ttc_measured_hz" in text.splitlines()[0]
+    assert "effective_ttc_s" in text.splitlines()[0]
+    assert "ttc_prediction_age_s" in text.splitlines()[0]
     assert "test complete" in text.splitlines()[1]

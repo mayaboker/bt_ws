@@ -171,6 +171,10 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.TTC_PIT_SLEW))
 
     @property
+    def ttc_pit_rec(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_PIT_REC))
+
+    @property
     def ttc_inv_kp(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.TTC_INV_KP))
 
@@ -231,6 +235,14 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.TTC_DY_KP))
 
     @property
+    def ttc_dy_vmax(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_DY_VMAX))
+
+    @property
+    def ttc_dy_near(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_DY_NEAR))
+
+    @property
     def ttc_vy_kp(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.TTC_VY_KP))
 
@@ -257,6 +269,10 @@ class TypedParameters:
     @property
     def ttc_fill(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.TTC_FILL))
+
+    @property
+    def ttc_clip_fill(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TTC_CLIP_FILL))
 
     @property
     def ttc_align(self) -> float:

@@ -45,6 +45,7 @@ class ParameterKey:
     TTC_PIT_INIT: Final[Literal['TTC_PIT_INIT']] = 'TTC_PIT_INIT'
     TTC_PIT_MIN: Final[Literal['TTC_PIT_MIN']] = 'TTC_PIT_MIN'
     TTC_PIT_SLEW: Final[Literal['TTC_PIT_SLEW']] = 'TTC_PIT_SLEW'
+    TTC_PIT_REC: Final[Literal['TTC_PIT_REC']] = 'TTC_PIT_REC'
     TTC_INV_KP: Final[Literal['TTC_INV_KP']] = 'TTC_INV_KP'
     TTC_SCALE_A: Final[Literal['TTC_SCALE_A']] = 'TTC_SCALE_A'
     TTC_SCALE_B: Final[Literal['TTC_SCALE_B']] = 'TTC_SCALE_B'
@@ -60,6 +61,8 @@ class ParameterKey:
     TTC_VY_MAX: Final[Literal['TTC_VY_MAX']] = 'TTC_VY_MAX'
     TTC_MIN_S: Final[Literal['TTC_MIN_S']] = 'TTC_MIN_S'
     TTC_DY_KP: Final[Literal['TTC_DY_KP']] = 'TTC_DY_KP'
+    TTC_DY_VMAX: Final[Literal['TTC_DY_VMAX']] = 'TTC_DY_VMAX'
+    TTC_DY_NEAR: Final[Literal['TTC_DY_NEAR']] = 'TTC_DY_NEAR'
     TTC_VY_KP: Final[Literal['TTC_VY_KP']] = 'TTC_VY_KP'
     TTC_VY_KI: Final[Literal['TTC_VY_KI']] = 'TTC_VY_KI'
     TTC_VY_KD: Final[Literal['TTC_VY_KD']] = 'TTC_VY_KD'
@@ -67,6 +70,7 @@ class ParameterKey:
     TTC_VY_I_MAX: Final[Literal['TTC_VY_I_MAX']] = 'TTC_VY_I_MAX'
     TTC_THR_MAX: Final[Literal['TTC_THR_MAX']] = 'TTC_THR_MAX'
     TTC_FILL: Final[Literal['TTC_FILL']] = 'TTC_FILL'
+    TTC_CLIP_FILL: Final[Literal['TTC_CLIP_FILL']] = 'TTC_CLIP_FILL'
     TTC_ALIGN: Final[Literal['TTC_ALIGN']] = 'TTC_ALIGN'
     TTC_COMMIT_FR: Final[Literal['TTC_COMMIT_FR']] = 'TTC_COMMIT_FR'
     TTC_ALN_PIT: Final[Literal['TTC_ALN_PIT']] = 'TTC_ALN_PIT'
@@ -137,6 +141,7 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'TTC_PIT_INIT',
     'TTC_PIT_MIN',
     'TTC_PIT_SLEW',
+    'TTC_PIT_REC',
     'TTC_INV_KP',
     'TTC_SCALE_A',
     'TTC_SCALE_B',
@@ -152,6 +157,8 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'TTC_VY_MAX',
     'TTC_MIN_S',
     'TTC_DY_KP',
+    'TTC_DY_VMAX',
+    'TTC_DY_NEAR',
     'TTC_VY_KP',
     'TTC_VY_KI',
     'TTC_VY_KD',
@@ -159,6 +166,7 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'TTC_VY_I_MAX',
     'TTC_THR_MAX',
     'TTC_FILL',
+    'TTC_CLIP_FILL',
     'TTC_ALIGN',
     'TTC_COMMIT_FR',
     'TTC_ALN_PIT',

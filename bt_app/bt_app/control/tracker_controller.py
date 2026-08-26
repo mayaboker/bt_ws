@@ -36,6 +36,7 @@ class TrackerConfig:
     pitch_initial_deg: float
     pitch_minimum_deg: float
     pitch_slew_deg_s: float
+    pitch_recovery_slew_deg_s: float
     inverse_ttc_kp: float
     scale_alpha: float
     scale_beta: float
@@ -51,6 +52,8 @@ class TrackerConfig:
     vertical_speed_max_m_s: float
     minimum_target_ttc_s: float
     vertical_alignment_kp: float
+    vertical_alignment_max_m_s: float
+    near_field_alignment_max_m_s: float
     vertical_velocity_kp: float
     vertical_velocity_ki: float
     vertical_velocity_kd: float
@@ -59,6 +62,7 @@ class TrackerConfig:
     vertical_accel_limit_m_s2: float
     throttle_max_correction_rc: float
     commit_fill_fraction: float
+    clipped_commit_fill_fraction: float
     commit_alignment: float
     commit_frames: int
     alignment_pitch_deg: float
@@ -84,6 +88,7 @@ class TrackerConfig:
             pitch_initial_deg=parameters.get(ParameterKey.TTC_PIT_INIT),
             pitch_minimum_deg=parameters.get(ParameterKey.TTC_PIT_MIN),
             pitch_slew_deg_s=parameters.get(ParameterKey.TTC_PIT_SLEW),
+            pitch_recovery_slew_deg_s=parameters.get(ParameterKey.TTC_PIT_REC),
             inverse_ttc_kp=parameters.get(ParameterKey.TTC_INV_KP),
             scale_alpha=parameters.get(ParameterKey.TTC_SCALE_A),
             scale_beta=parameters.get(ParameterKey.TTC_SCALE_B),
@@ -99,6 +104,8 @@ class TrackerConfig:
             vertical_speed_max_m_s=parameters.get(ParameterKey.TTC_VY_MAX),
             minimum_target_ttc_s=parameters.get(ParameterKey.TTC_MIN_S),
             vertical_alignment_kp=parameters.get(ParameterKey.TTC_DY_KP),
+            vertical_alignment_max_m_s=parameters.get(ParameterKey.TTC_DY_VMAX),
+            near_field_alignment_max_m_s=parameters.get(ParameterKey.TTC_DY_NEAR),
             vertical_velocity_kp=parameters.get(ParameterKey.TTC_VY_KP),
             vertical_velocity_ki=parameters.get(ParameterKey.TTC_VY_KI),
             vertical_velocity_kd=parameters.get(ParameterKey.TTC_VY_KD),
@@ -107,6 +114,7 @@ class TrackerConfig:
             vertical_accel_limit_m_s2=parameters.get(ParameterKey.TRK_VZ_ACCEL),
             throttle_max_correction_rc=parameters.get(ParameterKey.TTC_THR_MAX),
             commit_fill_fraction=parameters.get(ParameterKey.TTC_FILL),
+            clipped_commit_fill_fraction=parameters.get(ParameterKey.TTC_CLIP_FILL),
             commit_alignment=parameters.get(ParameterKey.TTC_ALIGN),
             commit_frames=parameters.get(ParameterKey.TTC_COMMIT_FR),
             alignment_pitch_deg=parameters.get(ParameterKey.TTC_ALN_PIT),
@@ -134,6 +142,7 @@ class TrackerConfig:
             raise ValueError("minimum TTC pitch exceeds Betaflight angle limit")
         if (
             self.pitch_slew_deg_s <= 0.0
+            or self.pitch_recovery_slew_deg_s <= 0.0
             or self.yaw_slew_dps2 <= 0.0
             or self.nominal_vertical_speed_m_s <= 0.0
             or self.vertical_accel_limit_m_s2 <= 0.0
@@ -143,8 +152,15 @@ class TrackerConfig:
             raise ValueError("TTC alpha-beta gains must be in [0, 1]")
         if self.vertical_speed_min_m_s >= 0.0 or self.vertical_speed_max_m_s < 0.0:
             raise ValueError("TTC vertical limits must include descent and hover")
-        if self.vertical_velocity_ki < 0.0 or self.vertical_integral_max_rc < 0.0:
-            raise ValueError("TTC vertical integral settings must be nonnegative")
+        if (
+            self.vertical_alignment_max_m_s < 0.0
+            or self.near_field_alignment_max_m_s < self.vertical_alignment_max_m_s
+            or self.vertical_velocity_ki < 0.0
+            or self.vertical_integral_max_rc < 0.0
+        ):
+            raise ValueError(
+                "TTC vertical alignment limits must be ordered and integral limits nonnegative"
+            )
         if self.vertical_velocity_kd < 0.0:
             raise ValueError("TTC vertical acceleration gain must be nonnegative")
         if not 0.0 <= self.vertical_accel_filter_alpha <= 1.0:
@@ -160,6 +176,8 @@ class TrackerConfig:
             raise ValueError("TTC alignment pitch must be inside pitch limits")
         if not 0.0 < self.commit_fill_fraction <= 1.0:
             raise ValueError("TTC commit fill must be in (0, 1]")
+        if not self.commit_fill_fraction <= self.clipped_commit_fill_fraction <= 1.0:
+            raise ValueError("clipped commit fill must be at least TTC commit fill")
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,6 +304,8 @@ class LoopDiagnostics:
     throttle_d_rc: float = 0.0
     bbox_fill: float = 0.0
     yaw_rate_target_dps: float = 0.0
+    effective_ttc_s: float = 0.0
+    ttc_prediction_age_s: float = 0.0
 
 
 TRACKER_CSV_HEADER = (
@@ -295,6 +315,7 @@ TRACKER_CSV_HEADER = (
     "bbox_width", "bbox_height", "dx_norm", "dy_norm", "bbox_fill",
     "scale_px", "log_scale", "scale_innovation", "scale_reason",
     "filtered_log_scale_rate_hz", "inverse_ttc_measured_hz", "measured_ttc_s",
+    "effective_ttc_s", "ttc_prediction_age_s",
     "roll_deg", "pitch_deg", "heading_deg", "attitude_age_s",
     "altitude_m", "vertical_distance_m", "target_ttc_s", "inverse_ttc_target_hz",
     "pitch_initial_deg", "pitch_raw_deg", "pitch_command_deg",
@@ -327,6 +348,7 @@ class TrackerController:
         self._filter = OpticalTtcFilter()
         self._latest_observation: TrackerObservation | None = None
         self._latest_valid_observation: TrackerObservation | None = None
+        self._latest_control_observation: TrackerObservation | None = None
         self._last_scale_update = ScaleUpdate(False, False, None, None, None)
         self._first_valid_time_s: float | None = None
         self._valid_frame_count = 0
@@ -439,6 +461,11 @@ class TrackerController:
             if not self._active:
                 self._clear_acquisition()
             return False
+        if self._is_control_observation_valid(observation, config):
+            # Control may use a bbox touching an image edge to steer it back
+            # into view. TTC scale estimation remains stricter because a
+            # clipped bbox no longer represents the target's full size.
+            self._latest_control_observation = observation
         update = self._filter.update(observation, config)
         self._last_scale_update = update
         if update.accepted:
@@ -640,7 +667,7 @@ class TrackerController:
             vertical_speed_sample_time_s,
             config,
         )
-        observation = self._latest_valid_observation
+        observation = self._latest_control_observation
         if observation is None or now_s - observation.received_at_s > config.target_timeout_s:
             self._request_exit("tracker observation stale")
             return self._record(self._safe_result(config, "tracker observation stale"), now_s)
@@ -688,6 +715,16 @@ class TrackerController:
             if inverse_measured <= 1.0 / config.logged_ttc_max_s
             else 1.0 / inverse_measured
         )
+        ttc_prediction_age_s = (
+            0.0
+            if self._filter.time_s is None
+            else max(0.0, now_s - self._filter.time_s)
+        )
+        effective_ttc = max(
+            measured_ttc - ttc_prediction_age_s,
+            config.minimum_target_ttc_s,
+        )
+        inverse_effective = 1.0 / effective_ttc
         vertical_distance = config.target_height_m - self._altitude_m
         target_ttc = max(
             abs(vertical_distance) / config.nominal_vertical_speed_m_s,
@@ -697,26 +734,63 @@ class TrackerController:
         if self._phase == TrackerPhase.ALIGN:
             pitch_raw = config.alignment_pitch_deg
         else:
-            pitch_raw = config.pitch_initial_deg - config.inverse_ttc_kp * (
-                inverse_target - inverse_measured
+            ttc_pitch_raw = config.pitch_initial_deg - config.inverse_ttc_kp * (
+                inverse_target - inverse_effective
+            )
+            # Blend continuously instead of waiting for perfect vertical
+            # alignment before accelerating forward. At the image edge the
+            # conservative alignment pitch dominates; near center TTC has full
+            # pitch authority.
+            alignment_weight = clamp(abs(dy), 0.0, 1.0)
+            pitch_raw = (
+                (1.0 - alignment_weight) * ttc_pitch_raw
+                + alignment_weight * config.alignment_pitch_deg
             )
         pitch_raw = clamp(pitch_raw, config.pitch_minimum_deg, 0.0)
-        max_pitch_step = config.pitch_slew_deg_s * dt_s
+        pitch_error = pitch_raw - self._pitch_command_deg
+        pitch_slew = (
+            config.pitch_recovery_slew_deg_s
+            if pitch_error > 0.0
+            else config.pitch_slew_deg_s
+        )
+        max_pitch_step = pitch_slew * dt_s
         self._pitch_command_deg += clamp(
-            pitch_raw - self._pitch_command_deg,
+            pitch_error,
             -max_pitch_step,
             max_pitch_step,
         )
         if self._phase == TrackerPhase.ALIGN:
-            # Staging must not spend altitude to center the target vertically.
-            # The existing vario PI-D loop therefore holds zero vertical speed.
+            # Keep the conservative alignment pitch, but correct vertical image
+            # error before forward tracking. A target below image center needs
+            # descent now; holding altitude lets it reach the lower frame edge.
+            dy_deadbanded = self._deadband(dy, config.deadband)
             vertical_nominal = 0.0
-            vertical_alignment = 0.0
-            vertical_target = 0.0
+            vertical_alignment = clamp(
+                config.vertical_alignment_kp * dy_deadbanded,
+                -config.vertical_alignment_max_m_s,
+                config.vertical_alignment_max_m_s,
+            )
+            vertical_target = clamp(
+                vertical_alignment,
+                config.vertical_speed_min_m_s,
+                config.vertical_speed_max_m_s,
+            )
         else:
             dy_deadbanded = self._deadband(dy, config.deadband)
-            vertical_nominal = vertical_distance / target_ttc
-            vertical_alignment = config.vertical_alignment_kp * dy_deadbanded
+            # Match altitude arrival time to the observed optical arrival time.
+            # This couples descent to forward closing and avoids spending most
+            # altitude before the vehicle has accelerated toward the target.
+            vertical_nominal = vertical_distance / effective_ttc
+            alignment_limit = (
+                config.near_field_alignment_max_m_s
+                if self._last_scale_update.reason == "bbox clipped"
+                else config.vertical_alignment_max_m_s
+            )
+            vertical_alignment = clamp(
+                config.vertical_alignment_kp * dy_deadbanded,
+                -alignment_limit,
+                alignment_limit,
+            )
             vertical_target = clamp(
                 vertical_nominal + vertical_alignment,
                 config.vertical_speed_min_m_s,
@@ -792,11 +866,15 @@ class TrackerController:
             result.bbox_width / config.camera_width_px,
             result.bbox_height / config.camera_height_px,
         )
-        commit_block = self._commit_block(
-            config, fill=fill, measured_ttc=measured_ttc, dx=dx, dy=dy
+        clipped_near_field = (
+            self._last_scale_update.reason == "bbox clipped"
+            and fill >= config.clipped_commit_fill_fraction
+        )
+        commit_block = None if clipped_near_field else self._commit_block(
+            config, fill=fill, measured_ttc=effective_ttc, dx=dx, dy=dy
         )
         if self._phase == TrackerPhase.TRACKING and self._last_scale_update.new_frame:
-            if live_frame and commit_block is None:
+            if (live_frame or clipped_near_field) and commit_block is None:
                 self._commit_count += 1
             else:
                 self._commit_count = 0
@@ -809,6 +887,8 @@ class TrackerController:
             scale_reason=self._last_scale_update.reason,
             inverse_ttc_measured_hz=inverse_measured,
             measured_ttc_s=measured_ttc,
+            effective_ttc_s=effective_ttc,
+            ttc_prediction_age_s=ttc_prediction_age_s,
             target_ttc_s=target_ttc,
             inverse_ttc_target_hz=inverse_target,
             pitch_raw_deg=pitch_raw,
@@ -889,6 +969,23 @@ class TrackerController:
         return clamp(dx, -1.0, 1.0), clamp(dy, -1.0, 1.0)
 
     @staticmethod
+    def _is_control_observation_valid(
+        observation: TrackerObservation,
+        config: TrackerConfig,
+    ) -> bool:
+        """Accept a locked bbox that intersects the image, including its edges."""
+        result = observation.result
+        return (
+            result.locked
+            and result.bbox_width > 0
+            and result.bbox_height > 0
+            and result.bbox_x < config.camera_width_px
+            and result.bbox_y < config.camera_height_px
+            and result.bbox_x + result.bbox_width > 0
+            and result.bbox_y + result.bbox_height > 0
+        )
+
+    @staticmethod
     def _deadband(value: float, deadband: float) -> float:
         if abs(value) <= deadband:
             return 0.0
@@ -945,6 +1042,7 @@ class TrackerController:
     def _clear_acquisition(self) -> None:
         self._filter.reset()
         self._latest_valid_observation = None
+        self._latest_control_observation = None
         self._first_valid_time_s = None
         self._valid_frame_count = 0
         self._ready_to_track = False
@@ -1030,6 +1128,8 @@ class TrackerController:
             "filtered_log_scale_rate_hz": self._filter.rate_hz,
             "inverse_ttc_measured_hz": d.inverse_ttc_measured_hz,
             "measured_ttc_s": d.measured_ttc_s,
+            "effective_ttc_s": d.effective_ttc_s,
+            "ttc_prediction_age_s": d.ttc_prediction_age_s,
             "roll_deg": self._roll_deg,
             "pitch_deg": self._attitude_pitch_deg,
             "heading_deg": self._heading_deg,

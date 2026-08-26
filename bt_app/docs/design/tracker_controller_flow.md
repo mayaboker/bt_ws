@@ -99,7 +99,7 @@ stateDiagram-v2
 
 With the current defaults, this means 8 accepted frames spanning at least 0.20 seconds. Re-reading the same frame at the faster application-loop rate does not increase the count and does not clear an already reached ready state.
 
-Before TRACK starts, any distinct invalid frame clears acquisition. During active TRACK, an invalid frame does not immediately discard the last valid observation; the controller may use that last observation until the freshness timeout expires.
+Before TRACK starts, any distinct TTC-invalid frame clears acquisition. During active TRACK, validation is split: TTC still requires the complete unclipped bbox, while yaw and vertical recovery may use a fresh locked bbox that intersects the image, including one touching an edge. The controller exits only after no control-valid observation has arrived for the freshness timeout.
 
 ### Start and stop
 
@@ -112,7 +112,7 @@ Before TRACK starts, any distinct invalid frame clears acquisition. During activ
 - phase and commit state;
 - in-memory CSV rows.
 
-During `ALIGN`, yaw remains active, pitch stays at `TTC_ALN_PIT`, and the existing vario PI-D loop targets zero vertical speed. Optical TTC cannot increase the closing pitch and vertical image error cannot command descent. The target must remain within the horizontal threshold `TTC_ALN_XY` for `TTC_ALN_FR` distinct accepted frames. A distinct rejected or horizontally misaligned frame resets this counter; reading the same frame again does not advance it. On transition to `TRACKING`, the optical expansion-rate estimate is reset so staging motion is not interpreted as target closing.
+During `ALIGN`, yaw remains active and pitch stays at `TTC_ALN_PIT`. Optical TTC cannot increase the closing pitch, but vertical image error drives a bounded vertical-speed target through the existing vario PI-D loop. This lets the vehicle descend when the target is below image center instead of holding altitude until the bbox is clipped. The target must remain within the horizontal threshold `TTC_ALN_XY` for `TTC_ALN_FR` distinct accepted frames. A distinct rejected or horizontally misaligned frame resets this counter; reading the same frame again does not advance it. On transition to `TRACKING`, the optical expansion-rate estimate is reset so staging motion is not interpreted as target closing.
 
 `stop_tracking(...)` exports the CSV atomically through a temporary file, resets all dynamic controller state, and returns to acquisition behavior.
 
@@ -129,7 +129,7 @@ During `ALIGN`, yaw remains active, pitch stays at `TTC_ALN_PIT`, and the existi
 - non-monotonic in local receive time;
 - a scale innovation larger than `log(1 + TTC_SCALE_JMP)`.
 
-The strict edge rule prevents a clipped box from corrupting TTC, because its visible area no longer represents the target's true projected area.
+The strict edge rule prevents a clipped box from corrupting TTC, because its visible area no longer represents the target's true projected area. It does not by itself invalidate steering during active tracking: the clipped bbox remains available to yaw and vertical control so they can bring it back into view.
 
 ### Scale and TTC equations
 
@@ -197,11 +197,11 @@ pitch_raw = TTC_PIT_INIT
 pitch_raw = clamp(pitch_raw, TTC_PIT_MIN, 0)
 ```
 
-If visual closing is slower than desired, pitch becomes more negative. If closing is faster than desired, pitch relaxes toward zero. The command can change by at most `TTC_PIT_SLEW * control_dt`, preventing pitch steps.
+If visual closing is slower than desired, pitch becomes more negative. If closing is faster than desired, pitch relaxes toward zero. Increasing forward tilt is limited by `TTC_PIT_SLEW`; relaxing pitch toward level uses the faster `TTC_PIT_REC` safety slew so an edge-risk guard is not delayed by the normal acceleration ramp.
 
 The mapper uses `sign=-1`, matching the configured Betaflight/simulator pitch-channel direction.
 
-Important current limitation: desired forward closing is not yet reduced when the bbox is badly misaligned in the near field. Pitch and vertical alignment therefore share camera geometry but are not explicitly trajectory-coupled.
+During TRACKING, normalized `abs(dy)` continuously blends the TTC pitch toward `TTC_ALN_PIT`. A centered target receives full TTC pitch; a target at an image edge receives the conservative alignment pitch. Intermediate errors retain proportional forward motion, avoiding the previous descend-first/accelerate-later behavior.
 
 ## Throttle: vertical trajectory and PI-D loop
 
@@ -231,11 +231,18 @@ flowchart LR
 
 ### Vertical target
 
-Because `target_ttc` is derived from vertical distance, the nominal speed is normally `-TTC_VY_NOM` while the drone is above the target:
+The nominal vertical speed synchronizes the remaining altitude change with an effective optical arrival time. While full bbox scale remains measurable, prediction age stays near one camera-frame interval. If clipping prevents scale updates, TTC counts down from the last measurement instead of freezing:
 
 ```text
-vertical_nominal = vertical_distance / target_ttc
-vertical_alignment = TTC_DY_KP * deadband(dy)
+ttc_prediction_age = now - last_valid_scale_time
+effective_ttc = max(measured_ttc - ttc_prediction_age, TTC_MIN_S)
+vertical_nominal = vertical_distance / effective_ttc
+alignment_limit = TTC_DY_NEAR if bbox_clipped else TTC_DY_VMAX
+vertical_alignment = clamp(
+    TTC_DY_KP * deadband(dy),
+    -alignment_limit,
+    +alignment_limit,
+)
 
 vertical_target = clamp(
     vertical_nominal + vertical_alignment,
@@ -244,7 +251,7 @@ vertical_target = clamp(
 )
 ```
 
-A target below the camera center produces negative `dy`, making the requested vertical velocity more negative.
+A target below the camera center produces negative `dy`, making the requested vertical velocity more negative. `TTC_DY_VMAX` protects the normal slope from excessive image correction; `TTC_DY_NEAR` provides stronger recovery after clipping. `TTC_VY_NOM` still defines the desired TTC used by the pitch loop; it no longer forces a fixed vertical descent speed.
 
 ### Setpoint slew limiter
 
@@ -356,7 +363,7 @@ Fill is the larger of the bbox width fraction and height fraction:
 fill = max(bbox_width / image_width, bbox_height / image_height)
 ```
 
-The current defaults require fill ≥ 0.60, TTC ≤ 0.50 seconds, and both alignment errors ≤ 0.15 for five consecutive accepted camera frames. Duplicate control-loop reads neither increment nor reset the counter. A distinct rejected frame resets it.
+The normal path requires fill ≥ 0.60, TTC ≤ 0.50 seconds, and both alignment errors ≤ 0.15 for five consecutive accepted camera frames. A second near-field path accepts five distinct fresh, locked, clipped frames with fill ≥ `TTC_CLIP_FILL=0.80`. This path does not use the frozen TTC or alignment gates because bbox scale and center are incomplete after clipping. Duplicate control-loop reads never advance either path.
 
 When the count reaches `TTC_COMMIT_FR`, the controller:
 
@@ -385,13 +392,13 @@ The most important active defaults are:
 |---|---|
 | Optical filter | `TTC_SCALE_A=0.35`, `TTC_SCALE_B=0.08`, `TTC_SCALE_JMP=0.35` |
 | Acquisition/loss | `TTC_LOCK_FR=8`, `TTC_LOCK_S=0.20`, `TTC_TIMEOUT=0.25` |
-| Initial alignment | `TTC_ALN_PIT=-5`, horizontal `TTC_ALN_XY=0.25`, `TTC_ALN_FR=5`; vertical-speed target is zero |
-| Pitch/TTC | `TTC_PIT_INIT=-8`, `TTC_PIT_MIN=-15`, `TTC_PIT_SLEW=5`, `TTC_INV_KP=10` |
-| Vertical profile | `TGT_HEIGHT_M=0.5`, `TTC_VY_NOM=1.25`, `TTC_DY_KP=1.5`, `TRK_VZ_ACCEL=0.5` |
+| Initial alignment | `TTC_ALN_PIT=-5`, horizontal `TTC_ALN_XY=0.25`, `TTC_ALN_FR=5`; vertical image error commands bounded climb/descent |
+| Pitch/TTC | `TTC_PIT_INIT=-10`, `TTC_PIT_MIN=-15`, forward slew `TTC_PIT_SLEW=5`, recovery slew `TTC_PIT_REC=25`, `TTC_INV_KP=10` |
+| Vertical profile | `TGT_HEIGHT_M=0.5`, countdown TTC feedforward, `TTC_VY_NOM=1.0` pitch timing, `TTC_DY_KP=1.5`, `TTC_DY_VMAX=0.5`, clipped recovery `TTC_DY_NEAR=1.5`, `TRK_VZ_ACCEL=0.5` |
 | Vertical PI-D | `TTC_VY_KP=20`, `TTC_VY_KI=3`, `TTC_VY_KD=10`, `TTC_AZ_ALPHA=0.2` |
-| Vertical limits | `TTC_VY_MIN=-5`, `TTC_VY_MAX=2`, `TTC_VY_I_MAX=40`, `TTC_THR_MAX=100` |
+| Vertical limits | `TTC_VY_MIN=-5`, `TTC_VY_MAX=2`, `TTC_VY_I_MAX=40`, `TTC_THR_MAX=140` |
 | Yaw | `TRK_YAW_KP=10`, `TRK_YAW_MAX=20`, `TRK_YAW_SLEW=20`, `TRK_DEADBAND=0.03` |
-| Commit | `TTC_FILL=0.60`, `TTC_ALIGN=0.15`, `TTC_COMMIT_FR=5`, `TTC_MIN_S=0.50` |
+| Commit | `TTC_FILL=0.60`, `TTC_CLIP_FILL=0.80`, `TTC_ALIGN=0.15`, `TTC_COMMIT_FR=5`, `TTC_MIN_S=0.50` |
 
 Parameter-change callbacks rebuild and validate an immutable `TrackerConfig`. Each observe or update operation takes a lock-protected configuration snapshot, so one iteration uses a consistent set of values.
 
@@ -403,7 +410,7 @@ When a CSV path is configured, each active `update(...)` appends a row in memory
 
 - raw tracker identity, timing, bbox, and validity;
 - normalized alignment and bbox fill;
-- optical filter state, innovation, inverse TTC, and TTC;
+- optical filter state, innovation, inverse TTC, raw/effective TTC, and TTC prediction age;
 - altitude, vario, velocity target/setpoint/error;
 - raw and filtered vertical acceleration;
 - P, I, and D throttle terms;
@@ -422,7 +429,7 @@ The implementation now has a stable vertical PI-D loop, but these capabilities r
 - no metric forward distance or forward velocity;
 - no GPS or horizontal-position feedback;
 - Euler attitude is logged at 20 Hz but is not feedback for bbox rotation compensation;
-- no near-field coupling that slows optical closing when `dx` or `dy` is poor;
+- pitch alignment scheduling uses `dy`, but does not yet incorporate `dx`, bbox fill, or metric distance;
 - no target-motion compensation—the TTC model assumes a stationary target.
 
-The next architectural addition should be near-field alignment-to-TTC coupling. It should reduce desired inverse TTC when the bbox is large and misaligned, without changing the now-stable vertical PI-D gains.
+The next architectural addition should incorporate bbox fill into the continuous pitch schedule so alignment authority increases progressively in the near field without changing the vertical PI-D gains.
