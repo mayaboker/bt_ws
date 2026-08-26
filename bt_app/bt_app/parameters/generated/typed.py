@@ -295,6 +295,10 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.TRK_YAW_MAX))
 
     @property
+    def trk_yaw_slew(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_YAW_SLEW))
+
+    @property
     def trk_thr_kp(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.TRK_THR_KP))
 

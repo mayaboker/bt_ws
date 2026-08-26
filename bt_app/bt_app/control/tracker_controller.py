@@ -68,6 +68,7 @@ class TrackerConfig:
     commit_duration_s: float
     yaw_kp: float
     yaw_max_dps: float
+    yaw_slew_dps2: float
     deadband: float
     angle_limit_deg: float
     hover_baseline_rc: float
@@ -115,6 +116,7 @@ class TrackerConfig:
             commit_duration_s=parameters.get(ParameterKey.TRK_COMMIT_S),
             yaw_kp=parameters.get(ParameterKey.TRK_YAW_KP),
             yaw_max_dps=parameters.get(ParameterKey.TRK_YAW_MAX),
+            yaw_slew_dps2=parameters.get(ParameterKey.TRK_YAW_SLEW),
             deadband=parameters.get(ParameterKey.TRK_DEADBAND),
             angle_limit_deg=parameters.get(ParameterKey.BF_ANGLE_LIMIT),
             hover_baseline_rc=parameters.get(ParameterKey.HOV_BASELINE),
@@ -132,10 +134,11 @@ class TrackerConfig:
             raise ValueError("minimum TTC pitch exceeds Betaflight angle limit")
         if (
             self.pitch_slew_deg_s <= 0.0
+            or self.yaw_slew_dps2 <= 0.0
             or self.nominal_vertical_speed_m_s <= 0.0
             or self.vertical_accel_limit_m_s2 <= 0.0
         ):
-            raise ValueError("TTC slew, speed, and acceleration must be positive")
+            raise ValueError("TTC slew, yaw slew, speed, and acceleration must be positive")
         if not 0.0 <= self.scale_alpha <= 1.0 or not 0.0 <= self.scale_beta <= 1.0:
             raise ValueError("TTC alpha-beta gains must be in [0, 1]")
         if self.vertical_speed_min_m_s >= 0.0 or self.vertical_speed_max_m_s < 0.0:
@@ -282,6 +285,7 @@ class LoopDiagnostics:
     filtered_vertical_accel_m_s2: float = 0.0
     throttle_d_rc: float = 0.0
     bbox_fill: float = 0.0
+    yaw_rate_target_dps: float = 0.0
 
 
 TRACKER_CSV_HEADER = (
@@ -299,7 +303,8 @@ TRACKER_CSV_HEADER = (
     "vario_m_s", "vario_age_s", "vertical_error_m_s", "throttle_p_rc",
     "throttle_i_rc", "raw_vertical_accel_m_s2",
     "filtered_vertical_accel_m_s2", "throttle_d_rc",
-    "tilt_hover_rc", "throttle_command_rc", "yaw_rate_dps", "alignment_count",
+    "tilt_hover_rc", "throttle_command_rc", "yaw_rate_target_dps",
+    "yaw_rate_dps", "alignment_count",
     "commit_count",
     "commit_block_reason", "exit_requested", "exit_reason", "result_valid",
     "result_reason", "ch1_roll", "ch2_pitch", "ch3_throttle", "ch4_yaw",
@@ -336,6 +341,7 @@ class TrackerController:
         self._commit_deadline_s: float | None = None
         self._frozen_result: TrackerControlResult | None = None
         self._pitch_command_deg = 0.0
+        self._yaw_rate_command_dps = 0.0
         self._last_update_s: float | None = None
         self._altitude_m: float | None = None
         self._vertical_speed_m_s: float | None = None
@@ -491,6 +497,7 @@ class TrackerController:
         self._commit_deadline_s = None
         self._frozen_result = None
         self._pitch_command_deg = config.alignment_pitch_deg
+        self._yaw_rate_command_dps = 0.0
         self._vertical_setpoint_m_s = vertical_speed_m_s
         self._vertical_integral_rc = 0.0
         self._previous_vario_m_s = vertical_speed_m_s
@@ -527,6 +534,7 @@ class TrackerController:
         self._commit_deadline_s = None
         self._frozen_result = None
         self._pitch_command_deg = 0.0
+        self._yaw_rate_command_dps = 0.0
         self._vertical_setpoint_m_s = None
         self._vertical_integral_rc = 0.0
         self._previous_vario_m_s = None
@@ -756,11 +764,18 @@ class TrackerController:
             math.cos(math.radians(self._pitch_command_deg)),
             0.35,
         )
-        yaw_rate = clamp(
+        yaw_rate_target = clamp(
             config.yaw_kp * self._deadband(dx, config.deadband),
             -config.yaw_max_dps,
             config.yaw_max_dps,
         )
+        max_yaw_rate_step = config.yaw_slew_dps2 * dt_s
+        self._yaw_rate_command_dps += clamp(
+            yaw_rate_target - self._yaw_rate_command_dps,
+            -max_yaw_rate_step,
+            max_yaw_rate_step,
+        )
+        yaw_rate = self._yaw_rate_command_dps
         mapper = BetaflightRcMapper(
             yaw_rate_full_stick_dps=config.yaw_stick_rate_dps
         )
@@ -804,6 +819,7 @@ class TrackerController:
             filtered_vertical_accel_m_s2=self._filtered_vertical_accel_m_s2,
             throttle_d_rc=throttle_d,
             bbox_fill=fill,
+            yaw_rate_target_dps=yaw_rate_target,
         )
         control_result = TrackerControlResult(
             channels=channels,
@@ -1047,6 +1063,7 @@ class TrackerController:
                 else channels[RCChannel.THROTTLE] - result.throttle_correction_rc
             ),
             "throttle_command_rc": channels[RCChannel.THROTTLE],
+            "yaw_rate_target_dps": d.yaw_rate_target_dps,
             "yaw_rate_dps": result.yaw_rate_dps,
             "alignment_count": self._alignment_count,
             "commit_count": self._commit_count,

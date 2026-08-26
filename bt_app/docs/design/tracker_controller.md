@@ -186,7 +186,7 @@ Tilt-compensated throttle is calculated from the current ramped pitch.
 
 ### Yaw
 
-Horizontal image error commands a proportional yaw rate:
+Horizontal image error commands a proportional target yaw rate:
 
 ```text
 yaw_rate = clamp(
@@ -195,6 +195,10 @@ yaw_rate = clamp(
     +TRK_YAW_MAX,
 )
 ```
+
+The sent yaw rate slews toward this target by at most
+`TRK_YAW_SLEW * dt` each loop. This limits initial acceleration and prevents an
+instantaneous sign reversal when the target crosses the camera center.
 
 A target to the right produces a right-turn request. The existing
 `BetaflightRcMapper.yaw_rate_to_rc()` converts the rate to RC.
@@ -361,8 +365,9 @@ original deadline despite parameter updates.
 | --- | ---: | --- |
 | `TRK_PITCH_DEG` | `-10.0` | Fixed forward pitch angle |
 | `TRK_PITCH_RATE` | `5.0` | Pitch slew rate in degrees per second |
-| `TRK_YAW_KP` | `15.0` | Yaw-rate gain in deg/s per normalized error |
+| `TRK_YAW_KP` | `10.0` | Yaw-rate gain in deg/s per normalized error |
 | `TRK_YAW_MAX` | `20.0` | Absolute yaw-rate limit in deg/s |
+| `TRK_YAW_SLEW` | `20.0` | Yaw-rate slew limit in deg/s² |
 | `TRK_THR_KP` | `100.0` | Outer visual gain used with `TRK_VZ_KD` to derive requested speed |
 | `TRK_VZ_KD` | `30.0` | Inner vertical-speed error gain in RC units per m/s |
 | `TRK_VZ_MAX` | `1.75` | Far-range absolute vertical-speed target limit in m/s |

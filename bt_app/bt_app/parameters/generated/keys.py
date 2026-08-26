@@ -76,6 +76,7 @@ class ParameterKey:
     TRK_PITCH_RATE: Final[Literal['TRK_PITCH_RATE']] = 'TRK_PITCH_RATE'
     TRK_YAW_KP: Final[Literal['TRK_YAW_KP']] = 'TRK_YAW_KP'
     TRK_YAW_MAX: Final[Literal['TRK_YAW_MAX']] = 'TRK_YAW_MAX'
+    TRK_YAW_SLEW: Final[Literal['TRK_YAW_SLEW']] = 'TRK_YAW_SLEW'
     TRK_THR_KP: Final[Literal['TRK_THR_KP']] = 'TRK_THR_KP'
     TRK_VZ_KD: Final[Literal['TRK_VZ_KD']] = 'TRK_VZ_KD'
     TRK_VZ_MAX: Final[Literal['TRK_VZ_MAX']] = 'TRK_VZ_MAX'
@@ -167,6 +168,7 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'TRK_PITCH_RATE',
     'TRK_YAW_KP',
     'TRK_YAW_MAX',
+    'TRK_YAW_SLEW',
     'TRK_THR_KP',
     'TRK_VZ_KD',
     'TRK_VZ_MAX',

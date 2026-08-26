@@ -313,7 +313,7 @@ throttle_rc = clamp(round(tilt_hover + correction), RC_MIN, RC_MAX)
 
 ## Yaw and fixed channels
 
-Yaw is a bounded proportional loop after image deadband:
+Yaw first computes a bounded proportional target after image deadband:
 
 ```text
 yaw_rate = clamp(
@@ -324,6 +324,7 @@ yaw_rate = clamp(
 ```
 
 `BetaflightRcMapper` converts yaw rate using `BF_YAW_RATE` as the full-stick rate.
+Before mapping, the command slews toward the target at `TRK_YAW_SLEW` deg/s².
 
 The output channel policy is:
 
@@ -389,7 +390,7 @@ The most important active defaults are:
 | Vertical profile | `TGT_HEIGHT_M=0.5`, `TTC_VY_NOM=1.25`, `TTC_DY_KP=1.5`, `TRK_VZ_ACCEL=0.5` |
 | Vertical PI-D | `TTC_VY_KP=20`, `TTC_VY_KI=3`, `TTC_VY_KD=10`, `TTC_AZ_ALPHA=0.2` |
 | Vertical limits | `TTC_VY_MIN=-5`, `TTC_VY_MAX=2`, `TTC_VY_I_MAX=40`, `TTC_THR_MAX=100` |
-| Yaw | `TRK_YAW_KP=15`, `TRK_YAW_MAX=20`, `TRK_DEADBAND=0.03` |
+| Yaw | `TRK_YAW_KP=10`, `TRK_YAW_MAX=20`, `TRK_YAW_SLEW=20`, `TRK_DEADBAND=0.03` |
 | Commit | `TTC_FILL=0.60`, `TTC_ALIGN=0.15`, `TTC_COMMIT_FR=5`, `TTC_MIN_S=0.50` |
 
 Parameter-change callbacks rebuild and validate an immutable `TrackerConfig`. Each observe or update operation takes a lock-protected configuration snapshot, so one iteration uses a consistent set of values.

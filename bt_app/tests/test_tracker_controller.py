@@ -57,6 +57,7 @@ class FakeParameters:
             ParameterKey.TRK_COMMIT_S: 0.3,
             ParameterKey.TRK_YAW_KP: 15.0,
             ParameterKey.TRK_YAW_MAX: 20.0,
+            ParameterKey.TRK_YAW_SLEW: 20.0,
             ParameterKey.TRK_DEADBAND: 0.03,
             ParameterKey.BF_ANGLE_LIMIT: 60.0,
             ParameterKey.HOV_BASELINE: 1660,
@@ -256,6 +257,36 @@ def test_control_uses_ttc_pitch_vertical_speed_and_yaw():
     assert result.channels[RCChannel.PITCH] > RC_MID
     assert 1655 <= result.channels[RCChannel.THROTTLE] <= 1670
     assert result.channels[RCChannel.YAW] > RC_MID
+
+
+def test_yaw_rate_slew_limits_initial_command_and_sign_reversal():
+    controller = TrackerController(FakeParameters())
+    acquire(controller)
+    right = observation(14, 0.52, x=530)
+    controller.observe(
+        right, now_s=0.52, mode_selected=True, altitude_m=10.0,
+        vertical_speed_m_s=0.0, altitude_sample_time_s=0.52,
+    )
+    first = controller.update(
+        now_s=0.52, vertical_speed_m_s=0.0, vertical_speed_sample_time_s=0.52
+    )
+    second = controller.update(
+        now_s=0.54, vertical_speed_m_s=0.0, vertical_speed_sample_time_s=0.54
+    )
+
+    left = observation(15, 0.56, x=10)
+    controller.observe(
+        left, now_s=0.56, mode_selected=True, altitude_m=10.0,
+        vertical_speed_m_s=0.0, altitude_sample_time_s=0.56,
+    )
+    reversing = controller.update(
+        now_s=0.56, vertical_speed_m_s=0.0, vertical_speed_sample_time_s=0.56
+    )
+
+    assert first.yaw_rate_dps == pytest.approx(0.8)
+    assert second.yaw_rate_dps == pytest.approx(1.2)
+    assert reversing.yaw_rate_dps == pytest.approx(0.8)
+    assert reversing.channels[RCChannel.YAW] > RC_MID
 
 
 def test_bbox_expansion_estimates_inverse_ttc():

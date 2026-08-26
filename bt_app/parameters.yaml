@@ -321,12 +321,16 @@ parameters:
     limits: {min: 0.1, max: 90.0}
   TRK_YAW_KP:
     type: float
-    default: 15.0
+    default: 10.0
     limits: {min: 0.0, max: 1000.0}
   TRK_YAW_MAX:
     type: float
     default: 20.0
     limits: {min: 0.0, max: 1000.0}
+  TRK_YAW_SLEW:
+    type: float
+    default: 20.0
+    limits: {min: 0.1, max: 1000.0}
   TRK_THR_KP:
     type: float
     default: 100.0
