@@ -12,6 +12,7 @@ from bt_gst.red_detection import (
     read_red_detection,
 )
 from bt_gst.zmq_publisher import ZmqFramePublisher, ZmqPublisherError
+from bt_gst.selector_subscriber import SelectorSubscriberError, ZmqSelectorSubscriber
 
 pipeline_runner_logger = logger.bind(component="bt_gst.pipeline_runner")
 
@@ -56,6 +57,7 @@ def run_pipeline(config: AppConfig) -> int:
         raise PipelineRunError(f"GStreamer pipeline could not be parsed: {exc}") from exc
 
     publisher = None
+    selector_subscriber = None
     try:
         if config.zmq.enabled:
             publisher = ZmqFramePublisher(
@@ -66,6 +68,19 @@ def run_pipeline(config: AppConfig) -> int:
             try:
                 publisher.start()
             except ZmqPublisherError as exc:
+                raise PipelineRunError(str(exc)) from exc
+
+        red_detector = pipeline.get_by_name("red_detector") if config.detector.enabled else None
+        if config.detector.enabled and red_detector is None:
+            raise PipelineRunError("GStreamer element 'red_detector' was not found")
+        if config.detector.enabled and config.selector_zmq.enabled:
+            selector_subscriber = ZmqSelectorSubscriber(
+                config.selector_zmq.endpoint,
+                bind=config.selector_zmq.bind,
+            )
+            try:
+                selector_subscriber.start()
+            except SelectorSubscriberError as exc:
                 raise PipelineRunError(str(exc)) from exc
 
         overlay_state = None
@@ -82,9 +97,6 @@ def run_pipeline(config: AppConfig) -> int:
         frame_ids = count(1) if publisher is not None else None
         metadata_warning_limiter = _WarningRateLimiter()
         if config.detector.enabled and (overlay_state is not None or publisher is not None):
-            red_detector = pipeline.get_by_name("red_detector")
-            if red_detector is None:
-                raise PipelineRunError("GStreamer element 'red_detector' was not found")
             detector_src_pad = red_detector.get_static_pad("src")
             if detector_src_pad is None:
                 raise PipelineRunError("GStreamer element 'red_detector' has no src pad")
@@ -103,8 +115,22 @@ def run_pipeline(config: AppConfig) -> int:
         bus = pipeline.get_bus()
         pipeline.set_state(Gst.State.PLAYING)
         pipeline_runner_logger.debug("GStreamer pipeline entered PLAYING")
+        applied_selector = None
         try:
             while True:
+                if selector_subscriber is not None and red_detector is not None:
+                    selector = selector_subscriber.latest(
+                        max_age_s=config.selector_zmq.command_timeout_s
+                    )
+                    if selector is not None:
+                        selector_key = (
+                            selector.center_x,
+                            selector.center_y,
+                            int(selector.state),
+                        )
+                        if selector_key != applied_selector:
+                            _apply_selector_command(red_detector, selector)
+                            applied_selector = selector_key
                 message = bus.timed_pop_filtered(
                     50 * getattr(Gst, "MSECOND", 1_000_000),
                     Gst.MessageType.ERROR | Gst.MessageType.EOS,
@@ -133,7 +159,18 @@ def run_pipeline(config: AppConfig) -> int:
                 publisher.stop()
             except ZmqPublisherError as exc:
                 pipeline_runner_logger.warning("ZMQ publisher shutdown failed error={}", exc)
+        if selector_subscriber is not None:
+            try:
+                selector_subscriber.stop()
+            except SelectorSubscriberError as exc:
+                pipeline_runner_logger.warning("selector subscriber shutdown failed error={}", exc)
         pipeline_runner_logger.debug("GStreamer pipeline entered NULL")
+
+
+def _apply_selector_command(red_detector: object, command: object) -> None:
+    red_detector.set_property("selector-center-x", command.center_x)
+    red_detector.set_property("selector-center-y", command.center_y)
+    red_detector.set_property("selector-state", int(command.state))
 
 
 def _on_detector_buffer(
@@ -182,17 +219,27 @@ def _on_detection_overlay_draw(
     state: DetectionOverlayState,
 ) -> None:
     detection = state.detection_for_timestamp(timestamp)
-    if detection is None or not detection.found:
+    if detection is None:
         return
 
     line_width = 3.0
-    half_line = line_width / 2.0
-    context.set_source_rgba(0.0, 1.0, 0.0, 1.0)
     context.set_line_width(line_width)
+    for candidate in detection.candidates:
+        _draw_box(context, candidate, line_width, (0.0, 0.0, 1.0, 1.0))
+    if detection.found:
+        _draw_box(context, detection, line_width, (0.0, 1.0, 0.0, 1.0))
+    if detection.selector_state == 1:
+        color = (0.0, 1.0, 0.0, 1.0) if detection.selector_valid else (1.0, 1.0, 0.0, 1.0)
+        _draw_box(context, detection.selector, line_width, color)
+
+
+def _draw_box(context: object, box: object, line_width: float, color: tuple[float, ...]) -> None:
+    half_line = line_width / 2.0
+    context.set_source_rgba(*color)
     context.rectangle(
-        detection.x + half_line,
-        detection.y + half_line,
-        max(0.0, detection.width - line_width),
-        max(0.0, detection.height - line_width),
+        box.x + half_line,
+        box.y + half_line,
+        max(0.0, box.width - line_width),
+        max(0.0, box.height - line_width),
     )
     context.stroke()

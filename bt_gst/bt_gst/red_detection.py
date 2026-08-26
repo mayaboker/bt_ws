@@ -6,6 +6,14 @@ GST_CLOCK_TIME_NONE = (1 << 64) - 1
 
 
 @dataclass(frozen=True)
+class DetectionBox:
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+@dataclass(frozen=True)
 class RedDetection:
     found: bool
     x: int
@@ -13,6 +21,10 @@ class RedDetection:
     width: int
     height: int
     pts_ns: int | None
+    selector: DetectionBox = DetectionBox(0, 0, 0, 0)
+    selector_valid: bool = False
+    selector_state: int = 0
+    candidates: tuple[DetectionBox, ...] = ()
 
 
 @dataclass
@@ -42,6 +54,16 @@ def read_red_detection(buffer: object) -> RedDetection | None:
 
     structure = meta.get_structure()
     pts = int(buffer.pts)
+    candidate_count = int(structure.get_value("candidate-count"))
+    candidates = tuple(
+        DetectionBox(
+            x=int(structure.get_value(f"candidate-{index}-x")),
+            y=int(structure.get_value(f"candidate-{index}-y")),
+            width=int(structure.get_value(f"candidate-{index}-width")),
+            height=int(structure.get_value(f"candidate-{index}-height")),
+        )
+        for index in range(candidate_count)
+    )
     return RedDetection(
         found=bool(structure.get_value("found")),
         x=int(structure.get_value("x")),
@@ -49,4 +71,13 @@ def read_red_detection(buffer: object) -> RedDetection | None:
         width=int(structure.get_value("width")),
         height=int(structure.get_value("height")),
         pts_ns=None if pts == GST_CLOCK_TIME_NONE else pts,
+        selector=DetectionBox(
+            x=int(structure.get_value("selector-x")),
+            y=int(structure.get_value("selector-y")),
+            width=int(structure.get_value("selector-width")),
+            height=int(structure.get_value("selector-height")),
+        ),
+        selector_valid=bool(structure.get_value("selector-valid")),
+        selector_state=int(structure.get_value("selector-state")),
+        candidates=candidates,
     )

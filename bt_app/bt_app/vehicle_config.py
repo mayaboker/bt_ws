@@ -27,6 +27,7 @@ class VehicleConfig():
     config_name: str = field(default="parameters.yaml")
     log_level: str = field(default="INFO")
     visual_zmq_endpoint: str = field(default="tcp://127.0.0.1:5556")
+    selector_zmq_endpoint: str = field(default="tcp://127.0.0.1:5557")
     # region singleton
     _instance = None
     _initialized = False

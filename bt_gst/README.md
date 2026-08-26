@@ -61,3 +61,10 @@ tracker fields with explicit placeholder values. The publisher sends only the
 latest result on the configured PUB endpoint at no more than
 `zmq.max_rate_hz`, without doing serialization or socket work on the GStreamer
 streaming thread.
+
+With red detection enabled, bt_gst also connects by default to
+`tcp://127.0.0.1:5557` for absolute `TargetSelectorCommandMessage` updates from
+bt-app. The socket worker validates and stores only the newest command; the
+pipeline runner applies it to `controlledreddetect`. The Cairo overlay draws
+all candidates blue, an invalid selector yellow, and the selected target and
+valid selector green.

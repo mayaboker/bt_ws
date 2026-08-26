@@ -1,5 +1,25 @@
 # Red Detection to ZMQ Publication Flow
 
+## Target-selector command path
+
+Detection results still flow from bt_gst to bt-app on the configured result
+endpoint. Target selection adds an independent reverse PUB/SUB path:
+
+```mermaid
+flowchart LR
+    App[bt-app selector controller] -->|TargetSelectorCommandMessage<br/>tcp://127.0.0.1:5557| Sub[bt_gst subscriber thread]
+    Sub -->|latest validated command| Runner[pipeline runner thread]
+    Runner -->|GObject properties| Detector[controlledreddetect]
+    Detector --> Meta[Selected target + selector/candidate metadata]
+    Meta --> Overlay[Cairo colored overlay]
+    Meta --> Result[TrackerResultMessage]
+```
+
+Commands contain an absolute normalized center and `disabled`, `selecting`, or
+`locked` state. Applying properties stays on the pipeline runner thread. Once
+commands have been received, a 0.5-second receive timeout disables selection
+and causes unlocked tracker results.
+
 This document describes the current `bt_gst` implementation. The red detector
 adds bounding-box metadata to every video buffer, and the ZMQ publisher copies
 that detection into the generic tracker-result wire message.

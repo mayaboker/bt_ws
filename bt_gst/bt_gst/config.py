@@ -72,6 +72,7 @@ DEFAULT_MTU = 1200
 SUPPORTED_CODECS = frozenset({DEFAULT_CODEC})
 DEFAULT_ZMQ_ENDPOINT = "tcp://127.0.0.1:5556"
 DEFAULT_ZMQ_MAX_RATE_HZ = 30
+DEFAULT_SELECTOR_ZMQ_ENDPOINT = "tcp://127.0.0.1:5557"
 
 
 @dataclass(frozen=True)
@@ -115,10 +116,27 @@ class ZmqConfigOverrides:
 
 
 @dataclass(frozen=True)
+class SelectorZmqConfig:
+    enabled: bool = True
+    endpoint: str = DEFAULT_SELECTOR_ZMQ_ENDPOINT
+    bind: bool = False
+    command_timeout_s: float = 0.5
+
+
+@dataclass(frozen=True)
+class SelectorZmqConfigOverrides:
+    enabled: bool | None = None
+    endpoint: str | None = None
+    bind: bool | None = None
+    command_timeout_s: float | None = None
+
+
+@dataclass(frozen=True)
 class AppConfig:
     source: SourceConfig | None = None
     detector: DetectorConfig = DetectorConfig()
     zmq: ZmqConfig = ZmqConfig()
+    selector_zmq: SelectorZmqConfig = SelectorZmqConfig()
     video_local: bool = DEFAULT_VIDEO_LOCAL
     codec: str = DEFAULT_CODEC
     host: str = DEFAULT_HOST
@@ -131,6 +149,7 @@ class AppConfigOverrides:
     source: SourceOverride | None = None
     detector: DetectorConfigOverrides | None = None
     zmq: ZmqConfigOverrides | None = None
+    selector_zmq: SelectorZmqConfigOverrides | None = None
     video_local: bool | None = None
     codec: str | None = None
     host: str | None = None
@@ -199,10 +218,23 @@ def app_config_overrides_from_mapping(raw_config: dict[str, Any]) -> AppConfigOv
             max_rate_hz=_optional_int(raw_zmq, "max_rate_hz"),
         )
 
+    raw_selector_zmq = raw_config.get("selector_zmq")
+    selector_zmq = None
+    if raw_selector_zmq is not None:
+        if not isinstance(raw_selector_zmq, dict):
+            raise ConfigError("selector_zmq must be a mapping")
+        selector_zmq = SelectorZmqConfigOverrides(
+            enabled=_optional_bool(raw_selector_zmq, "enabled"),
+            endpoint=_optional_string(raw_selector_zmq, "endpoint"),
+            bind=_optional_bool(raw_selector_zmq, "bind"),
+            command_timeout_s=_optional_float(raw_selector_zmq, "command_timeout_s"),
+        )
+
     return AppConfigOverrides(
         source=source,
         detector=detector,
         zmq=zmq,
+        selector_zmq=selector_zmq,
         video_local=_optional_bool(raw_config, "video_local"),
         codec=_optional_string(raw_config, "codec"),
         host=_optional_string(raw_config, "host"),
@@ -254,6 +286,9 @@ def resolve_config(
             source=_resolve_source_config(config.source, override.source),
             detector=_resolve_detector_config(config.detector, override.detector),
             zmq=_resolve_zmq_config(config.zmq, override.zmq),
+            selector_zmq=_resolve_selector_zmq_config(
+                config.selector_zmq, override.selector_zmq
+            ),
             video_local=(
                 override.video_local
                 if override.video_local is not None
@@ -303,6 +338,24 @@ def _resolve_zmq_config(
             override.max_rate_hz
             if override.max_rate_hz is not None
             else current.max_rate_hz
+        ),
+    )
+
+
+def _resolve_selector_zmq_config(
+    current: SelectorZmqConfig,
+    override: SelectorZmqConfigOverrides | None,
+) -> SelectorZmqConfig:
+    if override is None:
+        return current
+    return SelectorZmqConfig(
+        enabled=override.enabled if override.enabled is not None else current.enabled,
+        endpoint=override.endpoint if override.endpoint is not None else current.endpoint,
+        bind=override.bind if override.bind is not None else current.bind,
+        command_timeout_s=(
+            override.command_timeout_s
+            if override.command_timeout_s is not None
+            else current.command_timeout_s
         ),
     )
 
@@ -382,6 +435,7 @@ def validate_config(config: AppConfig) -> AppConfig:
         raise ConfigError("mtu must be greater than 0")
     _validate_detector_config(config.detector)
     _validate_zmq_config(config.zmq, config.detector)
+    _validate_selector_zmq_config(config.selector_zmq)
     return config
 
 
@@ -426,6 +480,21 @@ def _validate_zmq_config(zmq: ZmqConfig, detector: DetectorConfig) -> None:
         raise ConfigError("zmq.enabled requires detector.enabled")
 
 
+def _validate_selector_zmq_config(config: SelectorZmqConfig) -> None:
+    if not isinstance(config.enabled, bool):
+        raise ConfigError("selector_zmq.enabled must be a bool")
+    if not isinstance(config.bind, bool):
+        raise ConfigError("selector_zmq.bind must be a bool")
+    if not isinstance(config.endpoint, str) or not config.endpoint:
+        raise ConfigError("selector_zmq.endpoint must be a non-empty string")
+    if isinstance(config.command_timeout_s, bool) or not isinstance(
+        config.command_timeout_s, (int, float)
+    ):
+        raise ConfigError("selector_zmq.command_timeout_s must be a number")
+    if config.command_timeout_s <= 0:
+        raise ConfigError("selector_zmq.command_timeout_s must be greater than 0")
+
+
 def _required_string(raw_source: dict[str, Any], field: str, source_type: str) -> str:
     value = raw_source.get(field)
     if not isinstance(value, str) or not value:
@@ -462,6 +531,15 @@ def _optional_int(raw_config: dict[str, Any], field: str) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigError(f"{field} must be an int")
     return value
+
+
+def _optional_float(raw_config: dict[str, Any], field: str) -> float | None:
+    if field not in raw_config:
+        return None
+    value = raw_config[field]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigError(f"{field} must be a number")
+    return float(value)
 
 
 def _optional_file_rate(raw_source: dict[str, Any]) -> int:

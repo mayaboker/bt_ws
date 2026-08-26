@@ -14,7 +14,7 @@ from bt_app.msp import MspTransportDependencyError
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.parameters import Parameters
 from bt_app.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
-from bt_app.services import ManualLandService, TrackerResultStore
+from bt_app.services import ManualLandService, TargetSelectorPublisher, TrackerResultStore
 from bt_app.vehicle_config import DroneSink, VehicleConfig
 from bt_app.visual_bridge import VisualBridgeManager
 from bt_joy.server.mavlink import (
@@ -43,6 +43,7 @@ class AppServices:
         rc_recorder: RcStateRecorder | NullRcStateRecorder,
         manual_land: ManualLandService,
         tracker_results: TrackerResultStore,
+        target_selector: TargetSelectorPublisher,
     ) -> None:
         self.config = config
         self.parameters = parameters
@@ -53,6 +54,7 @@ class AppServices:
         self.rc_recorder = rc_recorder
         self.manual_land = manual_land
         self.tracker_results = tracker_results
+        self.target_selector = target_selector
         self._started: list[tuple[str, object]] = []
 
     @classmethod
@@ -105,6 +107,7 @@ class AppServices:
             context=context,
             parameters=parameters,
         )
+        target_selector = TargetSelectorPublisher(config.selector_zmq_endpoint)
         return cls(
             config=config,
             parameters=parameters,
@@ -115,6 +118,7 @@ class AppServices:
             rc_recorder=recorder,
             manual_land=manual_land,
             tracker_results=tracker_results,
+            target_selector=target_selector,
         )
 
     @staticmethod
@@ -139,6 +143,7 @@ class AppServices:
             self._start("joystick listener", self.joystick)
             self._start("MAVLink service", self.mavlink)
             self._start("RC state recorder", self.rc_recorder)
+            self._start("target selector publisher", self.target_selector)
         except BaseException:
             self.stop_all()
             raise
@@ -195,6 +200,7 @@ class AppServices:
             ("joystick listener", self.joystick),
             ("MAVLink service", self.mavlink),
             ("RC state recorder", self.rc_recorder),
+            ("target selector publisher", getattr(self, "target_selector", None)),
             ("parameter service", self.parameters),
         )
         for name, service in resources:

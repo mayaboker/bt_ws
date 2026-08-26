@@ -5,6 +5,10 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <string>
 #include <vector>
 
 namespace
@@ -26,6 +30,19 @@ struct GstControlledRedDetect
   guint highH = 10;
   guint highS = 255;
   guint highV = 255;
+  GMutex configMutex;
+  guint selectorState = 1;
+  gdouble selectorCenterX = 0.5;
+  gdouble selectorCenterY = 0.5;
+  guint selectorWidth = 80;
+  guint selectorHeight = 80;
+  guint minimumArea = 150;
+  gdouble minimumCoverage = 0.30;
+  gboolean hasTrackedTarget = FALSE;
+  gint trackedX = 0;
+  gint trackedY = 0;
+  gint trackedWidth = 0;
+  gint trackedHeight = 0;
 };
 
 struct GstControlledRedDetectClass
@@ -43,6 +60,13 @@ enum
   PROP_HIGH_H,
   PROP_HIGH_S,
   PROP_HIGH_V,
+  PROP_SELECTOR_STATE,
+  PROP_SELECTOR_CENTER_X,
+  PROP_SELECTOR_CENTER_Y,
+  PROP_SELECTOR_WIDTH,
+  PROP_SELECTOR_HEIGHT,
+  PROP_MINIMUM_AREA,
+  PROP_MINIMUM_COVERAGE,
 };
 
 GType gst_controlled_red_detect_get_type();
@@ -86,7 +110,11 @@ void attachDetectionMeta(
   gint x,
   gint y,
   gint width,
-  gint height)
+  gint height,
+  const cv::Rect &selector,
+  gboolean selectorValid,
+  guint selectorState,
+  const std::vector<cv::Rect> &candidates)
 {
   ensureDetectionMetaRegistered();
 
@@ -105,7 +133,26 @@ void attachDetectionMeta(
     "y", G_TYPE_INT, y,
     "width", G_TYPE_INT, width,
     "height", G_TYPE_INT, height,
+    "selector-x", G_TYPE_INT, selector.x,
+    "selector-y", G_TYPE_INT, selector.y,
+    "selector-width", G_TYPE_INT, selector.width,
+    "selector-height", G_TYPE_INT, selector.height,
+    "selector-valid", G_TYPE_BOOLEAN, selectorValid,
+    "selector-state", G_TYPE_UINT, selectorState,
+    "candidate-count", G_TYPE_UINT, static_cast<guint>(candidates.size()),
     nullptr);
+  for (guint index = 0; index < candidates.size(); ++index)
+  {
+    const auto &candidate = candidates[index];
+    const std::string prefix = "candidate-" + std::to_string(index) + "-";
+    gst_structure_set(
+      structure,
+      (prefix + "x").c_str(), G_TYPE_INT, candidate.x,
+      (prefix + "y").c_str(), G_TYPE_INT, candidate.y,
+      (prefix + "width").c_str(), G_TYPE_INT, candidate.width,
+      (prefix + "height").c_str(), G_TYPE_INT, candidate.height,
+      nullptr);
+  }
 }
 
 void gst_controlled_red_detect_set_property(
@@ -115,6 +162,7 @@ void gst_controlled_red_detect_set_property(
   GParamSpec *pspec)
 {
   auto *self = GST_CONTROLLED_RED_DETECT(object);
+  g_mutex_lock(&self->configMutex);
 
   switch (propertyId)
   {
@@ -139,9 +187,39 @@ void gst_controlled_red_detect_set_property(
     case PROP_HIGH_V:
       self->highV = g_value_get_uint(value);
       break;
+    case PROP_SELECTOR_STATE:
+      self->selectorState = g_value_get_uint(value);
+      if (self->selectorState == 0)
+      {
+        self->hasTrackedTarget = FALSE;
+      }
+      break;
+    case PROP_SELECTOR_CENTER_X:
+      self->selectorCenterX = g_value_get_double(value);
+      break;
+    case PROP_SELECTOR_CENTER_Y:
+      self->selectorCenterY = g_value_get_double(value);
+      break;
+    case PROP_SELECTOR_WIDTH:
+      self->selectorWidth = g_value_get_uint(value);
+      break;
+    case PROP_SELECTOR_HEIGHT:
+      self->selectorHeight = g_value_get_uint(value);
+      break;
+    case PROP_MINIMUM_AREA:
+      self->minimumArea = g_value_get_uint(value);
+      break;
+    case PROP_MINIMUM_COVERAGE:
+      self->minimumCoverage = g_value_get_double(value);
+      break;
     default:
+      g_mutex_unlock(&self->configMutex);
       G_OBJECT_WARN_INVALID_PROPERTY_ID(object, propertyId, pspec);
       break;
+  }
+  if (propertyId != PROP_0 && propertyId <= PROP_MINIMUM_COVERAGE)
+  {
+    g_mutex_unlock(&self->configMutex);
   }
 }
 
@@ -152,6 +230,7 @@ void gst_controlled_red_detect_get_property(
   GParamSpec *pspec)
 {
   auto *self = GST_CONTROLLED_RED_DETECT(object);
+  g_mutex_lock(&self->configMutex);
 
   switch (propertyId)
   {
@@ -176,9 +255,35 @@ void gst_controlled_red_detect_get_property(
     case PROP_HIGH_V:
       g_value_set_uint(value, self->highV);
       break;
+    case PROP_SELECTOR_STATE:
+      g_value_set_uint(value, self->selectorState);
+      break;
+    case PROP_SELECTOR_CENTER_X:
+      g_value_set_double(value, self->selectorCenterX);
+      break;
+    case PROP_SELECTOR_CENTER_Y:
+      g_value_set_double(value, self->selectorCenterY);
+      break;
+    case PROP_SELECTOR_WIDTH:
+      g_value_set_uint(value, self->selectorWidth);
+      break;
+    case PROP_SELECTOR_HEIGHT:
+      g_value_set_uint(value, self->selectorHeight);
+      break;
+    case PROP_MINIMUM_AREA:
+      g_value_set_uint(value, self->minimumArea);
+      break;
+    case PROP_MINIMUM_COVERAGE:
+      g_value_set_double(value, self->minimumCoverage);
+      break;
     default:
+      g_mutex_unlock(&self->configMutex);
       G_OBJECT_WARN_INVALID_PROPERTY_ID(object, propertyId, pspec);
       break;
+  }
+  if (propertyId != PROP_0 && propertyId <= PROP_MINIMUM_COVERAGE)
+  {
+    g_mutex_unlock(&self->configMutex);
   }
 }
 
@@ -198,10 +303,31 @@ GstFlowReturn gst_controlled_red_detect_transform_ip(
 {
   auto *self = GST_CONTROLLED_RED_DETECT(base);
 
-  if (!self->detectionEnabled)
+  gboolean detectionEnabled;
+  guint lowH, lowS, lowV, highH, highS, highV;
+  guint selectorState, selectorWidth, selectorHeight, minimumArea;
+  gdouble selectorCenterX, selectorCenterY, minimumCoverage;
+  g_mutex_lock(&self->configMutex);
+  detectionEnabled = self->detectionEnabled;
+  lowH = self->lowH;
+  lowS = self->lowS;
+  lowV = self->lowV;
+  highH = self->highH;
+  highS = self->highS;
+  highV = self->highV;
+  selectorState = self->selectorState;
+  selectorCenterX = self->selectorCenterX;
+  selectorCenterY = self->selectorCenterY;
+  selectorWidth = self->selectorWidth;
+  selectorHeight = self->selectorHeight;
+  minimumArea = self->minimumArea;
+  minimumCoverage = self->minimumCoverage;
+  g_mutex_unlock(&self->configMutex);
+
+  if (!detectionEnabled)
   {
     GST_LOG_OBJECT(base, "Detection disabled");
-    attachDetectionMeta(base, buffer, FALSE, 0, 0, 0, 0);
+    attachDetectionMeta(base, buffer, FALSE, 0, 0, 0, 0, cv::Rect(), FALSE, 0, {});
     return GST_FLOW_OK;
   }
 
@@ -225,12 +351,41 @@ GstFlowReturn gst_controlled_red_detect_transform_ip(
   cv::Mat mask;
   cv::inRange(
     hsv,
-    cv::Scalar(self->lowH, self->lowS, self->lowV),
-    cv::Scalar(self->highH, self->highS, self->highV),
+    cv::Scalar(lowH, lowS, lowV),
+    cv::Scalar(highH, highS, highV),
     mask);
 
-  std::vector<cv::Point> redPixels;
-  cv::findNonZero(mask, redPixels);
+  const cv::Mat kernel = cv::Mat::ones(5, 5, CV_8U);
+  cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
+  cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, kernel);
+
+  std::vector<std::vector<cv::Point>> contours;
+  cv::findContours(mask.clone(), contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+  std::vector<cv::Rect> candidates;
+  candidates.reserve(contours.size());
+  for (const auto &contour : contours)
+  {
+    if (cv::contourArea(contour) >= minimumArea)
+    {
+      candidates.push_back(cv::boundingRect(contour));
+    }
+  }
+
+  const gint requestedWidth = std::min<gint>(selectorWidth, width);
+  const gint requestedHeight = std::min<gint>(selectorHeight, height);
+  const gint centerX = std::clamp(
+    static_cast<gint>(std::lround(selectorCenterX * width)),
+    requestedWidth / 2,
+    width - (requestedWidth - requestedWidth / 2));
+  const gint centerY = std::clamp(
+    static_cast<gint>(std::lround(selectorCenterY * height)),
+    requestedHeight / 2,
+    height - (requestedHeight - requestedHeight / 2));
+  const cv::Rect selector(
+    centerX - requestedWidth / 2,
+    centerY - requestedHeight / 2,
+    requestedWidth,
+    requestedHeight);
 
   gboolean found = FALSE;
   gint boxX = 0;
@@ -238,31 +393,98 @@ GstFlowReturn gst_controlled_red_detect_transform_ip(
   gint boxWidth = 0;
   gint boxHeight = 0;
 
-  if (!redPixels.empty())
+  gint selectedIndex = -1;
+  if (selectorState == 1 && selector.area() > 0)
   {
-    const cv::Rect box = cv::boundingRect(redPixels);
+    gdouble bestCoverage = -1.0;
+    gdouble bestDistance = std::numeric_limits<gdouble>::max();
+    for (guint index = 0; index < candidates.size(); ++index)
+    {
+      const auto &candidate = candidates[index];
+      const cv::Point candidateCenter(
+        candidate.x + candidate.width / 2,
+        candidate.y + candidate.height / 2);
+      if (!selector.contains(candidateCenter))
+      {
+        continue;
+      }
+      const gdouble coverage = static_cast<gdouble>(cv::countNonZero(mask(candidate))) /
+        static_cast<gdouble>(candidate.area());
+      if (coverage < minimumCoverage)
+      {
+        continue;
+      }
+      const gdouble distance = std::hypot(
+        candidate.x + candidate.width / 2.0 - centerX,
+        candidate.y + candidate.height / 2.0 - centerY);
+      if (coverage > bestCoverage ||
+          (std::abs(coverage - bestCoverage) < 1e-9 && distance < bestDistance))
+      {
+        bestCoverage = coverage;
+        bestDistance = distance;
+        selectedIndex = static_cast<gint>(index);
+      }
+    }
+  }
+  else if (selectorState == 2)
+  {
+    gboolean hasTrackedTarget;
+    cv::Rect previous;
+    g_mutex_lock(&self->configMutex);
+    hasTrackedTarget = self->hasTrackedTarget;
+    previous = cv::Rect(
+      self->trackedX, self->trackedY, self->trackedWidth, self->trackedHeight);
+    g_mutex_unlock(&self->configMutex);
+    if (hasTrackedTarget)
+    {
+      const gdouble gate = std::max(50.0, 1.5 * std::hypot(previous.width, previous.height));
+      gdouble bestDistance = gate;
+      const cv::Point2d previousCenter(
+        previous.x + previous.width / 2.0,
+        previous.y + previous.height / 2.0);
+      for (guint index = 0; index < candidates.size(); ++index)
+      {
+        const auto &candidate = candidates[index];
+        const gdouble distance = std::hypot(
+          candidate.x + candidate.width / 2.0 - previousCenter.x,
+          candidate.y + candidate.height / 2.0 - previousCenter.y);
+        if (distance <= bestDistance)
+        {
+          bestDistance = distance;
+          selectedIndex = static_cast<gint>(index);
+        }
+      }
+    }
+  }
+
+  if (selectedIndex >= 0)
+  {
+    const auto &box = candidates[selectedIndex];
     found = TRUE;
     boxX = box.x;
     boxY = box.y;
     boxWidth = box.width;
     boxHeight = box.height;
-
-    GST_LOG_OBJECT(
-      base,
-      "Red box found x=%d y=%d width=%d height=%d",
-      boxX,
-      boxY,
-      boxWidth,
-      boxHeight);
+    g_mutex_lock(&self->configMutex);
+    self->hasTrackedTarget = TRUE;
+    self->trackedX = boxX;
+    self->trackedY = boxY;
+    self->trackedWidth = boxWidth;
+    self->trackedHeight = boxHeight;
+    g_mutex_unlock(&self->configMutex);
   }
-  else
+  else if (selectorState == 1)
   {
-    GST_LOG_OBJECT(base, "Red box not found");
+    g_mutex_lock(&self->configMutex);
+    self->hasTrackedTarget = FALSE;
+    g_mutex_unlock(&self->configMutex);
   }
 
   gst_video_frame_unmap(&videoFrame);
 
-  attachDetectionMeta(base, buffer, found, boxX, boxY, boxWidth, boxHeight);
+  attachDetectionMeta(
+    base, buffer, found, boxX, boxY, boxWidth, boxHeight,
+    selector, found, selectorState, candidates);
   return GST_FLOW_OK;
 }
 
@@ -288,6 +510,31 @@ void installUintProperty(
       static_cast<GParamFlags>(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 }
 
+void installDoubleProperty(
+  GObjectClass *objectClass,
+  guint propertyId,
+  const gchar *name,
+  const gchar *nick,
+  const gchar *blurb,
+  gdouble minimum,
+  gdouble maximum,
+  gdouble defaultValue)
+{
+  g_object_class_install_property(
+    objectClass,
+    propertyId,
+    g_param_spec_double(
+      name, nick, blurb, minimum, maximum, defaultValue,
+      static_cast<GParamFlags>(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+}
+
+void gst_controlled_red_detect_finalize(GObject *object)
+{
+  auto *self = GST_CONTROLLED_RED_DETECT(object);
+  g_mutex_clear(&self->configMutex);
+  G_OBJECT_CLASS(gst_controlled_red_detect_parent_class)->finalize(object);
+}
+
 void gst_controlled_red_detect_class_init(GstControlledRedDetectClass *klass)
 {
   auto *objectClass = G_OBJECT_CLASS(klass);
@@ -296,6 +543,7 @@ void gst_controlled_red_detect_class_init(GstControlledRedDetectClass *klass)
 
   objectClass->set_property = gst_controlled_red_detect_set_property;
   objectClass->get_property = gst_controlled_red_detect_get_property;
+  objectClass->finalize = gst_controlled_red_detect_finalize;
 
   g_object_class_install_property(
     objectClass,
@@ -325,6 +573,27 @@ void gst_controlled_red_detect_class_init(GstControlledRedDetectClass *klass)
   installUintProperty(
     objectClass, PROP_HIGH_V, "high-v", "High value",
     "Upper HSV value threshold", 255, 255);
+  installUintProperty(
+    objectClass, PROP_SELECTOR_STATE, "selector-state", "Selector state",
+    "0=disabled, 1=selecting, 2=locked", 2, 1);
+  installDoubleProperty(
+    objectClass, PROP_SELECTOR_CENTER_X, "selector-center-x", "Selector center X",
+    "Normalized horizontal selector center", 0.0, 1.0, 0.5);
+  installDoubleProperty(
+    objectClass, PROP_SELECTOR_CENTER_Y, "selector-center-y", "Selector center Y",
+    "Normalized vertical selector center", 0.0, 1.0, 0.5);
+  installUintProperty(
+    objectClass, PROP_SELECTOR_WIDTH, "selector-width", "Selector width",
+    "Selector width in pixels", 4096, 80);
+  installUintProperty(
+    objectClass, PROP_SELECTOR_HEIGHT, "selector-height", "Selector height",
+    "Selector height in pixels", 4096, 80);
+  installUintProperty(
+    objectClass, PROP_MINIMUM_AREA, "minimum-area", "Minimum contour area",
+    "Minimum red contour area in pixels", 10000000, 150);
+  installDoubleProperty(
+    objectClass, PROP_MINIMUM_COVERAGE, "minimum-coverage", "Minimum red coverage",
+    "Minimum red-mask coverage within a candidate bounding box", 0.0, 1.0, 0.30);
 
   gst_element_class_set_static_metadata(
     elementClass,
@@ -345,6 +614,7 @@ void gst_controlled_red_detect_class_init(GstControlledRedDetectClass *klass)
 void gst_controlled_red_detect_init(GstControlledRedDetect *self)
 {
   gst_video_info_init(&self->videoInfo);
+  g_mutex_init(&self->configMutex);
 
   self->detectionEnabled = TRUE;
   self->lowH = 0;
@@ -353,6 +623,14 @@ void gst_controlled_red_detect_init(GstControlledRedDetect *self)
   self->highH = 10;
   self->highS = 255;
   self->highV = 255;
+  self->selectorState = 1;
+  self->selectorCenterX = 0.5;
+  self->selectorCenterY = 0.5;
+  self->selectorWidth = 80;
+  self->selectorHeight = 80;
+  self->minimumArea = 150;
+  self->minimumCoverage = 0.30;
+  self->hasTrackedTarget = FALSE;
 
   gst_base_transform_set_in_place(GST_BASE_TRANSFORM(self), TRUE);
   gst_base_transform_set_passthrough(GST_BASE_TRANSFORM(self), FALSE);

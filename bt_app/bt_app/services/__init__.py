@@ -1,6 +1,7 @@
+from .tracker_result_store import TrackerObservation, TrackerResultStore
+from .target_selector import TargetSelectorPublisher
 from .distance_estimator import DistanceEstimatorService, TargetEstimate
 from .manual_land import ManualLandService
-from .tracker_result_store import TrackerObservation, TrackerResultStore
 
 __all__ = [
     "DistanceEstimatorService",
@@ -8,4 +9,5 @@ __all__ = [
     "TargetEstimate",
     "TrackerObservation",
     "TrackerResultStore",
+    "TargetSelectorPublisher",
 ]

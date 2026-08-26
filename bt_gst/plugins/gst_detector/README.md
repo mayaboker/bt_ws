@@ -50,3 +50,12 @@ gst-launch-1.0 -v \
 - `detection-enabled`: enables or disables red detection.
 - `low-h`, `low-s`, `low-v`: lower HSV threshold.
 - `high-h`, `high-s`, `high-v`: upper HSV threshold.
+- `selector-state`: `0` disabled, `1` selecting, `2` locked.
+- `selector-center-x`, `selector-center-y`: normalized selector center.
+- `selector-width`, `selector-height`: selector dimensions in pixels.
+- `minimum-area`, `minimum-coverage`: candidate qualification thresholds.
+
+The detector finds separate external red contours. In selecting state it emits
+only the contour under the selector; in locked state it associates subsequent
+frames with that selected contour. Metadata also contains the selector and all
+candidate rectangles for the bt_gst Cairo overlay.

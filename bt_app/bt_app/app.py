@@ -41,6 +41,7 @@ from bt_app.common import (
     AETR1234,
     InternalJoystick,
     TrackerMode)
+from bt_msgs import TargetSelectorState
 from loguru import logger as log
 import time
 from bt_app.common.mavlink import NamedValue
@@ -125,6 +126,8 @@ class App:
     def __validate_startup_config(self):
         if not self.config.visual_zmq_endpoint:
             raise AppStartupError("Visual ZMQ endpoint must not be empty")
+        if not self.config.selector_zmq_endpoint:
+            raise AppStartupError("Target selector ZMQ endpoint must not be empty")
 
         valid_sinks = {DroneSink.SERIAL.value, DroneSink.ETHERNET.value}
         if self.config.drone_sink not in valid_sinks:
@@ -442,8 +445,9 @@ class App:
 
         # TODO: add deadband ???
         # control pitch and yaw
-        pitch = self.ctx.request_rc.pitch
-        roll = self.ctx.request_rc.roll
+        selecting_target = self.ctx.request_rc.is_tracker_selected()
+        pitch = RC_MID if selecting_target else self.ctx.request_rc.pitch
+        roll = RC_MID if selecting_target else self.ctx.request_rc.roll
 
         controller.update_pitch_roll(pitch, roll)
 
@@ -520,6 +524,7 @@ class App:
         tracker = self.controllers.get(RobotState.TRACK)
         if tracker is not None:
             self._tracker_now_s = time.monotonic()
+            self._update_target_selector(self._tracker_now_s)
             self._prepare_tracker_switches()
             estimate = self._require_services().tracker_results.latest_observation
             tracker.observe(
@@ -547,6 +552,8 @@ class App:
                     self.ctx.armed,
                     not self.ctx.request_rc.is_manual(),
                     self.ctx.tracker_ready,
+                    abs(self.ctx.request_rc.roll - RC_MID) <= 35,
+                    abs(self.ctx.request_rc.pitch - RC_MID) <= 35,
                 ]
             )
             if self.ctx.state != RobotState.TRACK:
@@ -563,6 +570,23 @@ class App:
             #     self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE
             # if self.ctx.state != RobotState.FAILSAFE: 
             #     self.controllers[RobotState.FAILSAFE].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE 
+
+    def _update_target_selector(self, now_s: float) -> None:
+        selector = getattr(self._require_services(), "target_selector", None)
+        if selector is None:
+            return
+        if self.ctx.state == RobotState.TRACK:
+            state = TargetSelectorState.LOCKED
+        elif self.ctx.state == RobotState.ALT_HOLD and self.ctx.request_rc.is_tracker_selected():
+            state = TargetSelectorState.SELECTING
+        else:
+            state = TargetSelectorState.DISABLED
+        selector.update(
+            roll_rc=self.ctx.request_rc.roll,
+            pitch_rc=self.ctx.request_rc.pitch,
+            state=state,
+            now_s=now_s,
+        )
 
     def _prepare_tracker_switches(self) -> None:
         """Turn an observed SF low-to-high transition into a one-loop request."""

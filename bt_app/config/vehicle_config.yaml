@@ -31,3 +31,6 @@ log_level: "INFO"
 
 # bt_gst tracker-result subscription endpoint.
 visual_zmq_endpoint: "tcp://127.0.0.1:5556"
+
+# bt-app target-selector command publisher; bt_gst connects to this endpoint.
+selector_zmq_endpoint: "tcp://127.0.0.1:5557"

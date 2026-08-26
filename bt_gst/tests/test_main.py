@@ -15,6 +15,7 @@ from bt_gst.config import (
     DetectorConfig,
     FileSourceConfig,
     SimulationSourceConfig,
+    SelectorZmqConfig,
     ZmqConfig,
     load_config_overrides,
     resolve_config,
@@ -29,6 +30,7 @@ from bt_gst.pipeline_runner import (
 from bt_gst.red_detection import (
     GST_CLOCK_TIME_NONE,
     DetectionOverlayState,
+    DetectionBox,
     RedDetection,
     read_red_detection,
 )
@@ -112,6 +114,23 @@ def test_loads_and_resolves_zmq_config(tmp_path: Path) -> None:
     )
 
 
+def test_loads_selector_zmq_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n  type: file\n  path: video.avi\n"
+        "selector_zmq:\n  endpoint: tcp://127.0.0.1:6001\n"
+        "  bind: true\n  command_timeout_s: 0.8\n",
+        encoding="utf-8",
+    )
+    config = resolve_config(AppConfig(), load_config_overrides(config_path))
+    assert config.selector_zmq == SelectorZmqConfig(
+        enabled=True,
+        endpoint="tcp://127.0.0.1:6001",
+        bind=True,
+        command_timeout_s=0.8,
+    )
+
+
 def test_zmq_requires_enabled_detector() -> None:
     with pytest.raises(ConfigError, match="requires detector.enabled"):
         validate_config(
@@ -135,15 +154,18 @@ class RecordingDrawContext:
     def __init__(self) -> None:
         self.rectangle_args: tuple[float, float, float, float] | None = None
         self.stroke_called = False
+        self.colors = []
+        self.rectangles = []
 
-    def set_source_rgba(self, *_rgba: float) -> None:
-        return
+    def set_source_rgba(self, *rgba: float) -> None:
+        self.colors.append(rgba)
 
     def set_line_width(self, _width: float) -> None:
         return
 
     def rectangle(self, *args: float) -> None:
         self.rectangle_args = args
+        self.rectangles.append(args)
 
     def stroke(self) -> None:
         self.stroke_called = True
@@ -160,6 +182,48 @@ def test_detection_overlay_draws_matching_detection() -> None:
     assert context.stroke_called
 
 
+def test_detection_overlay_colors_candidates_and_selector():
+    state = DetectionOverlayState()
+    state.update(
+        RedDetection(
+            True, 10, 20, 30, 40, 123,
+            selector=DetectionBox(5, 6, 80, 80),
+            selector_valid=True,
+            selector_state=1,
+            candidates=(DetectionBox(10, 20, 30, 40), DetectionBox(100, 20, 30, 40)),
+        )
+    )
+    context = RecordingDrawContext()
+
+    _on_detection_overlay_draw(None, context, 123, 0, state)
+
+    assert context.colors == [
+        (0.0, 0.0, 1.0, 1.0),
+        (0.0, 0.0, 1.0, 1.0),
+        (0.0, 1.0, 0.0, 1.0),
+        (0.0, 1.0, 0.0, 1.0),
+    ]
+    assert len(context.rectangles) == 4
+
+
+def test_detection_overlay_hides_selector_when_target_is_locked():
+    state = DetectionOverlayState()
+    state.update(
+        RedDetection(
+            True, 10, 20, 30, 40, 123,
+            selector=DetectionBox(5, 6, 80, 80),
+            selector_valid=True,
+            selector_state=2,
+        )
+    )
+    context = RecordingDrawContext()
+
+    _on_detection_overlay_draw(None, context, 123, 0, state)
+
+    assert context.colors == [(0.0, 1.0, 0.0, 1.0)]
+    assert len(context.rectangles) == 1
+
+
 class FakeStructure:
     def __init__(self, found: bool = True) -> None:
         self.values = {
@@ -168,6 +232,13 @@ class FakeStructure:
             "y": 2 if found else 0,
             "width": 3 if found else 0,
             "height": 4 if found else 0,
+            "selector-x": 0,
+            "selector-y": 0,
+            "selector-width": 0,
+            "selector-height": 0,
+            "selector-valid": False,
+            "selector-state": 0,
+            "candidate-count": 0,
         }
 
     def get_value(self, name: str) -> object:
