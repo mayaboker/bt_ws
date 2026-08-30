@@ -22,6 +22,35 @@ The MessagePack/ZMQ interface between `bt_app` and `bt_gst` is documented in
 uv run bt-app run -c config/vehicle_config.yaml
 ```
 
+## Flight blackbox
+
+When `blackbox_enabled` is true, every armed interval is recorded under
+`logs/blackbox` in a UTC-prefixed session directory such as:
+
+```text
+20260830T091530.123000Z_a1b2c3d4_blackbox/
+├── metadata.json
+├── frames-000000.parquet
+└── events-000000.parquet
+```
+
+Each frame is one coherent 50 Hz controller snapshot containing the requested
+18-channel joystick command, the final 8-channel FCU command, altitude, vario,
+attitude, state, and the latest tracker output. Slower inputs include age and
+freshness columns so repeated values are distinguishable from new samples.
+State transitions are stored separately in the event chunks.
+
+The flight thread only submits frames to a bounded in-memory queue. A background
+writer commits an atomic Zstandard-compressed Parquet chunk every five seconds.
+If storage falls behind, frames are dropped and counted rather than delaying
+flight control. An interrupted session keeps its finalized chunks and is marked
+`unclean` on the next start.
+
+Use PyArrow, pandas, Polars, or DuckDB to read `frames-*.parquet`. Metadata
+contains the schema version, time anchors, application/Git version, complete
+parameter snapshot, vehicle configuration, chunk inventory, and drop/error
+counts. Sessions are never deleted automatically.
+
 ### MAVLink RC takeoff and landing scenario
 
 With Gazebo, SITL, and `bt-app` already running, execute the self-checking RC

@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from loguru import logger as log
 
+from bt_app.blackbox import BlackboxRecorder, NullBlackboxRecorder
 from bt_app.context import Context
 from bt_app.control import MavlinkListenerError, MavlinkListenerService
 from bt_app.errors import AppExitCode, AppStartupError
@@ -13,7 +14,6 @@ from bt_app.mavlink_wrapper import MavlinkService
 from bt_app.msp import MspTransportDependencyError
 from bt_app.msp_adapter import MSPAdapter
 from bt_app.parameters import Parameters
-from bt_app.rc_state_recorder import NullRcStateRecorder, RcStateRecorder
 from bt_app.services import ManualLandService, TargetSelectorPublisher, TrackerResultStore
 from bt_app.vehicle_config import DroneSink, VehicleConfig
 from bt_app.visual_bridge import VisualBridgeManager
@@ -40,7 +40,7 @@ class AppServices:
         drone: MSPAdapter,
         joystick: MavlinkListenerService,
         mavlink: MavlinkService,
-        rc_recorder: RcStateRecorder | NullRcStateRecorder,
+        blackbox: BlackboxRecorder | NullBlackboxRecorder,
         manual_land: ManualLandService,
         tracker_results: TrackerResultStore,
         target_selector: TargetSelectorPublisher,
@@ -51,7 +51,7 @@ class AppServices:
         self.drone = drone
         self.joystick = joystick
         self.mavlink = mavlink
-        self.rc_recorder = rc_recorder
+        self.blackbox = blackbox
         self.manual_land = manual_land
         self.tracker_results = tracker_results
         self.target_selector = target_selector
@@ -94,14 +94,16 @@ class AppServices:
             parameter_service=parameters.service,
             qopenhd_addr=(config.gcs_ip, config.gcs_port),
         )
-        recorder = (
-            RcStateRecorder(
-                config.rc_record_path,
-                flush_interval_s=config.rc_record_flush_interval_s,
-                queue_size=config.rc_record_queue_size,
+        blackbox = (
+            BlackboxRecorder(
+                config.blackbox_directory,
+                vehicle_config=config,
+                parameters=parameters.dump_values,
+                chunk_duration_s=config.blackbox_chunk_duration_s,
+                queue_size=config.blackbox_queue_size,
             )
-            if config.rc_record_enabled
-            else NullRcStateRecorder()
+            if config.blackbox_enabled
+            else NullBlackboxRecorder()
         )
         manual_land = ManualLandService(
             context=context,
@@ -115,7 +117,7 @@ class AppServices:
             drone=drone,
             joystick=joystick,
             mavlink=mavlink,
-            rc_recorder=recorder,
+            blackbox=blackbox,
             manual_land=manual_land,
             tracker_results=tracker_results,
             target_selector=target_selector,
@@ -142,7 +144,7 @@ class AppServices:
             self._start_drone()
             self._start("joystick listener", self.joystick)
             self._start("MAVLink service", self.mavlink)
-            self._start("RC state recorder", self.rc_recorder)
+            self._start("flight blackbox", self.blackbox)
             self._start("target selector publisher", self.target_selector)
         except BaseException:
             self.stop_all()
@@ -199,7 +201,7 @@ class AppServices:
             ("visual bridge manager", self.visual_bridge),
             ("joystick listener", self.joystick),
             ("MAVLink service", self.mavlink),
-            ("RC state recorder", self.rc_recorder),
+            ("flight blackbox", self.blackbox),
             ("target selector publisher", getattr(self, "target_selector", None)),
             ("parameter service", self.parameters),
         )

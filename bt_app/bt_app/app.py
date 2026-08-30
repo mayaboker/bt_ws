@@ -128,6 +128,13 @@ class App:
             raise AppStartupError("Visual ZMQ endpoint must not be empty")
         if not self.config.selector_zmq_endpoint:
             raise AppStartupError("Target selector ZMQ endpoint must not be empty")
+        if self.config.blackbox_enabled:
+            if not self.config.blackbox_directory:
+                raise AppStartupError("Blackbox directory must not be empty")
+            if self.config.blackbox_chunk_duration_s <= 0:
+                raise AppStartupError("Blackbox chunk duration must be positive")
+            if self.config.blackbox_queue_size <= 0:
+                raise AppStartupError("Blackbox queue size must be positive")
 
         valid_sinks = {DroneSink.SERIAL.value, DroneSink.ETHERNET.value}
         if self.config.drone_sink not in valid_sinks:
@@ -760,7 +767,11 @@ class App:
                     break
                 # log for diagnostic
                 services = self._require_services()
-                services.rc_recorder.record(self.ctx.state, self.ctx.sent_rc)
+                services.blackbox.record(
+                    self.ctx,
+                    services.tracker_results.latest_observation,
+                    now_s=time.monotonic(),
+                )
                 # send to FCU
                 services.drone.dispatcher.set_rc(self.ctx.sent_rc)
                 next_deadline_s += period_s
