@@ -3,6 +3,163 @@
 This directory contains 12 flight scenarios and two supporting utilities for
 exercising `bt-app` through MAVLink RC overrides and visual tracking.
 
+## Initial setup
+
+The examples are intended for simulation. They expect Gazebo, Betaflight SITL,
+and `bt-app` to communicate over the UDP endpoints configured in
+[`../config/vehicle_config.yaml`](../config/vehicle_config.yaml).
+
+From the workspace root, create/synchronize the `bt-app` environment with
+`uv`:
+
+```bash
+cd bt_app
+uv sync --extra dev
+```
+
+This installs `bt-app`, `pymavlink`, the local `bt-msgs` package, and the test
+dependencies into `bt_app/.venv`. Run the following commands from separate
+terminals.
+
+### 1. Start Gazebo and Betaflight SITL
+
+From the workspace root:
+
+```bash
+./bt_bringup/launch/launch.sh
+```
+
+Select `sim` from the displayed menu. This loads the simulation session that
+starts Gazebo, the proxy, and Betaflight SITL. The SITL launcher currently
+expects Betaflight at:
+
+```text
+/home/user/projects/betaflight/obj/main/betaflight_SITL.elf
+```
+
+Update [`../../bt_bringup/launch/run_sitl.sh`](../../bt_bringup/launch/run_sitl.sh)
+if your Betaflight executable is located elsewhere.
+
+### 2. Start `bt-app`
+
+From the `bt_app` directory:
+
+```bash
+uv run bt-app run -c config/vehicle_config.yaml
+```
+
+Leave this process running. By default, `bt-app` listens for scenario RC
+traffic on UDP port `14560` and publishes telemetry toward UDP port `14550`.
+
+### 3. Run a scenario
+
+In another terminal, from the `bt_app` directory, run the baseline automatic
+takeoff and landing scenario:
+
+```bash
+uv run python example/send_rc.py
+```
+
+The scenario waits for live telemetry, arms in MANUAL, requests automatic
+takeoff, verifies ALT_HOLD, descends, confirms touchdown, and disarms. Inspect
+or change its available options with:
+
+```bash
+uv run python example/send_rc.py --help
+```
+
+For example, to hold altitude for 10 seconds and allow 90 seconds for landing:
+
+```bash
+uv run python example/send_rc.py \
+  --alt-hold-duration 10 \
+  --landing-timeout 90
+```
+
+Replace `send_rc.py` with any script from the scenario menu below. Tracking
+scenarios additionally require the red-target detector and `bt-gst` pipeline
+to be running before the scenario starts.
+
+> **Safety:** These scripts command an armed aircraft and are intended for SITL.
+> Do not point them at real hardware without a separate safety review and
+> suitable operational controls.
+
+## How the simulated joystick flight works
+
+[`send_rc.py`](send_rc.py) acts like a scripted joystick. It does not directly
+move the simulated aircraft and it does not skip the normal `bt-app` flight
+logic. Instead, it repeatedly converts the desired stick and switch positions
+into MAVLink `RC_CHANNELS_OVERRIDE` messages and sends them to `bt-app` at the
+configured rate (50 Hz by default).
+
+`bt-app` receives those virtual joystick channels, runs its normal state
+machine and flight controllers, and commands Betaflight SITL. Gazebo simulates
+the aircraft response. Telemetry then returns through `bt-app`, allowing the
+scenario to verify each transition before it sends the next joystick command.
+
+```mermaid
+flowchart LR
+    Scenario["send_rc.py<br/>scripted joystick"]
+    App["bt-app<br/>state machine and controllers"]
+    FC["Betaflight SITL<br/>flight controller"]
+    Sim["Gazebo<br/>aircraft dynamics"]
+
+    Scenario -- "MAVLink RC_CHANNELS_OVERRIDE<br/>UDP 14560, default 50 Hz" --> App
+    App -- "MSP RC/control commands<br/>TCP 5761" --> FC
+    FC -- "motor commands" --> Sim
+    Sim -- "simulated vehicle state" --> FC
+    FC -- "flight data" --> App
+    App -- "MAVLink HEARTBEAT + GLOBAL_POSITION_INT<br/>UDP 14550" --> Scenario
+```
+
+The baseline script builds complete eight-channel joystick snapshots. RC values
+use approximately `1000` for low, `1500` for center, and `2000` for high.
+
+### Joystick channel mapping
+
+The Python constants use zero-based list indexes, while MAVLink and transmitter
+channel numbers are one-based. For example, Python index `0` is RC channel 1.
+
+| Python index | RC channel | Name | Input interpretation | Typical values | Boxer control |
+|---:|---:|---|---|---|---|
+| `0` | 1 | `ROLL` | Low rolls left, center is neutral, high rolls right. | `1000 / 1500 / 2000` | Right stick, horizontal |
+| `1` | 2 | `PITCH` | Low pitches forward, center is neutral, high pitches backward. | `1000 / 1500 / 2000` | Right stick, vertical |
+| `2` | 3 | `THROTTLE` | Low is minimum thrust; increasing the value increases thrust. `1500` is also the neutral altitude-setpoint command in ALT_HOLD. | `1000..2000` | Left stick, vertical |
+| `3` | 4 | `YAW` | Low commands counter-clockwise yaw, center is neutral, high commands clockwise yaw. | `1000 / 1500 / 2000` | Left stick, horizontal |
+| `4` | 5 | `ARM` | Low requests disarmed; high requests armed. | `1000 / 2000` | `SE` switch |
+| `5` | 6 | `MANUAL` | Low selects MANUAL; high releases MANUAL so ALT_HOLD can be selected by the state machine. | `1000 / 2000` | `SA` switch |
+| `6` | 7 | `AUTO_TAKEOFF` | Low is inactive; high requests automatic takeoff while armed in MANUAL. | `1000 / 2000` | `SD` switch |
+| `7` | 8 | Reserved in `send_rc.py` | Not used by the baseline scenario; transmitted low. Extended tracking scenarios reuse later channels for tracker selection and enable. | `1000` | `SB` begins tracker selection in the transmitter configuration |
+
+The helper `rc_channels()` always creates a complete snapshot rather than
+changing only one channel. Its safe defaults are centered roll, pitch, and yaw;
+minimum throttle; disarmed; automatic takeoff inactive; and MANUAL not selected.
+Each scenario phase then overrides only the controls needed for that phase.
+
+The tracking examples extend the snapshot beyond these eight baseline fields:
+
+| RC channel | Tracking name | Meaning | Transmitter control |
+|---:|---|---|---|
+| 8 | `TRACKER_MODE` | `1000` disables tracking, `1500` selects tracker 1, and `2000` selects tracker 2. | `SB` switch |
+| 9 | `TRACKER_ENABLE` | A low-to-high transition requests entry into TRACK after a valid target lock. | Momentary `SF` switch |
+
+| Script phase | Simulated joystick command | Expected application result |
+|---|---|---|
+| Discover application | Neutral sticks, disarmed | Receive the first `bt-app` heartbeat. |
+| Arm in MANUAL | ARM high, MANUAL selected, throttle low | `IDLE -> MANUAL`, armed flag set. |
+| Request takeoff | ARM high, AUTO_TAKEOFF high | `MANUAL -> TAKEOFF`. |
+| Complete takeoff | Continue holding the takeoff snapshot | `TAKEOFF -> ALT_HOLD`. |
+| Hold altitude | Roll/pitch/yaw centered, throttle centered, armed | Remain in `ALT_HOLD` for the requested duration. |
+| Descend | Select MANUAL and send fixed throttle below the hover baseline | `ALT_HOLD -> MANUAL`, followed by decreasing altitude. |
+| Confirm touchdown | Continue the descent snapshot | Observe three consecutive altitude samples at or below the touchdown threshold. |
+| Disarm | MANUAL selected, ARM low, throttle low | `MANUAL -> IDLE`, armed flag cleared. |
+
+Every phase is feedback-gated: `_wait_for()` continues transmitting the current
+joystick snapshot while reading telemetry, and advances only when its expected
+state or altitude condition is true. A timeout raises `ScenarioError`. Before
+takeoff, cleanup sends a final disarm snapshot; after takeoff, cleanup stops RC
+traffic so the `bt-app` communication failsafe can take control.
+
 ## Scenario menu
 
 | Scenario | Flight flow | Purpose |
