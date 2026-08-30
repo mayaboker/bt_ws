@@ -133,7 +133,7 @@ parameters:
       max: 200.0
   HY_MAX_RATE:
     type: float
-    default: 10.0
+    default: 15.0
     limits:
       min: 0.0
       max: 1000.0

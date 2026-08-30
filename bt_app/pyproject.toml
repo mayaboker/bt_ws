@@ -43,7 +43,7 @@ bt-pitch-effect = "bt_app.diagnostics.pitch_rotation_effect:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["bt_app*", "msp*"]
+include = ["bt_app*", "msp*", "joy_scenarios*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "bt_app._version.__version__" }

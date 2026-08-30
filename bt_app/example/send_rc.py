@@ -60,7 +60,7 @@ Simulates this joystick flight sequence:
   2. Arm the drone in MANUAL with low throttle.
   3. Request automatic takeoff and wait for ALT_HOLD.
   4. Hold altitude for the configured duration.
-  5. Switch to MANUAL and descend with the configured throttle.
+  5. Switch to MANUAL and descend with the configured throttle. (not velocity control)
   6. Confirm touchdown, disarm, and verify IDLE.
 
 Safety behavior:
