@@ -20,6 +20,7 @@ class VehicleConfig():
     drone_serial_port: str = field(default="/dev/ttyUSB0")
     gcs_ip: str = field(default="127.0.0.1")
     gcs_port: int = field(default=14550)
+    debug_mode: bool = field(default=False)
     blackbox_enabled: bool = field(default=False)
     blackbox_directory: str = field(default="logs/blackbox")
     blackbox_chunk_duration_s: float = field(default=5.0)

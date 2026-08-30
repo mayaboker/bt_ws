@@ -17,6 +17,9 @@ drone_serial_port: "/dev/ttyUSB0"
 gcs_ip: "127.0.0.1"
 gcs_port: 14550
 
+# Enable additional simulation/debug telemetry such as MSP_RAW_GPS polling.
+debug_mode: true
+
 # Non-blocking armed-flight blackbox recorder.
 blackbox_enabled: true
 blackbox_directory: "logs/blackbox"

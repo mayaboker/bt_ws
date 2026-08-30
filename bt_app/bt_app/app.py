@@ -43,6 +43,7 @@ from bt_app.common import (
     TrackerMode)
 from bt_msgs import TargetSelectorState
 from loguru import logger as log
+from bt_app.velocity import gps_horizontal_velocity, ned_to_body_frd
 import time
 from bt_app.common.mavlink import NamedValue
 #TODO: remove when rc_channel_control implement adapter
@@ -124,6 +125,8 @@ class App:
         log.debug("Application log level : DEBUG")
 
     def __validate_startup_config(self):
+        if not isinstance(self.config.debug_mode, bool):
+            raise AppStartupError("debug_mode must be a boolean")
         if not self.config.visual_zmq_endpoint:
             raise AppStartupError("Visual ZMQ endpoint must not be empty")
         if not self.config.selector_zmq_endpoint:
@@ -388,6 +391,9 @@ class App:
             self.ctx.drone_attitude_received_at_s = float(
                 attitude.get("received_at_s", 0.0)
             )
+        gps = getattr(drone.dispatcher, "last_gps", None)
+        if gps:
+            self._update_gps_velocity(gps)
         ## read last drone rc
         rc = drone.get_rc()
         if rc:
@@ -404,6 +410,47 @@ class App:
         battery = drone.dispatcher.last_battery
         if battery and "voltage_v" in battery:
             self.ctx.battery_voltage = battery["voltage_v"] + 20.0 #TODO: remove this hack, the voltage is not correct in betaflight 4.4.1
+
+    def _update_gps_velocity(self, gps: dict[str, object]) -> None:
+        """Store raw GPS and derive NED plus body-FRD diagnostic velocity."""
+
+        self.ctx.drone_gps = dict(gps)
+        self.ctx.drone_gps_received_at_s = float(gps.get("received_at_s", 0.0))
+        if (
+            not bool(gps.get("fix", False))
+            or self.ctx.drone_alt_received_at_s <= 0.0
+            or self.ctx.drone_attitude_received_at_s <= 0.0
+        ):
+            self._clear_gps_velocity()
+            return
+
+        north, east = gps_horizontal_velocity(
+            float(gps.get("ground_speed_m_s", 0.0)),
+            float(gps.get("course_deg", 0.0)),
+        )
+        down = -float(self.ctx.drone_vertical_speed)
+        body_x, body_y, body_z = ned_to_body_frd(
+            north,
+            east,
+            down,
+            roll_deg=self.ctx.drone_roll_deg,
+            pitch_deg=self.ctx.drone_pitch_deg,
+            yaw_deg=self.ctx.drone_heading_deg,
+        )
+        self.ctx.drone_velocity_north_m_s = north
+        self.ctx.drone_velocity_east_m_s = east
+        self.ctx.drone_velocity_down_m_s = down
+        self.ctx.drone_velocity_body_x_m_s = body_x
+        self.ctx.drone_velocity_body_y_m_s = body_y
+        self.ctx.drone_velocity_body_z_m_s = body_z
+
+    def _clear_gps_velocity(self) -> None:
+        self.ctx.drone_velocity_north_m_s = None
+        self.ctx.drone_velocity_east_m_s = None
+        self.ctx.drone_velocity_down_m_s = None
+        self.ctx.drone_velocity_body_x_m_s = None
+        self.ctx.drone_velocity_body_y_m_s = None
+        self.ctx.drone_velocity_body_z_m_s = None
 
         
     
