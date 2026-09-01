@@ -354,11 +354,11 @@ parameters:
     limits: {min: 0.1, max: 90.0}
   TRK_YAW_KP:
     type: float
-    default: 30.0
+    default: 20.0
     limits: {min: 0.0, max: 1000.0}
   TRK_YAW_MAX:
     type: float
-    default: 20.0
+    default: 15.0
     limits: {min: 0.0, max: 1000.0}
   TRK_YAW_SLEW:
     type: float
@@ -372,15 +372,15 @@ parameters:
     limits: {options: [-1, 1]}
   TRK_ROLL_KP:
     type: float
-    default: 60.0
+    default: 90.0
     limits: {min: 0.0, max: 90.0}
   TRK_ROLL_MAX:
     type: float
-    default: 10.0
+    default: 20.0
     limits: {min: 0.0, max: 30.0}
   TRK_ROLL_SLEW:
     type: float
-    default: 20.0
+    default: 40.0
     limits: {min: 0.1, max: 180.0}
   TRK_ROLL_SIGN:
     type: int
@@ -429,11 +429,11 @@ parameters:
     limits: {min: 0.0, max: 1.0}
   TRK_XY_SLOW:
     type: float
-    default: 0.05
+    default: 0.10
     limits: {min: 0.0, max: 1.0}
   TRK_XY_STOP:
     type: float
-    default: 0.15
+    default: 0.25
     limits: {min: 0.0, max: 1.0}
   TRK_TIMEOUT_S:
     type: float
