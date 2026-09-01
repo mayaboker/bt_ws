@@ -94,6 +94,8 @@ class ParameterKey:
     TRK_VZ_BRAKE: Final[Literal['TRK_VZ_BRAKE']] = 'TRK_VZ_BRAKE'
     TRK_THR_MAX: Final[Literal['TRK_THR_MAX']] = 'TRK_THR_MAX'
     TRK_DEADBAND: Final[Literal['TRK_DEADBAND']] = 'TRK_DEADBAND'
+    TRK_XY_SLOW: Final[Literal['TRK_XY_SLOW']] = 'TRK_XY_SLOW'
+    TRK_XY_STOP: Final[Literal['TRK_XY_STOP']] = 'TRK_XY_STOP'
     TRK_TIMEOUT_S: Final[Literal['TRK_TIMEOUT_S']] = 'TRK_TIMEOUT_S'
     TRK_LOCK_FRAMES: Final[Literal['TRK_LOCK_FRAMES']] = 'TRK_LOCK_FRAMES'
     TRK_COMMIT_M: Final[Literal['TRK_COMMIT_M']] = 'TRK_COMMIT_M'
@@ -193,6 +195,8 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'TRK_VZ_BRAKE',
     'TRK_THR_MAX',
     'TRK_DEADBAND',
+    'TRK_XY_SLOW',
+    'TRK_XY_STOP',
     'TRK_TIMEOUT_S',
     'TRK_LOCK_FRAMES',
     'TRK_COMMIT_M',

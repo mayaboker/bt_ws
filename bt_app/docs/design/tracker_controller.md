@@ -201,8 +201,8 @@ The sent yaw rate slews toward this target by at most
 instantaneous sign reversal when the target crosses the camera center.
 
 A target to the right produces the correction selected by `TRK_YAW_SIGN`.
-The current camera/vehicle convention uses `+1`; an opposite installation can
-use `-1` without changing the shared vehicle yaw mapping. The existing
+The current camera/vehicle convention uses `-1`; an opposite installation can
+use `+1` without changing the shared vehicle yaw mapping. The existing
 `BetaflightRcMapper.yaw_rate_to_rc()` converts the rate to RC.
 
 ### Throttle
@@ -370,7 +370,7 @@ original deadline despite parameter updates.
 | `TRK_YAW_KP` | `30.0` | Yaw-rate gain in deg/s per normalized error |
 | `TRK_YAW_MAX` | `20.0` | Absolute yaw-rate limit in deg/s |
 | `TRK_YAW_SLEW` | `20.0` | Yaw-rate slew limit in deg/s² |
-| `TRK_YAW_SIGN` | `1` | Image-error to vehicle-yaw direction; only `-1` or `1` |
+| `TRK_YAW_SIGN` | `-1` | Image-error to vehicle-yaw direction; only `-1` or `1` |
 | `TRK_THR_KP` | `100.0` | Outer visual gain used with `TRK_VZ_KD` to derive requested speed |
 | `TRK_VZ_KD` | `30.0` | Inner vertical-speed error gain in RC units per m/s |
 | `TRK_VZ_MAX` | `1.75` | Far-range absolute vertical-speed target limit in m/s |
@@ -380,7 +380,9 @@ original deadline despite parameter updates.
 | `TRK_VZ_TAPER_E` | `2.0` | Depth where the near speed limit is reached |
 | `TRK_VZ_BRAKE` | `1.5` | Setpoint braking rate toward zero in m/s squared |
 | `TRK_THR_MAX` | `100.0` | Absolute throttle correction limit in RC units |
-| `TRK_DEADBAND` | `0.01` | Image-error deadband |
+| `TRK_DEADBAND` | `0.02` | Image-error deadband |
+| `TRK_XY_SLOW` | `0.05` | Horizontal error where approach scaling begins |
+| `TRK_XY_STOP` | `0.15` | Horizontal error where pitch and descent reach zero |
 | `TRK_TIMEOUT_S` | `0.25` | Maximum time since the last valid estimate |
 | `TRK_LOCK_FRAMES` | `3` | Consecutive frames required for entry |
 | `TRK_COMMIT_M` | `1.0` | Forward depth that enters COMMIT |

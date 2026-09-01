@@ -367,6 +367,14 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.TRK_DEADBAND))
 
     @property
+    def trk_xy_slow(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_XY_SLOW))
+
+    @property
+    def trk_xy_stop(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_XY_STOP))
+
+    @property
     def trk_timeout_s(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.TRK_TIMEOUT_S))
 

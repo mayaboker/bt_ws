@@ -75,6 +75,8 @@ class TrackerConfig:
     yaw_slew_dps2: float
     yaw_sign: int
     deadband: float
+    horizontal_slow_threshold: float
+    horizontal_stop_threshold: float
     angle_limit_deg: float
     hover_baseline_rc: float
     yaw_stick_rate_dps: float
@@ -130,6 +132,8 @@ class TrackerConfig:
             yaw_slew_dps2=parameters.get(ParameterKey.TRK_YAW_SLEW),
             yaw_sign=parameters.get(ParameterKey.TRK_YAW_SIGN),
             deadband=parameters.get(ParameterKey.TRK_DEADBAND),
+            horizontal_slow_threshold=parameters.get(ParameterKey.TRK_XY_SLOW),
+            horizontal_stop_threshold=parameters.get(ParameterKey.TRK_XY_STOP),
             angle_limit_deg=parameters.get(ParameterKey.BF_ANGLE_LIMIT),
             hover_baseline_rc=parameters.get(ParameterKey.HOV_BASELINE),
             yaw_stick_rate_dps=parameters.get(ParameterKey.BF_YAW_RATE),
@@ -154,6 +158,13 @@ class TrackerConfig:
             raise ValueError("invalid Betaflight Actual-rates yaw configuration")
         if self.yaw_sign not in (-1, 1):
             raise ValueError("tracker yaw sign must be -1 or 1")
+        if not (
+            0.0
+            <= self.horizontal_slow_threshold
+            < self.horizontal_stop_threshold
+            <= 1.0
+        ):
+            raise ValueError("tracker horizontal slowdown thresholds are invalid")
         if (
             self.pitch_slew_deg_s <= 0.0
             or self.pitch_recovery_slew_deg_s <= 0.0
@@ -318,6 +329,7 @@ class LoopDiagnostics:
     throttle_d_rc: float = 0.0
     bbox_fill: float = 0.0
     yaw_rate_target_dps: float = 0.0
+    horizontal_alignment_scale: float = 1.0
     effective_ttc_s: float = 0.0
     ttc_prediction_age_s: float = 0.0
 
@@ -333,6 +345,7 @@ TRACKER_CSV_HEADER = (
     "roll_deg", "pitch_deg", "heading_deg", "attitude_age_s",
     "altitude_m", "vertical_distance_m", "target_ttc_s", "inverse_ttc_target_hz",
     "pitch_initial_deg", "pitch_raw_deg", "pitch_command_deg",
+    "horizontal_alignment_scale",
     "vertical_nominal_m_s", "vertical_alignment_m_s", "vertical_target_m_s",
     "vertical_setpoint_m_s",
     "vario_m_s", "vario_age_s", "vertical_error_m_s", "throttle_p_rc",
@@ -701,6 +714,16 @@ class TrackerController:
     ) -> TrackerControlResult:
         result = observation.result
         dx, dy = self._normalized_errors(result, config)
+        horizontal_alignment_scale = clamp(
+            (
+                config.horizontal_stop_threshold - abs(dx)
+            ) / (
+                config.horizontal_stop_threshold
+                - config.horizontal_slow_threshold
+            ),
+            0.0,
+            1.0,
+        )
         live_frame = self._last_scale_update.accepted and self._last_scale_update.new_frame
         if self._phase == TrackerPhase.ALIGN and self._last_scale_update.new_frame:
             if live_frame and abs(dx) <= config.horizontal_alignment_threshold:
@@ -761,6 +784,7 @@ class TrackerController:
                 + alignment_weight * config.alignment_pitch_deg
             )
         pitch_raw = clamp(pitch_raw, config.pitch_minimum_deg, 0.0)
+        pitch_raw *= horizontal_alignment_scale
         pitch_error = pitch_raw - self._pitch_command_deg
         pitch_slew = (
             config.pitch_recovery_slew_deg_s
@@ -810,6 +834,7 @@ class TrackerController:
                 config.vertical_speed_min_m_s,
                 config.vertical_speed_max_m_s,
             )
+        vertical_target *= horizontal_alignment_scale
         previous_vertical_setpoint = (
             vario
             if self._vertical_setpoint_m_s is None
@@ -916,6 +941,7 @@ class TrackerController:
             throttle_d_rc=throttle_d,
             bbox_fill=fill,
             yaw_rate_target_dps=yaw_rate_target,
+            horizontal_alignment_scale=horizontal_alignment_scale,
         )
         control_result = TrackerControlResult(
             channels=channels,
@@ -1161,6 +1187,7 @@ class TrackerController:
             "pitch_initial_deg": config.pitch_initial_deg,
             "pitch_raw_deg": d.pitch_raw_deg,
             "pitch_command_deg": result.pitch_command_deg,
+            "horizontal_alignment_scale": d.horizontal_alignment_scale,
             "vertical_nominal_m_s": d.vertical_nominal_m_s,
             "vertical_alignment_m_s": d.vertical_alignment_m_s,
             "vertical_target_m_s": result.vertical_speed_target_m_s,
