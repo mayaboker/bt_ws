@@ -127,7 +127,7 @@ parameters:
       max: 200.0
   TAKEOFF_ALT:
     type: float
-    default: 10.0
+    default: 20.0
     limits:
       min: 0.0
       max: 200.0
@@ -266,7 +266,7 @@ parameters:
     limits: {min: -100.0, max: 1000.0}
   TTC_VY_NOM:
     type: float
-    default: 1.0
+    default: 1.2
     limits: {min: 0.01, max: 5.0}
   TTC_VY_MIN:
     type: float
