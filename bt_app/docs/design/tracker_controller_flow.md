@@ -62,7 +62,7 @@ sequenceDiagram
         end
     end
     App->>Controller: stop_tracking(end_reason)
-    Controller->>Controller: export CSV and reset
+    Controller->>Controller: reset dynamic state
 ```
 
 `TrackerObservation.received_at_s` is a local monotonic receive time. It is used instead of the camera timestamp for freshness and optical-filter time differences.
@@ -109,12 +109,11 @@ Before TRACK starts, any distinct TTC-invalid frame clears acquisition. During a
 - the vertical setpoint to current measured vario;
 - the vertical integral to zero;
 - acceleration history from the current vario sample;
-- phase and commit state;
-- in-memory CSV rows.
+- phase and commit state.
 
 During `ALIGN`, yaw remains active and pitch stays at `TTC_ALN_PIT`. Optical TTC cannot increase the closing pitch, but vertical image error drives a bounded vertical-speed target through the existing vario PI-D loop. This lets the vehicle descend when the target is below image center instead of holding altitude until the bbox is clipped. The target must remain within the horizontal threshold `TTC_ALN_XY` for `TTC_ALN_FR` distinct accepted frames. A distinct rejected or horizontally misaligned frame resets this counter; reading the same frame again does not advance it. On transition to `TRACKING`, the optical expansion-rate estimate is reset so staging motion is not interpreted as target closing.
 
-`stop_tracking(...)` exports the CSV atomically through a temporary file, resets all dynamic controller state, and returns to acquisition behavior.
+`stop_tracking(...)` resets all dynamic controller state and returns to acquisition behavior.
 
 ## Camera-frame validation and optical TTC
 
@@ -397,35 +396,23 @@ The most important active defaults are:
 | Acquisition/loss | `TTC_LOCK_FR=8`, `TTC_LOCK_S=0.20`, `TTC_TIMEOUT=0.25` |
 | Initial alignment | `TTC_ALN_PIT=-5`, horizontal `TTC_ALN_XY=0.25`, `TTC_ALN_FR=5`; vertical image error commands bounded climb/descent |
 | Pitch/TTC | `TTC_PIT_INIT=-10`, `TTC_PIT_MIN=-15`, forward slew `TTC_PIT_SLEW=5`, recovery slew `TTC_PIT_REC=25`, `TTC_INV_KP=10` |
-| Vertical profile | `TGT_HEIGHT_M=0.5`, countdown TTC feedforward, `TTC_VY_NOM=1.0` pitch timing, `TTC_DY_KP=1.5`, `TTC_DY_VMAX=0.5`, clipped recovery `TTC_DY_NEAR=1.5`, `TRK_VZ_ACCEL=0.5` |
+| Vertical profile | `TGT_HEIGHT_M=0.2`, countdown TTC feedforward, `TTC_VY_NOM=1.0` pitch timing, `TTC_DY_KP=1.5`, `TTC_DY_VMAX=0.5`, clipped recovery `TTC_DY_NEAR=1.5`, `TRK_VZ_ACCEL=1.0` |
 | Vertical PI-D | `TTC_VY_KP=20`, `TTC_VY_KI=3`, `TTC_VY_KD=10`, `TTC_AZ_ALPHA=0.2` |
 | Vertical limits | `TTC_VY_MIN=-5`, `TTC_VY_MAX=2`, `TTC_VY_I_MAX=40`, `TTC_THR_MAX=140` |
-| Yaw | `TRK_YAW_KP=30`, `TRK_YAW_MAX=20`, `TRK_YAW_SLEW=20`, `TRK_YAW_SIGN=-1`, `TRK_DEADBAND=0.02` |
-| Roll | Image-error lateral correction with `TRK_ROLL_KP=10`, `TRK_ROLL_MAX=5`, `TRK_ROLL_SLEW=10`, and `TRK_ROLL_SIGN=1` |
-| Horizontal gate | Full approach through `TRK_XY_SLOW=0.05`, linearly reduced to zero at `TRK_XY_STOP=0.15`; yaw remains active |
+| Yaw | `TRK_YAW_KP=20`, `TRK_YAW_MAX=15`, `TRK_YAW_SLEW=20`, `TRK_YAW_SIGN=-1`, `TRK_DEADBAND=0.02` |
+| Roll | Image-error lateral correction with `TRK_ROLL_KP=90`, `TRK_ROLL_MAX=20`, `TRK_ROLL_SLEW=40`, and `TRK_ROLL_SIGN=1` |
+| Horizontal gate | Full approach through `TRK_XY_SLOW=0.10`, linearly reduced to zero at `TRK_XY_STOP=0.25`; yaw remains active |
 | Commit | `TTC_FILL=0.60`, `TTC_CLIP_FILL=0.80`, `TTC_ALIGN=0.15`, `TTC_COMMIT_FR=5`, `TTC_MIN_S=0.50` |
 
 Parameter-change callbacks rebuild and validate an immutable `TrackerConfig`. Each observe or update operation takes a lock-protected configuration snapshot, so one iteration uses a consistent set of values.
 
-## Diagnostics and CSV flow
+## Diagnostics
 
 The runtime logger emits one concise message for every lifecycle transition: acquisition to alignment, alignment to tracking, tracking to commit, and the active phase to stopped. Transition messages include the measurements and thresholds that caused the change; phase state is not printed on every control-loop iteration.
 
-When a CSV path is configured, each active `update(...)` appends a row in memory. The row contains:
-
-- raw tracker identity, timing, bbox, and validity;
-- normalized alignment and bbox fill;
-- optical filter state, innovation, inverse TTC, raw/effective TTC, and TTC prediction age;
-- altitude, vario, velocity target/setpoint/error;
-- raw and filtered vertical acceleration;
-- P, I, and D throttle terms;
-- actual roll, pitch, heading and attitude-sample age;
-- commanded pitch, yaw, throttle, alignment/commit state, exit state;
-- all eight final RC channels.
-
-Rows are exported only by `stop_tracking(...)`. Every row receives the same final `end_reason`, and the temporary file is atomically renamed to `logs/tracker_controller.csv`.
-
-One diagnostic detail matters during analysis: the final stale-data row contains a safe result, so its centered pitch and hover throttle are not the last active flight command. Use the last row with `result_valid=True` when interpreting terminal controller behavior.
+The controller performs no diagnostic file I/O. The application blackbox owns
+flight recording and captures tracker observations, vehicle telemetry, state
+changes, and dispatched RC output for offboard analysis.
 
 ## Current design boundary
 

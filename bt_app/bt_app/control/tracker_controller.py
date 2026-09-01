@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import csv
 import math
 import threading
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from pathlib import Path
 
 from loguru import logger as log
 
@@ -19,7 +17,6 @@ from bt_app.parameters.generated import ParameterKey
 from bt_app.services import TrackerObservation
 
 
-DEFAULT_TRACKER_CSV_PATH = Path("logs/tracker_controller.csv")
 _VERTICAL_SPEED_TIMEOUT_S = 0.30
 _VERTICAL_ACCEL_LIMIT_M_S2 = 5.0
 
@@ -350,42 +347,10 @@ class LoopDiagnostics:
     ttc_prediction_age_s: float = 0.0
 
 
-TRACKER_CSV_HEADER = (
-    "sample_index", "time_monotonic_ns", "elapsed_s", "end_reason", "phase",
-    "tracker_id", "frame_id", "camera_timestamp_ns", "camera_received_at_s",
-    "camera_age_s", "new_camera_frame", "locked", "score", "bbox_x", "bbox_y",
-    "bbox_width", "bbox_height", "dx_norm", "dy_norm", "bbox_fill",
-    "scale_px", "log_scale", "scale_innovation", "scale_reason",
-    "filtered_log_scale_rate_hz", "inverse_ttc_measured_hz", "measured_ttc_s",
-    "effective_ttc_s", "ttc_prediction_age_s",
-    "roll_deg", "pitch_deg", "heading_deg", "attitude_age_s",
-    "altitude_m", "vertical_distance_m", "target_ttc_s", "inverse_ttc_target_hz",
-    "pitch_initial_deg", "pitch_raw_deg", "pitch_command_deg",
-    "roll_target_deg", "roll_command_deg",
-    "horizontal_alignment_scale",
-    "vertical_nominal_m_s", "vertical_alignment_m_s", "vertical_target_m_s",
-    "vertical_setpoint_m_s",
-    "vario_m_s", "vario_age_s", "vertical_error_m_s", "throttle_p_rc",
-    "throttle_i_rc", "raw_vertical_accel_m_s2",
-    "filtered_vertical_accel_m_s2", "throttle_d_rc",
-    "tilt_hover_rc", "throttle_command_rc", "yaw_rate_target_dps",
-    "yaw_rate_dps", "alignment_count",
-    "commit_count",
-    "commit_block_reason", "exit_requested", "exit_reason", "result_valid",
-    "result_reason", "ch1_roll", "ch2_pitch", "ch3_throttle", "ch4_yaw",
-    "ch5_arm", "ch6_angle", "ch7_aux3", "ch8_aux4",
-)
-
-
 class TrackerController:
     """Control visual closing with optical TTC and altitude/vario feedback."""
 
-    def __init__(
-        self,
-        parameters: Parameters,
-        *,
-        csv_path: str | Path | None = None,
-    ) -> None:
+    def __init__(self, parameters: Parameters) -> None:
         self._parameters = parameters
         self._config_lock = threading.Lock()
         self._config = TrackerConfig.from_parameters(parameters)
@@ -424,9 +389,6 @@ class TrackerController:
         self._heading_deg: float | None = None
         self._attitude_sample_time_s: float | None = None
         self._diagnostics = LoopDiagnostics()
-        self._csv_path = None if csv_path is None else Path(csv_path)
-        self._rows: list[dict[str, object]] = []
-        self._log_started_s: float | None = None
         parameters.on_parameter_changed.subscribe(self.on_parameter_changed)
 
     @property
@@ -578,8 +540,6 @@ class TrackerController:
         self._raw_vertical_accel_m_s2 = 0.0
         self._filtered_vertical_accel_m_s2 = 0.0
         self._last_update_s = now_s
-        self._rows = []
-        self._log_started_s = None
         log.info(
             "TTC tracker phase: acquisition -> align; pitch_deg={:.2f} "
             "horizontal_gate={:.3f} required_frames={} vario_m_s={:.3f}",
@@ -596,7 +556,6 @@ class TrackerController:
                 self._phase.value,
                 end_reason,
             )
-        self._export_log(end_reason)
         self._active = False
         self._exit_requested = False
         self._exit_reason = None
@@ -647,7 +606,7 @@ class TrackerController:
            estimate, but it cannot advance alignment or commit counters.
         6. Call ``_control()`` to handle ALIGN/TRACKING phase logic, optical TTC,
            pitch and yaw commands, and the vertical PI-D throttle command.
-        7. Record the returned result in the in-memory CSV diagnostics buffer.
+        7. Return the controller result to the application.
 
         ``exit_requested`` is intentionally only a request.  The application
         state machine owns the actual TRACK-to-ALT_HOLD transition and later
@@ -664,7 +623,7 @@ class TrackerController:
                 D -- Yes --> E[Hold frozen RC command]
                 E --> F{Commit deadline reached?}
                 F -- Yes --> G[Request TRACK exit]
-                F -- No --> H[Record result]
+                F -- No --> H[Return result]
                 G --> H
                 D -- No --> I{Vario and altitude fresh?}
                 I -- No --> J[Request exit and safe hover]
@@ -675,7 +634,7 @@ class TrackerController:
                 M --> H
                 L -- Yes --> N[_control: phase, TTC, pitch, yaw, throttle]
                 N --> H
-                H --> O[Return TrackerControlResult]
+                H --> O[TrackerControlResult]
         ```
 
         Args:
@@ -698,7 +657,7 @@ class TrackerController:
                 self._completion_latched = True
                 self._request_exit("commit complete")
             result = self._frozen_result or self._safe_result(config, "commit unavailable")
-            return self._record(result, now_s)
+            return result
         speed, speed_age, speed_valid = self._validate_vario(
             now_s,
             vertical_speed_m_s,
@@ -708,7 +667,7 @@ class TrackerController:
         self._altitude_sample_time_s = vertical_speed_sample_time_s
         if not speed_valid or speed is None or self._altitude_m is None:
             self._request_exit("altitude or vario stale")
-            return self._record(self._safe_result(config, "altitude or vario stale"), now_s)
+            return self._safe_result(config, "altitude or vario stale")
         self._update_vertical_acceleration(
             speed,
             vertical_speed_sample_time_s,
@@ -717,11 +676,11 @@ class TrackerController:
         observation = self._latest_control_observation
         if observation is None or now_s - observation.received_at_s > config.target_timeout_s:
             self._request_exit("tracker observation stale")
-            return self._record(self._safe_result(config, "tracker observation stale"), now_s)
+            return self._safe_result(config, "tracker observation stale")
         dt_s = max(0.0, now_s - (self._last_update_s or now_s))
         self._last_update_s = now_s
         result = self._control(config, observation, speed, speed_age, dt_s, now_s)
-        return self._record(result, now_s)
+        return result
 
     def _control(
         self,
@@ -1172,119 +1131,3 @@ class TrackerController:
         channels[RCChannel.AUX3] = RC_MIN
         channels[RCChannel.AUX4] = RC_MIN
         return tuple(channels)
-
-    def _record(self, result: TrackerControlResult, now_s: float) -> TrackerControlResult:
-        if self._csv_path is None:
-            return result
-        if self._log_started_s is None:
-            self._log_started_s = now_s
-        observation = self._latest_observation
-        message = None if observation is None else observation.result
-        config = self._config_snapshot()
-        d = self._diagnostics
-        channels = result.channels
-        row = {
-            "sample_index": len(self._rows),
-            "time_monotonic_ns": round(now_s * 1_000_000_000),
-            "elapsed_s": now_s - self._log_started_s,
-            "end_reason": "",
-            "phase": result.phase.value,
-            "tracker_id": None if message is None else message.tracker_id,
-            "frame_id": None if message is None else message.frame_id,
-            "camera_timestamp_ns": None if message is None else message.timestamp_ns,
-            "camera_received_at_s": None if observation is None else observation.received_at_s,
-            "camera_age_s": None if observation is None else now_s - observation.received_at_s,
-            "new_camera_frame": d.new_camera_frame,
-            "locked": None if message is None else message.locked,
-            "score": None if message is None else message.score,
-            "bbox_x": None if message is None else message.bbox_x,
-            "bbox_y": None if message is None else message.bbox_y,
-            "bbox_width": None if message is None else message.bbox_width,
-            "bbox_height": None if message is None else message.bbox_height,
-            "dx_norm": result.error_x,
-            "dy_norm": result.error_y,
-            "bbox_fill": d.bbox_fill,
-            "scale_px": d.scale_px,
-            "log_scale": d.log_scale,
-            "scale_innovation": d.scale_innovation,
-            "scale_reason": d.scale_reason,
-            "filtered_log_scale_rate_hz": self._filter.rate_hz,
-            "inverse_ttc_measured_hz": d.inverse_ttc_measured_hz,
-            "measured_ttc_s": d.measured_ttc_s,
-            "effective_ttc_s": d.effective_ttc_s,
-            "ttc_prediction_age_s": d.ttc_prediction_age_s,
-            "roll_deg": self._roll_deg,
-            "pitch_deg": self._attitude_pitch_deg,
-            "heading_deg": self._heading_deg,
-            "attitude_age_s": (
-                None
-                if self._attitude_sample_time_s is None
-                else now_s - self._attitude_sample_time_s
-            ),
-            "altitude_m": self._altitude_m,
-            "vertical_distance_m": d.vertical_distance_m,
-            "target_ttc_s": d.target_ttc_s,
-            "inverse_ttc_target_hz": d.inverse_ttc_target_hz,
-            "pitch_initial_deg": config.pitch_initial_deg,
-            "pitch_raw_deg": d.pitch_raw_deg,
-            "pitch_command_deg": result.pitch_command_deg,
-            "roll_target_deg": d.roll_target_deg,
-            "roll_command_deg": result.roll_command_deg,
-            "horizontal_alignment_scale": d.horizontal_alignment_scale,
-            "vertical_nominal_m_s": d.vertical_nominal_m_s,
-            "vertical_alignment_m_s": d.vertical_alignment_m_s,
-            "vertical_target_m_s": result.vertical_speed_target_m_s,
-            "vertical_setpoint_m_s": result.vertical_speed_setpoint_m_s,
-            "vario_m_s": result.drone_vertical_speed_m_s,
-            "vario_age_s": result.drone_vertical_speed_age_s,
-            "vertical_error_m_s": result.vertical_speed_error_m_s,
-            "throttle_p_rc": result.throttle_damping_correction_rc,
-            "throttle_i_rc": self._vertical_integral_rc,
-            "raw_vertical_accel_m_s2": d.raw_vertical_accel_m_s2,
-            "filtered_vertical_accel_m_s2": d.filtered_vertical_accel_m_s2,
-            "throttle_d_rc": d.throttle_d_rc,
-            "tilt_hover_rc": (
-                None
-                if result.vertical_speed_error_m_s is None
-                else channels[RCChannel.THROTTLE] - result.throttle_correction_rc
-            ),
-            "throttle_command_rc": channels[RCChannel.THROTTLE],
-            "yaw_rate_target_dps": d.yaw_rate_target_dps,
-            "yaw_rate_dps": result.yaw_rate_dps,
-            "alignment_count": self._alignment_count,
-            "commit_count": self._commit_count,
-            "commit_block_reason": result.terminal_block_reason,
-            "exit_requested": self._exit_requested,
-            "exit_reason": self._exit_reason,
-            "result_valid": result.valid,
-            "result_reason": result.reason,
-            "ch1_roll": channels[0], "ch2_pitch": channels[1],
-            "ch3_throttle": channels[2], "ch4_yaw": channels[3],
-            "ch5_arm": channels[4], "ch6_angle": channels[5],
-            "ch7_aux3": channels[6], "ch8_aux4": channels[7],
-        }
-        self._rows.append(row)
-        return result
-
-    def _export_log(self, end_reason: str) -> None:
-        if self._csv_path is None or not self._rows:
-            return
-        temporary = self._csv_path.with_name(f".{self._csv_path.name}.tmp")
-        try:
-            self._csv_path.parent.mkdir(parents=True, exist_ok=True)
-            with temporary.open("w", encoding="utf-8", newline="") as stream:
-                writer = csv.DictWriter(stream, fieldnames=TRACKER_CSV_HEADER)
-                writer.writeheader()
-                for row in self._rows:
-                    row["end_reason"] = end_reason
-                    writer.writerow(row)
-            temporary.replace(self._csv_path)
-        except OSError:
-            log.exception("Failed to export TTC tracker CSV {}", self._csv_path)
-            try:
-                temporary.unlink(missing_ok=True)
-            except OSError:
-                log.exception("Failed to remove temporary TTC CSV {}", temporary)
-        finally:
-            self._rows = []
-            self._log_started_s = None

@@ -86,4 +86,6 @@ The controller then freezes the current RC command for `TRK_COMMIT_S` and reques
 
 ## Diagnostics
 
-`logs/tracker_controller.csv` is written when tracking stops. It records the raw bbox and frame timing, filter state and rejection reason, measured and target TTC, altitude/vario and vertical loop terms, pitch/yaw commands, commit state, exit reason, and all eight final RC channels. The next tuning pass should use this file together with Gazebo ground truth, which remains outside the controller for milestone 1.
+The controller performs no diagnostic file I/O. Use the application blackbox
+for offboard analysis of tracker observations, vehicle telemetry, and final RC
+output.

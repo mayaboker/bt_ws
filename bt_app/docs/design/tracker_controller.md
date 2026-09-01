@@ -49,27 +49,11 @@ The tracker controller runs synchronously in the existing 50 Hz application
 loop. ZMQ reception continues on its existing receiver thread; it only replaces
 the immutable latest estimate. No additional controller thread is needed.
 
-## Buffered controller trace
+## Flight trace
 
-Each TRACK session buffers one analysis row for every controller update. The
-trace separates the newest observed target result from the last valid estimate
-that drives a held command during visual-loss grace. It includes monotonic
-timing, target geometry, desired `vx_m_s`/`vy_m_s`, controller internals, active
-parameters, phase and exit flags, measured FC vertical speed and freshness,
-the raw/capped/slew-limited vertical-speed requests, velocity error,
-visual/damping throttle terms, and all eight proposed RC channels.
-
-No file I/O occurs while TRACK is actively producing commands. When TRACK
-exits, `stop_tracking()` synchronously overwrites
-`logs/tracker_controller.csv` through an atomic temporary-file replacement.
-The App supplies an end reason such as target loss, commit completion, tracker
-disable, manual override, or failsafe. Export failures are logged without
-preventing the requested state transition.
-
-The trace intentionally records proposed controller output rather than final
-sanitized/dispatched RC. Vertical speed is measured FC telemetry, but horizontal
-velocity and position remain unavailable, so the trace still cannot establish
-the drone's actual trajectory.
+The controller does not buffer or write diagnostic files. Flight telemetry,
+tracker observations, and dispatched RC output are recorded by the application
+blackbox when blackbox recording is enabled.
 
 ## Proposed interfaces
 

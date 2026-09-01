@@ -649,21 +649,3 @@ def test_large_clipped_bbox_enters_commit_without_fresh_ttc():
     assert result.phase == TrackerPhase.COMMIT
     assert result.terminal_ready
     assert result.terminal_block_reason is None
-
-
-def test_tracking_stop_exports_ttc_diagnostics(tmp_path):
-    path = tmp_path / "tracker.csv"
-    controller = TrackerController(FakeParameters(), csv_path=path)
-    acquire(controller)
-    controller.update(
-        now_s=0.49,
-        vertical_speed_m_s=0.0,
-        vertical_speed_sample_time_s=0.49,
-    )
-    controller.stop_tracking(end_reason="test complete")
-
-    text = path.read_text(encoding="utf-8")
-    assert "inverse_ttc_measured_hz" in text.splitlines()[0]
-    assert "effective_ttc_s" in text.splitlines()[0]
-    assert "ttc_prediction_age_s" in text.splitlines()[0]
-    assert "test complete" in text.splitlines()[1]

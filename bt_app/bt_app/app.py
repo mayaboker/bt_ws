@@ -9,7 +9,6 @@ import threading
 from enum import Enum, auto
 
 from bt_app.control import (
-    DEFAULT_TRACKER_CSV_PATH,
     FailSafeController,
     TakeoffController,
     ARMController,
@@ -180,10 +179,7 @@ class App:
         self.controllers[RobotState.ALT_HOLD] = HoverYawController(parameters)
 
         # red-target visual controller
-        self.controllers[RobotState.TRACK] = TrackerController(
-            parameters,
-            csv_path=DEFAULT_TRACKER_CSV_PATH,
-        )
+        self.controllers[RobotState.TRACK] = TrackerController(parameters)
 
     # def register_joy_interrupt(self, joy_adapter):
     #     joy_adapter.register_interrupt(AETR1234.AUX4, JoyInterrupt.TAKEOFF_REQUEST)
