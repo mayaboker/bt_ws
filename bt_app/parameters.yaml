@@ -127,7 +127,7 @@ parameters:
       max: 200.0
   TAKEOFF_ALT:
     type: float
-    default: 20.0
+    default: 10.0
     limits:
       min: 0.0
       max: 200.0

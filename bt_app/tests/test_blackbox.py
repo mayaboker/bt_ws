@@ -6,11 +6,18 @@ from pathlib import Path
 
 from bt_msgs import TrackerResultMessage
 import pyarrow.parquet as pq
+import pytest
 
 import bt_app.blackbox as blackbox_module
-from bt_app.blackbox import BlackboxRecorder, FRAME_SCHEMA, NullBlackboxRecorder
+from bt_app.blackbox import (
+    BlackboxRecorder,
+    FRAME_SCHEMA,
+    ODOMETRY_SCHEMA,
+    NullBlackboxRecorder,
+)
 from bt_app.common import InternalJoystick, RobotState
 from bt_app.context import Context
+from bt_app.mavlink_wrapper import OdometryVelocitySample
 from bt_app.services.tracker_result_store import TrackerObservation
 
 
@@ -55,6 +62,21 @@ def session_directory(path: Path) -> Path:
     sessions = list(path.glob("*_blackbox"))
     assert len(sessions) == 1
     return sessions[0]
+
+
+def make_odometry(*, received_monotonic_ns: int) -> OdometryVelocitySample:
+    return OdometryVelocitySample(
+        source_time_epoch_us=1_788_086_400_123_456,
+        received_monotonic_ns=received_monotonic_ns,
+        mavlink_sequence=17,
+        reset_counter=2,
+        velocity_body_x_m_s=1.0,
+        velocity_body_y_m_s=2.0,
+        velocity_body_z_m_s=3.0,
+        velocity_north_m_s=4.0,
+        velocity_east_m_s=5.0,
+        velocity_down_m_s=6.0,
+    )
 
 
 def test_records_only_armed_interval_as_combined_parquet_frame(tmp_path):
@@ -106,7 +128,78 @@ def test_records_only_armed_interval_as_combined_parquet_frame(tmp_path):
     assert metadata["end_reason"] == "disarmed"
     assert metadata["end_utc_ns"] == 1_788_086_400_123_000_000
     assert metadata["frame_count"] == 2
+    assert metadata["odometry_count"] == 0
+    assert metadata["dropped_odometry"] == 0
+    assert metadata["chunks"][0]["odometry"] is None
     assert metadata["parameters"] == {"HOV_BASELINE": 1660}
+
+
+def test_records_odometry_only_during_armed_session(tmp_path):
+    recorder = make_recorder(tmp_path)
+    recorder.start()
+    recorder.record_odometry(make_odometry(received_monotonic_ns=9_900_000_000))
+    context = make_context(armed=True)
+    recorder.record(context, None, now_s=10.0)
+    recorder.record_odometry(make_odometry(received_monotonic_ns=10_100_000_000))
+    context.armed = False
+    recorder.record(context, None, now_s=10.2)
+    recorder.record_odometry(make_odometry(received_monotonic_ns=10_300_000_000))
+    recorder.stop()
+
+    session = session_directory(tmp_path)
+    table = pq.read_table(session / "odometry-000000.parquet")
+    assert table.schema == ODOMETRY_SCHEMA
+    assert table.to_pylist() == [
+        {
+            "schema_version": 2,
+            "sample_index": 0,
+            "source_time_epoch_us": 1_788_086_400_123_456,
+            "received_monotonic_ns": 10_100_000_000,
+            "elapsed_s": pytest.approx(0.1),
+            "mavlink_sequence": 17,
+            "reset_counter": 2,
+            "velocity_body_x_m_s": 1.0,
+            "velocity_body_y_m_s": 2.0,
+            "velocity_body_z_m_s": 3.0,
+            "velocity_north_m_s": 4.0,
+            "velocity_east_m_s": 5.0,
+            "velocity_down_m_s": 6.0,
+        }
+    ]
+    metadata = json.loads((session / "metadata.json").read_text())
+    assert metadata["schema_version"] == 2
+    assert metadata["odometry_count"] == 1
+    assert metadata["dropped_odometry"] == 0
+    assert metadata["chunks"][0]["odometry"] == "odometry-000000.parquet"
+
+
+def test_odometry_can_rotate_into_chunk_without_frames(tmp_path):
+    recorder = make_recorder(tmp_path, chunk_duration_s=0.05)
+    recorder.start()
+    context = make_context(armed=True)
+    recorder.record(context, None, now_s=10.0)
+    recorder.record_odometry(make_odometry(received_monotonic_ns=10_060_000_000))
+    context.armed = False
+    recorder.record(context, None, now_s=10.1)
+    recorder.stop()
+
+    metadata = json.loads(
+        (session_directory(tmp_path) / "metadata.json").read_text()
+    )
+    assert metadata["chunks"] == [
+        {
+            "events": "events-000000.parquet",
+            "frames": "frames-000000.parquet",
+            "index": 0,
+            "odometry": None,
+        },
+        {
+            "events": None,
+            "frames": None,
+            "index": 1,
+            "odometry": "odometry-000001.parquet",
+        },
+    ]
 
 
 def test_parameter_snapshot_is_taken_when_flight_arms(tmp_path):
@@ -218,13 +311,25 @@ def test_start_recovers_interrupted_session_and_removes_temporary_files(tmp_path
 def test_queue_overflow_drops_frame_without_blocking(tmp_path):
     recorder = make_recorder(tmp_path, queue_size=1)
     recorder._enabled = True
-    for _ in range(recorder._frame_capacity):
-        recorder._queue.put_nowait({"occupied": True})
-
     recorder._put_frame({"sample": 1})
+    recorder._put_frame({"sample": 2})
 
     assert recorder.dropped_frames == 1
     assert recorder._queue.qsize() == recorder._frame_capacity
+
+
+def test_queue_evicts_odometry_before_dropping_frames(tmp_path):
+    recorder = make_recorder(tmp_path, queue_size=2)
+    recorder._put_odometry({"sample": 1})
+    recorder._put_odometry({"sample": 2})
+
+    recorder._put_frame({"sample": 3})
+    recorder._put_frame({"sample": 4})
+    recorder._put_frame({"sample": 5})
+
+    assert recorder.dropped_odometry == 2
+    assert recorder.dropped_frames == 1
+    assert recorder._queue.qsize() == 2
 
 
 def test_capture_error_is_contained_and_disables_recording(tmp_path, monkeypatch):
@@ -269,6 +374,7 @@ def test_null_blackbox_never_creates_output(tmp_path):
     recorder = NullBlackboxRecorder()
     recorder.start()
     recorder.record(make_context(armed=True), None, now_s=1.0)
+    recorder.record_odometry(make_odometry(received_monotonic_ns=1_000_000_000))
     recorder.stop()
 
     assert list(tmp_path.iterdir()) == []

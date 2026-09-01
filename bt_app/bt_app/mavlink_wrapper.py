@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Callable, ClassVar
 
 from loguru import logger as log
-from pymavlink import mavutil
+from pymavlink.dialects.v20 import ardupilotmega as mavlink
 
 from bt_app.common import MavSeverity
 from bt_app.context import Context
@@ -21,7 +21,7 @@ QOPENHD_ADDR = ("127.0.0.1", 14550)
 LOCAL_ADDR = ("0.0.0.0", 14551)
 
 SYS_ID = 1
-COMP_ID = mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1
+COMP_ID = mavlink.MAV_COMP_ID_AUTOPILOT1
 GLOBAL_POSITION_INT_INTERVAL_S = 0.5
 ATTITUDE_INTERVAL_S = 0.5
 SYS_STATUS_INTERVAL_S = 2.0
@@ -63,9 +63,9 @@ def decode_odometry_velocity(msg, *, received_monotonic_ns: int) -> OdometryVelo
 
     if msg.get_type() != "ODOMETRY":
         raise ValueError("message is not ODOMETRY")
-    if msg.frame_id != mavutil.mavlink.MAV_FRAME_LOCAL_NED:
+    if msg.frame_id != mavlink.MAV_FRAME_LOCAL_NED:
         raise ValueError(f"unexpected odometry frame_id {msg.frame_id}")
-    if msg.child_frame_id != mavutil.mavlink.MAV_FRAME_BODY_FRD:
+    if msg.child_frame_id != mavlink.MAV_FRAME_BODY_FRD:
         raise ValueError(f"unexpected odometry child_frame_id {msg.child_frame_id}")
 
     source_time_epoch_us = int(msg.time_usec)
@@ -113,9 +113,9 @@ def decode_odometry_velocity(msg, *, received_monotonic_ns: int) -> OdometryVelo
 
 
 def make_base_mode(armed: bool) -> int:
-    base_mode = mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
+    base_mode = mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
     if armed:
-        base_mode |= mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
+        base_mode |= mavlink.MAV_MODE_FLAG_SAFETY_ARMED
     return base_mode
 
 
@@ -254,10 +254,10 @@ class MavlinkService:
         self._started = False
         self._socket = None
         self._boot_time_s = time.monotonic()
-        self._mav = mavutil.mavlink.MAVLink(
+        self._mav = mavlink.MAVLink(
             None, srcSystem=SYS_ID, srcComponent=COMP_ID
         )
-        self._parser = mavutil.mavlink.MAVLink(None)
+        self._parser = mavlink.MAVLink(None)
         self._parser.robust_parsing = True
         self._parameter_protocol = (
             MavlinkParameterProtocol(
@@ -355,11 +355,11 @@ class MavlinkService:
             return
 
         msg = self._mav.heartbeat_encode(
-            mavutil.mavlink.MAV_TYPE_GENERIC,
-            mavutil.mavlink.MAV_AUTOPILOT_GENERIC,
+            mavlink.MAV_TYPE_GENERIC,
+            mavlink.MAV_AUTOPILOT_GENERIC,
             make_base_mode(self.context.armed),
             int(self.context.state),
-            mavutil.mavlink.MAV_STATE_ACTIVE,
+            mavlink.MAV_STATE_ACTIVE,
         )
         self._socket.sendto(msg.pack(self._mav), self.qopenhd_addr)
 
@@ -529,7 +529,7 @@ class MavlinkService:
                     msg = self._parser.parse_char(bytes([byte]))
                     if msg is not None:
                         self._handle_received_message(msg, addr)
-            except mavutil.mavlink.MAVError as exc:
+            except mavlink.MAVError as exc:
                 log.warning("Discarding malformed MAVLink packet from {}: {}", addr, exc)
 
     def _handle_received_message(self, msg, addr: tuple[str, int]) -> None:

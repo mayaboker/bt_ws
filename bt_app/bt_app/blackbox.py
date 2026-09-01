@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import platform
-import queue
 import subprocess
 import threading
 import time
@@ -21,10 +21,11 @@ import pyarrow.parquet as pq
 
 from bt_app._version import __version__
 from bt_app.context import Context
+from bt_app.mavlink_wrapper import OdometryVelocitySample
 from bt_app.services.tracker_result_store import TrackerObservation
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 FRAME_SCHEMA = pa.schema(
     [
         ("schema_version", pa.int16()),
@@ -74,6 +75,23 @@ EVENT_SCHEMA = pa.schema(
         ("current_state_name", pa.string()),
     ]
 )
+ODOMETRY_SCHEMA = pa.schema(
+    [
+        ("schema_version", pa.int16()),
+        ("sample_index", pa.int64()),
+        ("source_time_epoch_us", pa.int64()),
+        ("received_monotonic_ns", pa.int64()),
+        ("elapsed_s", pa.float64()),
+        ("mavlink_sequence", pa.uint8()),
+        ("reset_counter", pa.uint8()),
+        ("velocity_body_x_m_s", pa.float64()),
+        ("velocity_body_y_m_s", pa.float64()),
+        ("velocity_body_z_m_s", pa.float64()),
+        ("velocity_north_m_s", pa.float64()),
+        ("velocity_east_m_s", pa.float64()),
+        ("velocity_down_m_s", pa.float64()),
+    ]
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +101,7 @@ class _StartFlight:
     monotonic_ns: int
     utc_ns: int
     dropped_frames_start: int
+    dropped_odometry_start: int
     writer_errors_start: int
 
 
@@ -99,6 +118,70 @@ class _StopWriter:
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class _FrameRecord:
+    row: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class _OdometryRecord:
+    row: dict[str, Any]
+
+
+class _TelemetryBuffer:
+    """Bounded FIFO that evicts odometry before rejecting control frames."""
+
+    def __init__(self, capacity: int) -> None:
+        self.capacity = capacity
+        self._items: deque[Any] = deque()
+        self._telemetry_count = 0
+        self._condition = threading.Condition()
+
+    def put_frame(self, item: _FrameRecord) -> tuple[bool, bool]:
+        with self._condition:
+            evicted_odometry = False
+            if self._telemetry_count >= self.capacity:
+                for index, queued in enumerate(self._items):
+                    if isinstance(queued, _OdometryRecord):
+                        del self._items[index]
+                        self._telemetry_count -= 1
+                        evicted_odometry = True
+                        break
+                else:
+                    return False, False
+            self._items.append(item)
+            self._telemetry_count += 1
+            self._condition.notify()
+            return True, evicted_odometry
+
+    def put_odometry(self, item: _OdometryRecord) -> bool:
+        with self._condition:
+            if self._telemetry_count >= self.capacity:
+                return False
+            self._items.append(item)
+            self._telemetry_count += 1
+            self._condition.notify()
+            return True
+
+    def put_control(self, item: Any) -> None:
+        with self._condition:
+            self._items.append(item)
+            self._condition.notify()
+
+    def get(self) -> Any:
+        with self._condition:
+            while not self._items:
+                self._condition.wait()
+            item = self._items.popleft()
+            if isinstance(item, (_FrameRecord, _OdometryRecord)):
+                self._telemetry_count -= 1
+            return item
+
+    def qsize(self) -> int:
+        with self._condition:
+            return len(self._items)
+
+
 class NullBlackboxRecorder:
     def start(self) -> None:
         return
@@ -110,6 +193,9 @@ class NullBlackboxRecorder:
         *,
         now_s: float | None = None,
     ) -> None:
+        return
+
+    def record_odometry(self, sample: OdometryVelocitySample) -> None:
         return
 
     def stop(self, timeout: float | None = 2.0) -> None:
@@ -137,9 +223,7 @@ class BlackboxRecorder:
         self.directory = Path(directory)
         self.chunk_duration_s = float(chunk_duration_s)
         self._frame_capacity = queue_size
-        # Reserve space for start/end/stop controls so lifecycle transitions do
-        # not compete with telemetry frames or block the flight thread.
-        self._queue: queue.Queue[Any] = queue.Queue(maxsize=queue_size + 4)
+        self._queue = _TelemetryBuffer(queue_size)
         self._clock = clock
         self._wall_clock_ns = wall_clock_ns
         self._vehicle_config = _json_safe(asdict(vehicle_config))
@@ -150,10 +234,12 @@ class BlackboxRecorder:
         self._session_id: str | None = None
         self._session_start_ns = 0
         self._sample_index = 0
+        self._odometry_sample_index = 0
         self._last_altitude_sample_s: float | None = None
         self._last_attitude_sample_s: float | None = None
         self._last_tracker_key: tuple[int, int] | None = None
         self.dropped_frames = 0
+        self.dropped_odometry = 0
         self.writer_errors = 0
 
     def start(self) -> None:
@@ -196,6 +282,35 @@ class BlackboxRecorder:
             self._enabled = False
             log.exception("Blackbox frame capture disabled after error: {}", exc)
 
+    def record_odometry(self, sample: OdometryVelocitySample) -> None:
+        if not self._enabled or not self._flight_active:
+            return
+        try:
+            row = {
+                "schema_version": SCHEMA_VERSION,
+                "sample_index": self._odometry_sample_index,
+                "source_time_epoch_us": int(sample.source_time_epoch_us),
+                "received_monotonic_ns": int(sample.received_monotonic_ns),
+                "elapsed_s": (
+                    sample.received_monotonic_ns - self._session_start_ns
+                )
+                / 1e9,
+                "mavlink_sequence": int(sample.mavlink_sequence),
+                "reset_counter": int(sample.reset_counter),
+                "velocity_body_x_m_s": float(sample.velocity_body_x_m_s),
+                "velocity_body_y_m_s": float(sample.velocity_body_y_m_s),
+                "velocity_body_z_m_s": float(sample.velocity_body_z_m_s),
+                "velocity_north_m_s": float(sample.velocity_north_m_s),
+                "velocity_east_m_s": float(sample.velocity_east_m_s),
+                "velocity_down_m_s": float(sample.velocity_down_m_s),
+            }
+            self._odometry_sample_index += 1
+            self._put_odometry(row)
+        except Exception as exc:
+            self.writer_errors += 1
+            self._enabled = False
+            log.exception("Blackbox odometry capture disabled after error: {}", exc)
+
     def stop(self, timeout: float | None = 2.0) -> None:
         self._enabled = False
         if self._flight_active:
@@ -208,6 +323,10 @@ class BlackboxRecorder:
             self._thread = None
         if self.dropped_frames:
             log.warning("Blackbox dropped {} frame(s)", self.dropped_frames)
+        if self.dropped_odometry:
+            log.warning(
+                "Blackbox dropped {} odometry sample(s)", self.dropped_odometry
+            )
 
     def _begin_flight(self, now_ns: int) -> None:
         utc_ns = int(self._wall_clock_ns())
@@ -220,6 +339,7 @@ class BlackboxRecorder:
         self._session_id = session_id
         self._session_start_ns = now_ns
         self._sample_index = 0
+        self._odometry_sample_index = 0
         self._last_altitude_sample_s = None
         self._last_attitude_sample_s = None
         self._last_tracker_key = None
@@ -230,6 +350,7 @@ class BlackboxRecorder:
                 now_ns,
                 utc_ns,
                 self.dropped_frames,
+                self.dropped_odometry,
                 self.writer_errors,
             )
         )
@@ -338,21 +459,18 @@ class BlackboxRecorder:
         }
 
     def _put_frame(self, frame: dict[str, Any]) -> None:
-        if self._queue.qsize() >= self._frame_capacity:
-            self.dropped_frames += 1
-            return
-        try:
-            self._queue.put_nowait(frame)
-        except queue.Full:
+        accepted, evicted_odometry = self._queue.put_frame(_FrameRecord(frame))
+        if evicted_odometry:
+            self.dropped_odometry += 1
+        if not accepted:
             self.dropped_frames += 1
 
+    def _put_odometry(self, row: dict[str, Any]) -> None:
+        if not self._queue.put_odometry(_OdometryRecord(row)):
+            self.dropped_odometry += 1
+
     def _put_control(self, item: Any) -> None:
-        try:
-            self._queue.put_nowait(item)
-        except queue.Full:
-            self.writer_errors += 1
-            self._enabled = False
-            log.error("Blackbox lifecycle queue is full; recording disabled")
+        self._queue.put_control(item)
 
     def _run(self) -> None:
         session: _SessionWriter | None = None
@@ -361,7 +479,13 @@ class BlackboxRecorder:
             try:
                 if isinstance(item, _StopWriter):
                     if session is not None:
-                        session.finish(clean=False, end_monotonic_ns=time.monotonic_ns())
+                        session.finish(
+                            clean=False,
+                            end_monotonic_ns=time.monotonic_ns(),
+                            dropped_frames=self.dropped_frames,
+                            dropped_odometry=self.dropped_odometry,
+                            writer_errors=self.writer_errors,
+                        )
                     return
                 if isinstance(item, _StartFlight):
                     session = _SessionWriter(
@@ -381,17 +505,25 @@ class BlackboxRecorder:
                             end_monotonic_ns=item.monotonic_ns,
                             end_utc_ns=item.utc_ns,
                             dropped_frames=self.dropped_frames,
+                            dropped_odometry=self.dropped_odometry,
                             writer_errors=self.writer_errors,
                         )
                         session = None
-                elif session is not None:
-                    session.append(item)
+                elif session is not None and isinstance(item, _FrameRecord):
+                    session.append_frame(item.row)
+                elif session is not None and isinstance(item, _OdometryRecord):
+                    session.append_odometry(item.row)
             except Exception as exc:
                 self.writer_errors += 1
                 self._enabled = False
                 log.exception("Blackbox writer failed: {}", exc)
                 if session is not None:
-                    session.fail(exc, self.dropped_frames, self.writer_errors)
+                    session.fail(
+                        exc,
+                        self.dropped_frames,
+                        self.dropped_odometry,
+                        self.writer_errors,
+                    )
                     session = None
 
     def _recover_interrupted_sessions(self) -> None:
@@ -425,10 +557,13 @@ class _SessionWriter:
         self.start_monotonic_ns = start.monotonic_ns
         self.rows: list[dict[str, Any]] = []
         self.events: list[dict[str, Any]] = []
+        self.odometry_rows: list[dict[str, Any]] = []
         self.chunk_index = 0
         self.frame_count = 0
+        self.odometry_count = 0
         self.previous_state: tuple[int, str] | None = None
         self.dropped_frames_start = start.dropped_frames_start
+        self.dropped_odometry_start = start.dropped_odometry_start
         self.writer_errors_start = start.writer_errors_start
         self.metadata = {
             "schema_version": SCHEMA_VERSION,
@@ -446,13 +581,15 @@ class _SessionWriter:
         }
         _write_json_atomic(self.directory / "metadata.json", self.metadata)
 
-    def append(self, row: dict[str, Any]) -> None:
+    def _rotate_if_needed(self, elapsed_s: float) -> None:
         if (
-            self.rows
-            and row["elapsed_s"]
-            >= (self.chunk_index + 1) * self.chunk_duration_s
+            (self.rows or self.odometry_rows)
+            and elapsed_s >= (self.chunk_index + 1) * self.chunk_duration_s
         ):
             self._flush_chunk()
+
+    def append_frame(self, row: dict[str, Any]) -> None:
+        self._rotate_if_needed(row["elapsed_s"])
         state = (row["state_id"], row["state_name"])
         if state != self.previous_state:
             previous = self.previous_state
@@ -471,15 +608,22 @@ class _SessionWriter:
         self.rows.append(row)
         self.frame_count += 1
 
+    def append_odometry(self, row: dict[str, Any]) -> None:
+        self._rotate_if_needed(row["elapsed_s"])
+        self.odometry_rows.append(row)
+        self.odometry_count += 1
+
     def _flush_chunk(self) -> None:
-        if not self.rows:
+        if not self.rows and not self.odometry_rows:
             return
         part = self.chunk_index
-        frame_name = f"frames-{part:06d}.parquet"
-        _write_parquet_atomic(
-            self.directory / frame_name,
-            pa.Table.from_pylist(self.rows, schema=FRAME_SCHEMA),
-        )
+        frame_name = None
+        if self.rows:
+            frame_name = f"frames-{part:06d}.parquet"
+            _write_parquet_atomic(
+                self.directory / frame_name,
+                pa.Table.from_pylist(self.rows, schema=FRAME_SCHEMA),
+            )
         event_name = None
         if self.events:
             event_name = f"events-{part:06d}.parquet"
@@ -487,11 +631,24 @@ class _SessionWriter:
                 self.directory / event_name,
                 pa.Table.from_pylist(self.events, schema=EVENT_SCHEMA),
             )
+        odometry_name = None
+        if self.odometry_rows:
+            odometry_name = f"odometry-{part:06d}.parquet"
+            _write_parquet_atomic(
+                self.directory / odometry_name,
+                pa.Table.from_pylist(self.odometry_rows, schema=ODOMETRY_SCHEMA),
+            )
         self.metadata["chunks"].append(
-            {"index": part, "frames": frame_name, "events": event_name}
+            {
+                "index": part,
+                "frames": frame_name,
+                "events": event_name,
+                "odometry": odometry_name,
+            }
         )
         self.rows.clear()
         self.events.clear()
+        self.odometry_rows.clear()
         self.chunk_index += 1
         _write_json_atomic(self.directory / "metadata.json", self.metadata)
 
@@ -502,6 +659,7 @@ class _SessionWriter:
         end_monotonic_ns: int,
         end_utc_ns: int | None = None,
         dropped_frames: int = 0,
+        dropped_odometry: int = 0,
         writer_errors: int = 0,
     ) -> None:
         self._flush_chunk()
@@ -512,23 +670,37 @@ class _SessionWriter:
                 "end_monotonic_ns": end_monotonic_ns,
                 "end_utc_ns": end_utc_ns,
                 "frame_count": self.frame_count,
+                "odometry_count": self.odometry_count,
                 "dropped_frames": max(
                     0, dropped_frames - self.dropped_frames_start
+                ),
+                "dropped_odometry": max(
+                    0, dropped_odometry - self.dropped_odometry_start
                 ),
                 "writer_errors": max(0, writer_errors - self.writer_errors_start),
             }
         )
         _write_json_atomic(self.directory / "metadata.json", self.metadata)
 
-    def fail(self, exc: Exception, dropped_frames: int, writer_errors: int) -> None:
+    def fail(
+        self,
+        exc: Exception,
+        dropped_frames: int,
+        dropped_odometry: int,
+        writer_errors: int,
+    ) -> None:
         self.metadata.update(
             {
                 "status": "unclean",
                 "end_reason": "writer_error",
                 "error": str(exc),
                 "frame_count": self.frame_count,
+                "odometry_count": self.odometry_count,
                 "dropped_frames": max(
                     0, dropped_frames - self.dropped_frames_start
+                ),
+                "dropped_odometry": max(
+                    0, dropped_odometry - self.dropped_odometry_start
                 ),
                 "writer_errors": max(0, writer_errors - self.writer_errors_start),
             }

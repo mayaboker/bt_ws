@@ -89,11 +89,6 @@ class AppServices:
             on_resume=on_resume,
             on_failure=on_failure,
         )
-        mavlink = MavlinkService(
-            context=context,
-            parameter_service=parameters.service,
-            qopenhd_addr=(config.gcs_ip, config.gcs_port),
-        )
         blackbox = (
             BlackboxRecorder(
                 config.blackbox_directory,
@@ -104,6 +99,12 @@ class AppServices:
             )
             if config.blackbox_enabled
             else NullBlackboxRecorder()
+        )
+        mavlink = MavlinkService(
+            context=context,
+            parameter_service=parameters.service,
+            qopenhd_addr=(config.gcs_ip, config.gcs_port),
+            on_odometry=blackbox.record_odometry,
         )
         manual_land = ManualLandService(
             context=context,
@@ -143,8 +144,8 @@ class AppServices:
             self._start("visual bridge manager", self.visual_bridge)
             self._start_drone()
             self._start("joystick listener", self.joystick)
-            self._start("MAVLink service", self.mavlink)
             self._start("flight blackbox", self.blackbox)
+            self._start("MAVLink service", self.mavlink)
             self._start("target selector publisher", self.target_selector)
         except BaseException:
             self.stop_all()

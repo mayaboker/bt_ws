@@ -3,6 +3,7 @@ import threading
 
 import pytest
 from pymavlink import mavutil
+from pymavlink.dialects.v20 import ardupilotmega as mavlink20
 
 import bt_app.app as app_module
 import bt_app.mavlink_wrapper as mavlink_module
@@ -22,6 +23,7 @@ from bt_app.mavlink_wrapper import (
     SysStatusCommand,
     V2_EXTENSION_CHANNEL_STATUS_MESSAGE_TYPE,
     V2_EXTENSION_CHANNEL_STATUS_PAYLOAD_FORMAT,
+    decode_odometry_velocity,
     make_base_mode,
 )
 from bt_app.vehicle_config import VehicleConfig
@@ -153,13 +155,159 @@ class FakeScheduler:
 
 
 def decode_mavlink(payload):
-    parser = mavutil.mavlink.MAVLink(None)
+    parser = mavlink20.MAVLink(None)
     msg = None
     for byte in payload:
         parsed = parser.parse_char(bytes([byte]))
         if parsed is not None:
             msg = parsed
     return msg
+
+
+def make_odometry_message(
+    *,
+    frame_id=mavlink20.MAV_FRAME_LOCAL_NED,
+    child_frame_id=mavlink20.MAV_FRAME_BODY_FRD,
+    time_usec=1_788_086_400_123_456,
+    quaternion=(1.0, 0.0, 0.0, 0.0),
+    velocity=(1.0, 2.0, 3.0),
+):
+    message = mavlink20.MAVLink_odometry_message(
+        time_usec,
+        frame_id,
+        child_frame_id,
+        0.0,
+        0.0,
+        0.0,
+        quaternion,
+        *velocity,
+        0.0,
+        0.0,
+        0.0,
+        [0.0] * 21,
+        [0.0] * 21,
+        2,
+        0,
+        100,
+    )
+    message._header.seq = 17
+    return message
+
+
+def test_decodes_odometry_velocity_in_body_and_local_ned_frames():
+    sample = decode_odometry_velocity(
+        make_odometry_message(), received_monotonic_ns=10_000_000_000
+    )
+
+    assert sample.source_time_epoch_us == 1_788_086_400_123_456
+    assert sample.received_monotonic_ns == 10_000_000_000
+    assert sample.mavlink_sequence == 17
+    assert sample.reset_counter == 2
+    assert (
+        sample.velocity_body_x_m_s,
+        sample.velocity_body_y_m_s,
+        sample.velocity_body_z_m_s,
+    ) == pytest.approx((1.0, 2.0, 3.0))
+    assert (
+        sample.velocity_north_m_s,
+        sample.velocity_east_m_s,
+        sample.velocity_down_m_s,
+    ) == pytest.approx((1.0, 2.0, 3.0))
+
+
+@pytest.mark.parametrize(
+    ("quaternion", "velocity", "expected_ned"),
+    [
+        (
+            (2**-0.5, 0.0, 0.0, 2**-0.5),
+            (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+        ),
+        (
+            (2**-0.5, 2**-0.5, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (0.0, 0.0, 1.0),
+        ),
+    ],
+)
+def test_rotates_odometry_at_cardinal_and_tilted_attitudes(
+    quaternion, velocity, expected_ned
+):
+    sample = decode_odometry_velocity(
+        make_odometry_message(quaternion=quaternion, velocity=velocity),
+        received_monotonic_ns=1,
+    )
+
+    assert (
+        sample.velocity_north_m_s,
+        sample.velocity_east_m_s,
+        sample.velocity_down_m_s,
+    ) == pytest.approx(expected_ned, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        make_odometry_message(frame_id=mavlink20.MAV_FRAME_GLOBAL),
+        make_odometry_message(child_frame_id=mavlink20.MAV_FRAME_BODY_NED),
+        make_odometry_message(time_usec=0),
+        make_odometry_message(quaternion=(0.0, 0.0, 0.0, 0.0)),
+        make_odometry_message(velocity=(float("nan"), 0.0, 0.0)),
+    ],
+)
+def test_rejects_invalid_odometry(message):
+    with pytest.raises(ValueError):
+        decode_odometry_velocity(message, received_monotonic_ns=1)
+
+
+def test_odometry_callback_and_parameter_protocol_share_receiver():
+    samples = []
+    protocol_messages = []
+
+    class Protocol:
+        def handle(self, message, addr):
+            protocol_messages.append((message, addr))
+            return []
+
+    service = MavlinkService(
+        context=Context(), on_odometry=samples.append, monotonic_ns=lambda: 123
+    )
+    service._parameter_protocol = Protocol()
+    message = make_odometry_message()
+
+    service._handle_received_message(message, ("192.0.2.10", 14550))
+
+    assert len(samples) == 1
+    assert samples[0].received_monotonic_ns == 123
+    assert protocol_messages == [(message, ("192.0.2.10", 14550))]
+    assert service.odometry_accepted == 1
+    assert service.odometry_rejected == 0
+
+
+def test_receive_pending_parses_mavlink2_odometry_datagram():
+    samples = []
+    sender = mavlink20.MAVLink(None, srcSystem=42, srcComponent=77)
+    payload = make_odometry_message().pack(sender)
+
+    class DatagramSocket:
+        def __init__(self):
+            self.pending = [(payload, ("198.51.100.20", 32000))]
+
+        def recvfrom(self, _size):
+            if not self.pending:
+                raise BlockingIOError
+            return self.pending.pop(0)
+
+    service = MavlinkService(
+        context=Context(), on_odometry=samples.append, monotonic_ns=lambda: 456
+    )
+    service._socket = DatagramSocket()
+
+    service._receive_pending()
+
+    assert len(samples) == 1
+    assert samples[0].received_monotonic_ns == 456
+    assert service.odometry_accepted == 1
 
 
 def test_make_base_mode_sets_custom_mode_flag_only_when_disarmed():
@@ -675,6 +823,41 @@ def test_app_services_stop_in_safe_order_and_continue_after_error():
         "mavlink",
         "blackbox",
         "parameters",
+    ]
+
+
+def test_app_services_starts_blackbox_before_mavlink_receiver():
+    events = []
+
+    class Resource:
+        def __init__(self, name):
+            self.name = name
+
+        def start(self):
+            events.append(self.name)
+
+        def stop(self):
+            return None
+
+    services = AppServices.__new__(AppServices)
+    services.visual_bridge = Resource("visual bridge")
+    services.drone = Resource("msp")
+    services.joystick = Resource("joystick")
+    services.blackbox = Resource("blackbox")
+    services.mavlink = Resource("mavlink")
+    services.target_selector = Resource("target selector")
+    services._started = []
+    services._start_drone = lambda: events.append("msp")
+
+    services.start_all()
+
+    assert events == [
+        "visual bridge",
+        "msp",
+        "joystick",
+        "blackbox",
+        "mavlink",
+        "target selector",
     ]
 
 

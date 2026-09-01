@@ -31,7 +31,8 @@ When `blackbox_enabled` is true, every armed interval is recorded under
 20260830T091530.123000Z_a1b2c3d4_blackbox/
 ├── metadata.json
 ├── frames-000000.parquet
-└── events-000000.parquet
+├── events-000000.parquet
+└── odometry-000000.parquet
 ```
 
 Each frame is one coherent 50 Hz controller snapshot containing the requested
@@ -39,6 +40,9 @@ Each frame is one coherent 50 Hz controller snapshot containing the requested
 attitude, state, and the latest tracker output. Slower inputs include age and
 freshness columns so repeated values are distinguishable from new samples.
 State transitions are stored separately in the event chunks.
+Validated MAVLink `ODOMETRY` received while armed is stored separately with
+body-FRD velocity and quaternion-derived local-NED velocity. The MAVLink bridge
+must send MAVLink 2 traffic to bt-app's UDP port 14551.
 
 The flight thread only submits frames to a bounded in-memory queue. A background
 writer commits an atomic Zstandard-compressed Parquet chunk every five seconds.
@@ -49,7 +53,8 @@ flight control. An interrupted session keeps its finalized chunks and is marked
 Use PyArrow, pandas, Polars, or DuckDB to read `frames-*.parquet`. Metadata
 contains the schema version, time anchors, application/Git version, complete
 parameter snapshot, vehicle configuration, chunk inventory, and drop/error
-counts. Sessions are never deleted automatically.
+counts, including independent frame and odometry drop totals. Sessions are
+never deleted automatically.
 
 ### MAVLink RC takeoff and landing scenario
 
