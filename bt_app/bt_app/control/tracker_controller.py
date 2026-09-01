@@ -345,6 +345,7 @@ class LoopDiagnostics:
     horizontal_alignment_scale: float = 1.0
     effective_ttc_s: float = 0.0
     ttc_prediction_age_s: float = 0.0
+    vertical_schedule_ttc_s: float = 0.0
 
 
 class TrackerController:
@@ -747,6 +748,7 @@ class TrackerController:
             config.minimum_target_ttc_s,
         )
         inverse_target = 1.0 / target_ttc
+        vertical_schedule_ttc = min(effective_ttc, target_ttc)
         if self._phase == TrackerPhase.ALIGN:
             pitch_raw = config.alignment_pitch_deg
         else:
@@ -805,10 +807,11 @@ class TrackerController:
             )
         else:
             dy_deadbanded = self._deadband(dy, config.deadband)
-            # Match altitude arrival time to the observed optical arrival time.
-            # This couples descent to forward closing and avoids spending most
-            # altitude before the vehicle has accelerated toward the target.
-            vertical_nominal = vertical_distance / effective_ttc
+            # Do not let a distant, slowly expanding bbox postpone vertical
+            # motion beyond the arrival time already requested by the pitch
+            # loop. A shorter measured TTC can still accelerate the vertical
+            # schedule when visual contact becomes imminent.
+            vertical_nominal = vertical_distance / vertical_schedule_ttc
             alignment_limit = (
                 config.near_field_alignment_max_m_s
                 if self._last_scale_update.reason == "bbox clipped"
@@ -824,7 +827,6 @@ class TrackerController:
                 config.vertical_speed_min_m_s,
                 config.vertical_speed_max_m_s,
             )
-        vertical_target *= horizontal_alignment_scale
         previous_vertical_setpoint = (
             vario
             if self._vertical_setpoint_m_s is None
@@ -925,6 +927,7 @@ class TrackerController:
             measured_ttc_s=measured_ttc,
             effective_ttc_s=effective_ttc,
             ttc_prediction_age_s=ttc_prediction_age_s,
+            vertical_schedule_ttc_s=vertical_schedule_ttc,
             target_ttc_s=target_ttc,
             inverse_ttc_target_hz=inverse_target,
             pitch_raw_deg=pitch_raw,

@@ -375,8 +375,8 @@ original deadline despite parameter updates.
 | `TRK_VZ_BRAKE` | `1.5` | Setpoint braking rate toward zero in m/s squared |
 | `TRK_THR_MAX` | `100.0` | Absolute throttle correction limit in RC units |
 | `TRK_DEADBAND` | `0.02` | Image-error deadband |
-| `TRK_XY_SLOW` | `0.05` | Horizontal error where approach scaling begins |
-| `TRK_XY_STOP` | `0.15` | Horizontal error where pitch and descent reach zero |
+| `TRK_XY_SLOW` | `0.05` | Horizontal error where forward-pitch scaling begins |
+| `TRK_XY_STOP` | `0.15` | Horizontal error where forward pitch reaches zero; vertical control remains active |
 | `TRK_TIMEOUT_S` | `0.25` | Maximum time since the last valid estimate |
 | `TRK_LOCK_FRAMES` | `3` | Consecutive frames required for entry |
 | `TRK_COMMIT_M` | `1.0` | Forward depth that enters COMMIT |

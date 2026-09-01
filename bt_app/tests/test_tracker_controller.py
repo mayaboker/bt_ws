@@ -193,8 +193,8 @@ def test_alignment_blocks_ttc_approach_until_distinct_centered_frames():
 
     assert result.phase == TrackerPhase.ALIGN
     assert result.pitch_command_deg == pytest.approx(0.0)
-    assert result.vertical_speed_target_m_s == pytest.approx(0.0)
-    assert result.vertical_speed_setpoint_m_s == pytest.approx(0.0)
+    assert result.vertical_speed_target_m_s == pytest.approx(0.5)
+    assert result.vertical_speed_setpoint_m_s == pytest.approx(0.1)
 
     for frame in range(14, 18):
         time_s = 0.48 + (frame - 13) * 0.04
@@ -244,7 +244,7 @@ def test_alignment_blocks_ttc_approach_until_distinct_centered_frames():
     assert final_result.phase == TrackerPhase.TRACKING
 
 
-def test_alignment_holds_vertical_motion_when_target_is_horizontally_misaligned():
+def test_alignment_keeps_vertical_motion_when_target_is_horizontally_misaligned():
     controller = TrackerController(FakeParameters())
     for frame in range(1, 9):
         time_s = (frame - 1) * 0.04
@@ -278,8 +278,8 @@ def test_alignment_holds_vertical_motion_when_target_is_horizontally_misaligned(
     )
 
     assert result.phase == TrackerPhase.ALIGN
-    assert result.vertical_speed_target_m_s == pytest.approx(0.0)
-    assert result.vertical_speed_setpoint_m_s == pytest.approx(0.0)
+    assert result.vertical_speed_target_m_s == pytest.approx(-0.5)
+    assert result.vertical_speed_setpoint_m_s == pytest.approx(-0.02)
     assert result.channels[RCChannel.THROTTLE] < 1663
 
 
@@ -305,7 +305,8 @@ def test_control_uses_ttc_pitch_vertical_speed_and_yaw():
     assert result.phase == TrackerPhase.TRACKING
     assert controller._diagnostics.horizontal_alignment_scale == pytest.approx(0.5625)
     assert result.pitch_command_deg > -5.4
-    assert result.vertical_speed_target_m_s == pytest.approx((-9.5 / 30.0) * 0.5625)
+    assert result.vertical_speed_target_m_s == pytest.approx(-1.25)
+    assert controller._diagnostics.vertical_schedule_ttc_s == pytest.approx(9.5 / 1.25)
     assert result.vertical_speed_setpoint_m_s == pytest.approx(-0.04)
     assert result.channels[RCChannel.PITCH] > RC_MID
     assert result.channels[RCChannel.ROLL] > RC_MID
@@ -317,7 +318,7 @@ def test_control_uses_ttc_pitch_vertical_speed_and_yaw():
     ("dx", "expected_scale"),
     [(0.03, 1.0), (0.10, 0.5), (0.20, 0.0)],
 )
-def test_horizontal_error_scales_pitch_and_vertical_approach(dx, expected_scale):
+def test_horizontal_error_scales_pitch_but_not_vertical_approach(dx, expected_scale):
     controller = TrackerController(FakeParameters())
     acquire(controller)
     controller._pitch_command_deg = 0.0
@@ -343,7 +344,7 @@ def test_horizontal_error_scales_pitch_and_vertical_approach(dx, expected_scale)
     )
     if expected_scale == 0.0:
         assert controller._diagnostics.pitch_raw_deg == pytest.approx(0.0)
-        assert result.vertical_speed_target_m_s == pytest.approx(0.0)
+        assert result.vertical_speed_target_m_s < 0.0
         assert result.yaw_rate_dps < 0.0
     else:
         assert controller._diagnostics.pitch_raw_deg < 0.0
@@ -555,7 +556,7 @@ def test_fresh_clipped_bbox_remains_available_for_recovery_control():
     assert result.error_y < 0.0
     assert controller._diagnostics.horizontal_alignment_scale == pytest.approx(0.875)
     assert result.vertical_speed_target_m_s == pytest.approx(
-        (-9.5 / 29.96 - (200.0 / 240.0 - 0.02)) * 0.875
+        -1.25 - (200.0 / 240.0 - 0.02)
     )
     assert -4.6 < result.pitch_command_deg < -4.4
 
@@ -625,6 +626,7 @@ def test_clipped_scale_uses_counting_down_effective_ttc():
     assert controller._diagnostics.measured_ttc_s == pytest.approx(5.0)
     assert controller._diagnostics.effective_ttc_s == pytest.approx(4.0)
     assert controller._diagnostics.ttc_prediction_age_s == pytest.approx(1.0)
+    assert controller._diagnostics.vertical_schedule_ttc_s == pytest.approx(4.0)
 
 
 def test_large_clipped_bbox_enters_commit_without_fresh_ttc():

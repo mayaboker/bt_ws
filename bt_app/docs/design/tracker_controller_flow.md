@@ -230,12 +230,19 @@ flowchart LR
 
 ### Vertical target
 
-The nominal vertical speed synchronizes the remaining altitude change with an effective optical arrival time. While full bbox scale remains measurable, prediction age stays near one camera-frame interval. If clipping prevents scale updates, TTC counts down from the last measurement instead of freezing:
+The nominal vertical speed synchronizes the remaining altitude change with the
+earlier of the effective optical arrival time and the arrival time requested by
+the pitch loop. This prevents a distant, slowly expanding bbox from delaying
+descent while forward pitch targets a much earlier arrival. While full bbox
+scale remains measurable, prediction age stays near one camera-frame interval.
+If clipping prevents scale updates, TTC counts down from the last measurement
+instead of freezing:
 
 ```text
 ttc_prediction_age = now - last_valid_scale_time
 effective_ttc = max(measured_ttc - ttc_prediction_age, TTC_MIN_S)
-vertical_nominal = vertical_distance / effective_ttc
+vertical_schedule_ttc = min(effective_ttc, target_ttc)
+vertical_nominal = vertical_distance / vertical_schedule_ttc
 alignment_limit = TTC_DY_NEAR if bbox_clipped else TTC_DY_VMAX
 vertical_alignment = clamp(
     TTC_DY_KP * deadband(dy),
@@ -251,6 +258,10 @@ vertical_target = clamp(
 ```
 
 A target below the camera center produces negative `dy`, making the requested vertical velocity more negative. `TTC_DY_VMAX` protects the normal slope from excessive image correction; `TTC_DY_NEAR` provides stronger recovery after clipping. `TTC_VY_NOM` still defines the desired TTC used by the pitch loop; it no longer forces a fixed vertical descent speed.
+
+Horizontal alignment scaling applies only to forward pitch. It does not scale
+`vertical_target`: roll and yaw can recover a large `dx` while the independent
+vertical loop continues closing `dy` and the target-height error.
 
 ### Setpoint slew limiter
 
@@ -401,7 +412,7 @@ The most important active defaults are:
 | Vertical limits | `TTC_VY_MIN=-5`, `TTC_VY_MAX=2`, `TTC_VY_I_MAX=40`, `TTC_THR_MAX=140` |
 | Yaw | `TRK_YAW_KP=20`, `TRK_YAW_MAX=15`, `TRK_YAW_SLEW=20`, `TRK_YAW_SIGN=-1`, `TRK_DEADBAND=0.02` |
 | Roll | Image-error lateral correction with `TRK_ROLL_KP=90`, `TRK_ROLL_MAX=20`, `TRK_ROLL_SLEW=40`, and `TRK_ROLL_SIGN=1` |
-| Horizontal gate | Full approach through `TRK_XY_SLOW=0.10`, linearly reduced to zero at `TRK_XY_STOP=0.25`; yaw remains active |
+| Horizontal gate | Full forward pitch through `TRK_XY_SLOW=0.10`, linearly reduced to zero at `TRK_XY_STOP=0.25`; roll, yaw, and vertical control remain active |
 | Commit | `TTC_FILL=0.60`, `TTC_CLIP_FILL=0.80`, `TTC_ALIGN=0.15`, `TTC_COMMIT_FR=5`, `TTC_MIN_S=0.50` |
 
 Parameter-change callbacks rebuild and validate an immutable `TrackerConfig`. Each observe or update operation takes a lock-protected configuration snapshot, so one iteration uses a consistent set of values.
