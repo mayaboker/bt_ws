@@ -318,7 +318,7 @@ parameters:
     limits: {min: 0.0, max: 500.0}
   TTC_FILL:
     type: float
-    default: 0.60
+    default: 0.30
     limits: {min: 0.01, max: 1.0}
   TTC_CLIP_FILL:
     type: float
@@ -326,7 +326,7 @@ parameters:
     limits: {min: 0.01, max: 1.0}
   TTC_ALIGN:
     type: float
-    default: 0.15
+    default: 0.25
     limits: {min: 0.0, max: 1.0}
   TTC_COMMIT_FR:
     type: int
