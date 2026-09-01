@@ -133,6 +133,23 @@
             }
         },
         {
+            "label": "clear: blackbox logs",
+            "type": "process",
+            "command": "find",
+            "args": [
+                "${workspaceFolder}/bt_app/logs/blackbox",
+                "-mindepth",
+                "1",
+                "-delete"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            }
+        },
+        {
             "label": "build: bt_joy",
             "type": "shell",
             "command": "python3",
