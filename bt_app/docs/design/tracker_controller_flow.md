@@ -401,6 +401,7 @@ The most important active defaults are:
 | Vertical PI-D | `TTC_VY_KP=20`, `TTC_VY_KI=3`, `TTC_VY_KD=10`, `TTC_AZ_ALPHA=0.2` |
 | Vertical limits | `TTC_VY_MIN=-5`, `TTC_VY_MAX=2`, `TTC_VY_I_MAX=40`, `TTC_THR_MAX=140` |
 | Yaw | `TRK_YAW_KP=30`, `TRK_YAW_MAX=20`, `TRK_YAW_SLEW=20`, `TRK_YAW_SIGN=-1`, `TRK_DEADBAND=0.02` |
+| Roll | Image-error lateral correction with `TRK_ROLL_KP=10`, `TRK_ROLL_MAX=5`, `TRK_ROLL_SLEW=10`, and `TRK_ROLL_SIGN=1` |
 | Horizontal gate | Full approach through `TRK_XY_SLOW=0.05`, linearly reduced to zero at `TRK_XY_STOP=0.15`; yaw remains active |
 | Commit | `TTC_FILL=0.60`, `TTC_CLIP_FILL=0.80`, `TTC_ALIGN=0.15`, `TTC_COMMIT_FR=5`, `TTC_MIN_S=0.50` |
 

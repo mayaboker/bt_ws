@@ -327,6 +327,22 @@ class TypedParameters:
         return cast(int, self._parameters.get(ParameterKey.TRK_YAW_SIGN))
 
     @property
+    def trk_roll_kp(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_ROLL_KP))
+
+    @property
+    def trk_roll_max(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_ROLL_MAX))
+
+    @property
+    def trk_roll_slew(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.TRK_ROLL_SLEW))
+
+    @property
+    def trk_roll_sign(self) -> int:
+        return cast(int, self._parameters.get(ParameterKey.TRK_ROLL_SIGN))
+
+    @property
     def trk_thr_kp(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.TRK_THR_KP))
 

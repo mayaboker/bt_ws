@@ -84,6 +84,10 @@ class ParameterKey:
     TRK_YAW_MAX: Final[Literal['TRK_YAW_MAX']] = 'TRK_YAW_MAX'
     TRK_YAW_SLEW: Final[Literal['TRK_YAW_SLEW']] = 'TRK_YAW_SLEW'
     TRK_YAW_SIGN: Final[Literal['TRK_YAW_SIGN']] = 'TRK_YAW_SIGN'
+    TRK_ROLL_KP: Final[Literal['TRK_ROLL_KP']] = 'TRK_ROLL_KP'
+    TRK_ROLL_MAX: Final[Literal['TRK_ROLL_MAX']] = 'TRK_ROLL_MAX'
+    TRK_ROLL_SLEW: Final[Literal['TRK_ROLL_SLEW']] = 'TRK_ROLL_SLEW'
+    TRK_ROLL_SIGN: Final[Literal['TRK_ROLL_SIGN']] = 'TRK_ROLL_SIGN'
     TRK_THR_KP: Final[Literal['TRK_THR_KP']] = 'TRK_THR_KP'
     TRK_VZ_KD: Final[Literal['TRK_VZ_KD']] = 'TRK_VZ_KD'
     TRK_VZ_MAX: Final[Literal['TRK_VZ_MAX']] = 'TRK_VZ_MAX'
@@ -185,6 +189,10 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'TRK_YAW_MAX',
     'TRK_YAW_SLEW',
     'TRK_YAW_SIGN',
+    'TRK_ROLL_KP',
+    'TRK_ROLL_MAX',
+    'TRK_ROLL_SLEW',
+    'TRK_ROLL_SIGN',
     'TRK_THR_KP',
     'TRK_VZ_KD',
     'TRK_VZ_MAX',

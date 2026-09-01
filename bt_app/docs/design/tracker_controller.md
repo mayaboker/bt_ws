@@ -205,6 +205,12 @@ The current camera/vehicle convention uses `-1`; an opposite installation can
 use `+1` without changing the shared vehicle yaw mapping. The existing
 `BetaflightRcMapper.yaw_rate_to_rc()` converts the rate to RC.
 
+Horizontal error also commands a bounded lateral roll angle. Roll uses the
+same image deadband, has an independent direction sign, and slews smoothly so
+the vehicle can remove cross-track error without an abrupt bank. The default
+limit is 5 degrees. Hover feed-forward compensates for both pitch and roll
+tilt, and stale or invalid tracker output always centers roll.
+
 ### Throttle
 
 Vertical image error creates a bounded, acceleration-limited vertical-speed
@@ -371,6 +377,10 @@ original deadline despite parameter updates.
 | `TRK_YAW_MAX` | `20.0` | Absolute yaw-rate limit in deg/s |
 | `TRK_YAW_SLEW` | `20.0` | Yaw-rate slew limit in deg/s² |
 | `TRK_YAW_SIGN` | `-1` | Image-error to vehicle-yaw direction; only `-1` or `1` |
+| `TRK_ROLL_KP` | `10.0` | Lateral roll-angle gain in degrees per normalized error |
+| `TRK_ROLL_MAX` | `5.0` | Maximum absolute tracker roll angle |
+| `TRK_ROLL_SLEW` | `10.0` | Roll-command slew limit in degrees per second |
+| `TRK_ROLL_SIGN` | `1` | Image-error to lateral-roll direction; only `-1` or `1` |
 | `TRK_THR_KP` | `100.0` | Outer visual gain used with `TRK_VZ_KD` to derive requested speed |
 | `TRK_VZ_KD` | `30.0` | Inner vertical-speed error gain in RC units per m/s |
 | `TRK_VZ_MAX` | `1.75` | Far-range absolute vertical-speed target limit in m/s |

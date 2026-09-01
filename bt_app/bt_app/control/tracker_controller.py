@@ -74,6 +74,10 @@ class TrackerConfig:
     yaw_max_dps: float
     yaw_slew_dps2: float
     yaw_sign: int
+    roll_kp_deg: float
+    roll_max_deg: float
+    roll_slew_deg_s: float
+    roll_sign: int
     deadband: float
     horizontal_slow_threshold: float
     horizontal_stop_threshold: float
@@ -131,6 +135,10 @@ class TrackerConfig:
             yaw_max_dps=parameters.get(ParameterKey.TRK_YAW_MAX),
             yaw_slew_dps2=parameters.get(ParameterKey.TRK_YAW_SLEW),
             yaw_sign=parameters.get(ParameterKey.TRK_YAW_SIGN),
+            roll_kp_deg=parameters.get(ParameterKey.TRK_ROLL_KP),
+            roll_max_deg=parameters.get(ParameterKey.TRK_ROLL_MAX),
+            roll_slew_deg_s=parameters.get(ParameterKey.TRK_ROLL_SLEW),
+            roll_sign=parameters.get(ParameterKey.TRK_ROLL_SIGN),
             deadband=parameters.get(ParameterKey.TRK_DEADBAND),
             horizontal_slow_threshold=parameters.get(ParameterKey.TRK_XY_SLOW),
             horizontal_stop_threshold=parameters.get(ParameterKey.TRK_XY_STOP),
@@ -158,6 +166,12 @@ class TrackerConfig:
             raise ValueError("invalid Betaflight Actual-rates yaw configuration")
         if self.yaw_sign not in (-1, 1):
             raise ValueError("tracker yaw sign must be -1 or 1")
+        if self.roll_sign not in (-1, 1):
+            raise ValueError("tracker roll sign must be -1 or 1")
+        if self.roll_kp_deg < 0.0 or self.roll_max_deg < 0.0 or self.roll_slew_deg_s <= 0.0:
+            raise ValueError("tracker roll gain, limit, and slew are invalid")
+        if self.roll_max_deg > self.angle_limit_deg:
+            raise ValueError("tracker roll limit exceeds Betaflight angle limit")
         if not (
             0.0
             <= self.horizontal_slow_threshold
@@ -289,6 +303,7 @@ class TrackerControlResult:
     error_x: float | None
     error_y: float | None
     pitch_command_deg: float
+    roll_command_deg: float
     yaw_rate_dps: float
     drone_vertical_speed_m_s: float | None
     drone_vertical_speed_age_s: float | None
@@ -321,6 +336,7 @@ class LoopDiagnostics:
     target_ttc_s: float = 0.0
     inverse_ttc_target_hz: float = 0.0
     pitch_raw_deg: float = 0.0
+    roll_target_deg: float = 0.0
     vertical_distance_m: float = 0.0
     vertical_nominal_m_s: float = 0.0
     vertical_alignment_m_s: float = 0.0
@@ -345,6 +361,7 @@ TRACKER_CSV_HEADER = (
     "roll_deg", "pitch_deg", "heading_deg", "attitude_age_s",
     "altitude_m", "vertical_distance_m", "target_ttc_s", "inverse_ttc_target_hz",
     "pitch_initial_deg", "pitch_raw_deg", "pitch_command_deg",
+    "roll_target_deg", "roll_command_deg",
     "horizontal_alignment_scale",
     "vertical_nominal_m_s", "vertical_alignment_m_s", "vertical_target_m_s",
     "vertical_setpoint_m_s",
@@ -390,6 +407,7 @@ class TrackerController:
         self._commit_deadline_s: float | None = None
         self._frozen_result: TrackerControlResult | None = None
         self._pitch_command_deg = 0.0
+        self._roll_command_deg = 0.0
         self._yaw_rate_command_dps = 0.0
         self._last_update_s: float | None = None
         self._altitude_m: float | None = None
@@ -551,6 +569,7 @@ class TrackerController:
         self._commit_deadline_s = None
         self._frozen_result = None
         self._pitch_command_deg = config.alignment_pitch_deg
+        self._roll_command_deg = 0.0
         self._yaw_rate_command_dps = 0.0
         self._vertical_setpoint_m_s = vertical_speed_m_s
         self._vertical_integral_rc = 0.0
@@ -588,6 +607,7 @@ class TrackerController:
         self._commit_deadline_s = None
         self._frozen_result = None
         self._pitch_command_deg = 0.0
+        self._roll_command_deg = 0.0
         self._yaw_rate_command_dps = 0.0
         self._vertical_setpoint_m_s = None
         self._vertical_integral_rc = 0.0
@@ -797,6 +817,17 @@ class TrackerController:
             -max_pitch_step,
             max_pitch_step,
         )
+        roll_target = clamp(
+            config.roll_sign * config.roll_kp_deg * self._deadband(dx, config.deadband),
+            -config.roll_max_deg,
+            config.roll_max_deg,
+        )
+        max_roll_step = config.roll_slew_deg_s * dt_s
+        self._roll_command_deg += clamp(
+            roll_target - self._roll_command_deg,
+            -max_roll_step,
+            max_roll_step,
+        )
         if self._phase == TrackerPhase.ALIGN:
             # Keep the conservative alignment pitch, but correct vertical image
             # error before forward tracking. A target below image center needs
@@ -874,7 +905,8 @@ class TrackerController:
             correction_limit,
         )
         tilt_hover = RC_MIN + (config.hover_baseline_rc - RC_MIN) / max(
-            math.cos(math.radians(self._pitch_command_deg)),
+            math.cos(math.radians(self._pitch_command_deg))
+            * math.cos(math.radians(self._roll_command_deg)),
             0.35,
         )
         yaw_rate_target = clamp(
@@ -895,6 +927,10 @@ class TrackerController:
             yaw_expo=config.yaw_rate_expo,
         )
         channels = self._channels(
+            roll=mapper.angle_to_rc(
+                self._roll_command_deg,
+                angle_limit_deg=config.angle_limit_deg,
+            ),
             pitch=mapper.angle_to_rc(
                 self._pitch_command_deg,
                 angle_limit_deg=config.angle_limit_deg,
@@ -933,6 +969,7 @@ class TrackerController:
             target_ttc_s=target_ttc,
             inverse_ttc_target_hz=inverse_target,
             pitch_raw_deg=pitch_raw,
+            roll_target_deg=roll_target,
             vertical_distance_m=vertical_distance,
             vertical_nominal_m_s=vertical_nominal,
             vertical_alignment_m_s=vertical_alignment,
@@ -949,6 +986,7 @@ class TrackerController:
             error_x=dx,
             error_y=dy,
             pitch_command_deg=self._pitch_command_deg,
+            roll_command_deg=self._roll_command_deg,
             yaw_rate_dps=yaw_rate,
             drone_vertical_speed_m_s=vario,
             drone_vertical_speed_age_s=vario_age_s,
@@ -1092,6 +1130,7 @@ class TrackerController:
     def _safe_result(self, config: TrackerConfig, reason: str) -> TrackerControlResult:
         return TrackerControlResult(
             channels=self._channels(
+                roll=RC_MID,
                 pitch=RC_MID,
                 throttle=round(config.hover_baseline_rc),
                 yaw=RC_MID,
@@ -1100,6 +1139,7 @@ class TrackerController:
             error_x=None,
             error_y=None,
             pitch_command_deg=0.0,
+            roll_command_deg=0.0,
             yaw_rate_dps=0.0,
             drone_vertical_speed_m_s=None,
             drone_vertical_speed_age_s=None,
@@ -1121,8 +1161,9 @@ class TrackerController:
         )
 
     @staticmethod
-    def _channels(*, pitch: int, throttle: int, yaw: int) -> tuple[int, ...]:
+    def _channels(*, roll: int, pitch: int, throttle: int, yaw: int) -> tuple[int, ...]:
         channels = [RC_MID] * NO_RC_CHANNELS
+        channels[RCChannel.ROLL] = int(clamp(roll, RC_MIN, RC_MAX))
         channels[RCChannel.PITCH] = int(clamp(pitch, RC_MIN, RC_MAX))
         channels[RCChannel.THROTTLE] = int(clamp(throttle, RC_MIN, RC_MAX))
         channels[RCChannel.YAW] = int(clamp(yaw, RC_MIN, RC_MAX))
@@ -1187,6 +1228,8 @@ class TrackerController:
             "pitch_initial_deg": config.pitch_initial_deg,
             "pitch_raw_deg": d.pitch_raw_deg,
             "pitch_command_deg": result.pitch_command_deg,
+            "roll_target_deg": d.roll_target_deg,
+            "roll_command_deg": result.roll_command_deg,
             "horizontal_alignment_scale": d.horizontal_alignment_scale,
             "vertical_nominal_m_s": d.vertical_nominal_m_s,
             "vertical_alignment_m_s": d.vertical_alignment_m_s,
