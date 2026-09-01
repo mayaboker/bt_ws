@@ -324,14 +324,17 @@ Yaw first computes a bounded proportional target after image deadband:
 
 ```text
 yaw_rate = clamp(
-    TRK_YAW_KP * deadband(dx),
+    TRK_YAW_SIGN * TRK_YAW_KP * deadband(dx),
     -TRK_YAW_MAX,
     +TRK_YAW_MAX,
 )
 ```
 
-`BetaflightRcMapper` converts yaw rate using `BF_YAW_RATE` as the full-stick rate.
+`BetaflightRcMapper` converts physical yaw rate by inverting Betaflight's
+Actual-rates curve using `BF_YAW_CENTER`, `BF_YAW_RATE`, and `BF_YAW_EXPO`.
 Before mapping, the command slews toward the target at `TRK_YAW_SLEW` deg/s².
+`TRK_YAW_SIGN` is restricted to `-1` or `1` and defaults to `1` for the
+current simulated camera convention.
 
 The output channel policy is:
 
@@ -397,7 +400,7 @@ The most important active defaults are:
 | Vertical profile | `TGT_HEIGHT_M=0.5`, countdown TTC feedforward, `TTC_VY_NOM=1.0` pitch timing, `TTC_DY_KP=1.5`, `TTC_DY_VMAX=0.5`, clipped recovery `TTC_DY_NEAR=1.5`, `TRK_VZ_ACCEL=0.5` |
 | Vertical PI-D | `TTC_VY_KP=20`, `TTC_VY_KI=3`, `TTC_VY_KD=10`, `TTC_AZ_ALPHA=0.2` |
 | Vertical limits | `TTC_VY_MIN=-5`, `TTC_VY_MAX=2`, `TTC_VY_I_MAX=40`, `TTC_THR_MAX=140` |
-| Yaw | `TRK_YAW_KP=10`, `TRK_YAW_MAX=20`, `TRK_YAW_SLEW=20`, `TRK_DEADBAND=0.03` |
+| Yaw | `TRK_YAW_KP=30`, `TRK_YAW_MAX=20`, `TRK_YAW_SLEW=20`, `TRK_YAW_SIGN=1`, `TRK_DEADBAND=0.01` |
 | Commit | `TTC_FILL=0.60`, `TTC_CLIP_FILL=0.80`, `TTC_ALIGN=0.15`, `TTC_COMMIT_FR=5`, `TTC_MIN_S=0.50` |
 
 Parameter-change callbacks rebuild and validate an immutable `TrackerConfig`. Each observe or update operation takes a lock-protected configuration snapshot, so one iteration uses a consistent set of values.

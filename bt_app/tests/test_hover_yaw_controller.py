@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from bt_app.app import App
 from bt_app.common import InternalJoystick, MavSeverity, RobotState
 from bt_app.context import Context
@@ -32,7 +34,9 @@ class FakeParameters:
             ParameterKey.HY_MAX_RATE: 120.0,
             ParameterKey.HY_DEADBAND: 30,
             ParameterKey.HY_EXPO: 0.35,
-            ParameterKey.BF_YAW_RATE: 67.0,
+            ParameterKey.BF_YAW_RATE: 670.0,
+            ParameterKey.BF_YAW_CENTER: 70.0,
+            ParameterKey.BF_YAW_EXPO: 0.0,
         }
 
     def get(self, name):
@@ -68,6 +72,28 @@ def test_baseline_parameter_change_applies_live(monkeypatch):
     controller.on_parameter_changed(ParameterKey.HOV_BASELINE, 1450)
 
     assert controller._baseline == 1450.0
+
+
+def test_actual_yaw_rate_parameters_apply_live(monkeypatch):
+    controller = controller_with_times(monkeypatch, [0.0])
+
+    controller.on_parameter_changed(ParameterKey.BF_YAW_CENTER, 100.0)
+    controller.on_parameter_changed(ParameterKey.BF_YAW_RATE, 500.0)
+    controller.on_parameter_changed(ParameterKey.BF_YAW_EXPO, 0.25)
+
+    assert controller.rc_mapper.yaw_center_sensitivity_dps == 100.0
+    assert controller.rc_mapper.yaw_max_rate_dps == 500.0
+    assert controller.rc_mapper.yaw_expo == 0.25
+
+
+def test_invalid_live_yaw_mapping_keeps_previous_mapper(monkeypatch):
+    controller = controller_with_times(monkeypatch, [0.0])
+    previous = controller.rc_mapper
+
+    with pytest.raises(ValueError):
+        controller.on_parameter_changed(ParameterKey.BF_YAW_CENTER, 700.0)
+
+    assert controller.rc_mapper is previous
 
 
 def test_centered_throttle_does_not_change_setpoint(monkeypatch):
@@ -243,7 +269,7 @@ def test_left_yaw_stick_decreases_yaw_rc(monkeypatch):
     assert channels[RCChannel.YAW] < RC_MID
 
 
-def test_full_yaw_stick_clamps_to_rc_range(monkeypatch):
+def test_full_operator_yaw_stick_uses_actual_rates_inverse(monkeypatch):
     controller = controller_with_times(monkeypatch, [0.0])
 
     controller.update_yaw_from_joystick(2000)
@@ -251,8 +277,8 @@ def test_full_yaw_stick_clamps_to_rc_range(monkeypatch):
     controller.update_yaw_from_joystick(1000)
     left_channels = controller.update(setpoint=2.0, current=2.0)
 
-    assert right_channels[RCChannel.YAW] == RC_MAX
-    assert left_channels[RCChannel.YAW] == RC_MIN
+    assert right_channels[RCChannel.YAW] == 1696
+    assert left_channels[RCChannel.YAW] == 1304
 
 
 def test_yaw_expo_is_less_aggressive_than_linear_near_center(monkeypatch):

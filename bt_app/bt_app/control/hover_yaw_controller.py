@@ -36,13 +36,17 @@ class HoverYawController:
         self.max_yaw_rate_dps = self.params.get(ParameterKey.HY_MAX_RATE)
         self.yaw_deadband = self.params.get(ParameterKey.HY_DEADBAND)
         self.yaw_expo = self.params.get(ParameterKey.HY_EXPO)
-        self.yaw_stick_range = self.params.get(ParameterKey.BF_YAW_RATE)
+        self.yaw_max_rate_dps = self.params.get(ParameterKey.BF_YAW_RATE)
+        self.yaw_center_sensitivity_dps = self.params.get(ParameterKey.BF_YAW_CENTER)
+        self.betaflight_yaw_expo = self.params.get(ParameterKey.BF_YAW_EXPO)
         self._last_setpoint_update_s = time.monotonic()
         self._throttle_outside_deadband = False
         self._throttle_center_required = False
         self._altitude_setpoint_request_event = False
         self.rc_mapper = BetaflightRcMapper(
-            yaw_rate_full_stick_dps=self.yaw_stick_range,
+            yaw_center_sensitivity_dps=self.yaw_center_sensitivity_dps,
+            yaw_max_rate_dps=self.yaw_max_rate_dps,
+            yaw_expo=self.betaflight_yaw_expo,
         )
         self._setup()
 
@@ -173,7 +177,7 @@ class HoverYawController:
         """Accept a controller-generated RC yaw command without joystick shaping."""
         bounded = max(RC_MIN, min(RC_MAX, int(yaw_rc)))
         normalized = (bounded - RC_MID) / float(RC_MAX - RC_MID)
-        self.yaw_rate = normalized * float(self.yaw_stick_range)
+        self.yaw_rate = self.rc_mapper.yaw_norm_to_rate(normalized)
         return self.yaw_rate
     
     def update_pitch_roll(self, pitch, roll):
@@ -273,7 +277,30 @@ class HoverYawController:
         elif name == ParameterKey.HY_EXPO:
             self.yaw_expo = value
         elif name == ParameterKey.BF_YAW_RATE:
-            self.yaw_stick_range = value
-            self.rc_mapper.yaw_rate_full_stick_dps = value
+            self._replace_yaw_mapper(maximum=float(value))
+        elif name == ParameterKey.BF_YAW_CENTER:
+            self._replace_yaw_mapper(center=float(value))
+        elif name == ParameterKey.BF_YAW_EXPO:
+            self._replace_yaw_mapper(expo=float(value))
         elif name == ParameterKey.HOV_BASELINE:
             self._baseline = float(value)
+
+    def _replace_yaw_mapper(
+        self,
+        *,
+        center: float | None = None,
+        maximum: float | None = None,
+        expo: float | None = None,
+    ) -> None:
+        center = self.yaw_center_sensitivity_dps if center is None else center
+        maximum = self.yaw_max_rate_dps if maximum is None else maximum
+        expo = self.betaflight_yaw_expo if expo is None else expo
+        mapper = BetaflightRcMapper(
+            yaw_center_sensitivity_dps=center,
+            yaw_max_rate_dps=maximum,
+            yaw_expo=expo,
+        )
+        self.yaw_center_sensitivity_dps = center
+        self.yaw_max_rate_dps = maximum
+        self.betaflight_yaw_expo = expo
+        self.rc_mapper = mapper

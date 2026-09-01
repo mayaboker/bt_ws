@@ -151,10 +151,27 @@ parameters:
       max: 1.0
   BF_YAW_RATE:
     type: float
-    default: 67.0
+    # Betaflight Actual-rates maximum yaw rate in degrees/second. This matches
+    # CLI yaw_srate=67, whose physical maximum is 670 deg/s.
+    default: 670.0
     limits:
       min: 1.0
       max: 1000.0
+  BF_YAW_CENTER:
+    type: float
+    # Betaflight Actual-rates center sensitivity in degrees/second. This
+    # matches CLI yaw_rc_rate=7, whose physical sensitivity is 70 deg/s.
+    default: 70.0
+    limits:
+      min: 1.0
+      max: 1000.0
+  BF_YAW_EXPO:
+    type: float
+    # Betaflight Actual-rates yaw expo expressed as a fraction, not percent.
+    default: 0.0
+    limits:
+      min: 0.0
+      max: 1.0
   CAM_FX_PX:
     type: float
     default: 320.0
@@ -337,7 +354,7 @@ parameters:
     limits: {min: 0.1, max: 90.0}
   TRK_YAW_KP:
     type: float
-    default: 10.0
+    default: 30.0
     limits: {min: 0.0, max: 1000.0}
   TRK_YAW_MAX:
     type: float
@@ -347,6 +364,12 @@ parameters:
     type: float
     default: 20.0
     limits: {min: 0.1, max: 1000.0}
+  TRK_YAW_SIGN:
+    type: int
+    # Image-horizontal-error to vehicle-yaw direction. The current simulated
+    # camera and vehicle conventions require +1.
+    default: -1
+    limits: {options: [-1, 1]}
   TRK_THR_KP:
     type: float
     default: 100.0
@@ -385,7 +408,7 @@ parameters:
     limits: {min: 0.0, max: 500.0}
   TRK_DEADBAND:
     type: float
-    default: 0.03
+    default: 0.01
     limits: {min: 0.0, max: 1.0}
   TRK_TIMEOUT_S:
     type: float

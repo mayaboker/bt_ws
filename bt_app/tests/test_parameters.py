@@ -43,10 +43,10 @@ def decode_int32(value: float) -> int:
     return struct.unpack("<i", struct.pack("<f", value))[0]
 
 
-def test_canonical_parameter_registry_has_93_mavlink_names():
+def test_canonical_parameter_registry_has_96_mavlink_names():
     service = make_service()
 
-    assert len(ALL_PARAMETER_KEYS) == 93
+    assert len(ALL_PARAMETER_KEYS) == 96
     assert tuple(name for name, _, _ in service.snapshot()) == ALL_PARAMETER_KEYS
     assert all(
         re.fullmatch(r"[A-Z][A-Z0-9_]{0,15}", name) for name in ALL_PARAMETER_KEYS
@@ -78,6 +78,15 @@ def test_rejected_set_does_not_emit_change():
     assert changes == []
 
 
+def test_tracker_yaw_sign_rejects_zero():
+    service = make_service()
+
+    with pytest.raises(ValueError, match="TRK_YAW_SIGN must be one of"):
+        service.set("TRK_YAW_SIGN", 0)
+
+    assert service.get("TRK_YAW_SIGN") == 1
+
+
 def test_callback_failure_does_not_block_other_subscribers():
     service = make_service()
     changes = []
@@ -102,7 +111,7 @@ def test_list_read_and_int_set_use_canonical_names():
 
     responses = protocol.handle(mav.param_request_list_encode(1, 1), source)
 
-    assert len(responses) == 93
+    assert len(responses) == 96
     assert responses[0].message.param_id == "FS_HOLD_TIME"
     assert responses[-1].delay_s == pytest.approx((len(ALL_PARAMETER_KEYS) - 1) * 0.02)
 

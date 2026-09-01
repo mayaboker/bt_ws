@@ -123,6 +123,14 @@ class TypedParameters:
         return cast(float, self._parameters.get(ParameterKey.BF_YAW_RATE))
 
     @property
+    def bf_yaw_center(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.BF_YAW_CENTER))
+
+    @property
+    def bf_yaw_expo(self) -> float:
+        return cast(float, self._parameters.get(ParameterKey.BF_YAW_EXPO))
+
+    @property
     def cam_fx_px(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.CAM_FX_PX))
 
@@ -313,6 +321,10 @@ class TypedParameters:
     @property
     def trk_yaw_slew(self) -> float:
         return cast(float, self._parameters.get(ParameterKey.TRK_YAW_SLEW))
+
+    @property
+    def trk_yaw_sign(self) -> int:
+        return cast(int, self._parameters.get(ParameterKey.TRK_YAW_SIGN))
 
     @property
     def trk_thr_kp(self) -> float:

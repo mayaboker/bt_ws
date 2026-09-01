@@ -62,10 +62,13 @@ class FakeParameters:
             ParameterKey.TRK_YAW_KP: 15.0,
             ParameterKey.TRK_YAW_MAX: 20.0,
             ParameterKey.TRK_YAW_SLEW: 20.0,
+            ParameterKey.TRK_YAW_SIGN: 1,
             ParameterKey.TRK_DEADBAND: 0.03,
             ParameterKey.BF_ANGLE_LIMIT: 60.0,
             ParameterKey.HOV_BASELINE: 1660,
-            ParameterKey.BF_YAW_RATE: 67.0,
+            ParameterKey.BF_YAW_RATE: 670.0,
+            ParameterKey.BF_YAW_CENTER: 70.0,
+            ParameterKey.BF_YAW_EXPO: 0.0,
             ParameterKey.CAM_WIDTH_PX: 640,
             ParameterKey.CAM_HEIGHT_PX: 480,
             ParameterKey.CAM_CX_PX: 320.0,
@@ -330,6 +333,38 @@ def test_yaw_rate_slew_limits_initial_command_and_sign_reversal():
     assert second.yaw_rate_dps == pytest.approx(1.2)
     assert reversing.yaw_rate_dps == pytest.approx(0.8)
     assert reversing.channels[RCChannel.YAW] > RC_MID
+
+
+def test_negative_yaw_sign_supports_opposite_camera_convention():
+    params = FakeParameters()
+    params.values[ParameterKey.TRK_YAW_SIGN] = -1
+    controller = TrackerController(params)
+    acquire(controller)
+    controller.observe(
+        observation(14, 0.52, x=530),
+        now_s=0.52,
+        mode_selected=True,
+        altitude_m=10.0,
+        vertical_speed_m_s=0.0,
+        altitude_sample_time_s=0.52,
+    )
+
+    result = controller.update(
+        now_s=0.52,
+        vertical_speed_m_s=0.0,
+        vertical_speed_sample_time_s=0.52,
+    )
+
+    assert result.yaw_rate_dps == pytest.approx(-0.8)
+    assert result.channels[RCChannel.YAW] < RC_MID
+
+
+def test_zero_yaw_sign_is_rejected():
+    params = FakeParameters()
+    params.values[ParameterKey.TRK_YAW_SIGN] = 0
+
+    with pytest.raises(ValueError, match="yaw sign"):
+        TrackerController(params)
 
 
 def test_bbox_expansion_estimates_inverse_ttc():

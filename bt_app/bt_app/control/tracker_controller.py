@@ -73,10 +73,13 @@ class TrackerConfig:
     yaw_kp: float
     yaw_max_dps: float
     yaw_slew_dps2: float
+    yaw_sign: int
     deadband: float
     angle_limit_deg: float
     hover_baseline_rc: float
     yaw_stick_rate_dps: float
+    yaw_center_sensitivity_dps: float
+    yaw_rate_expo: float
     camera_width_px: int
     camera_height_px: int
     camera_cx_px: float
@@ -125,10 +128,13 @@ class TrackerConfig:
             yaw_kp=parameters.get(ParameterKey.TRK_YAW_KP),
             yaw_max_dps=parameters.get(ParameterKey.TRK_YAW_MAX),
             yaw_slew_dps2=parameters.get(ParameterKey.TRK_YAW_SLEW),
+            yaw_sign=parameters.get(ParameterKey.TRK_YAW_SIGN),
             deadband=parameters.get(ParameterKey.TRK_DEADBAND),
             angle_limit_deg=parameters.get(ParameterKey.BF_ANGLE_LIMIT),
             hover_baseline_rc=parameters.get(ParameterKey.HOV_BASELINE),
             yaw_stick_rate_dps=parameters.get(ParameterKey.BF_YAW_RATE),
+            yaw_center_sensitivity_dps=parameters.get(ParameterKey.BF_YAW_CENTER),
+            yaw_rate_expo=parameters.get(ParameterKey.BF_YAW_EXPO),
             camera_width_px=parameters.get(ParameterKey.CAM_WIDTH_PX),
             camera_height_px=parameters.get(ParameterKey.CAM_HEIGHT_PX),
             camera_cx_px=parameters.get(ParameterKey.CAM_CX_PX),
@@ -140,6 +146,14 @@ class TrackerConfig:
             raise ValueError("initial TTC pitch must be inside pitch limits")
         if abs(self.pitch_minimum_deg) > self.angle_limit_deg:
             raise ValueError("minimum TTC pitch exceeds Betaflight angle limit")
+        if (
+            self.yaw_center_sensitivity_dps <= 0.0
+            or self.yaw_stick_rate_dps < self.yaw_center_sensitivity_dps
+            or not 0.0 <= self.yaw_rate_expo <= 1.0
+        ):
+            raise ValueError("invalid Betaflight Actual-rates yaw configuration")
+        if self.yaw_sign not in (-1, 1):
+            raise ValueError("tracker yaw sign must be -1 or 1")
         if (
             self.pitch_slew_deg_s <= 0.0
             or self.pitch_recovery_slew_deg_s <= 0.0
@@ -839,7 +853,7 @@ class TrackerController:
             0.35,
         )
         yaw_rate_target = clamp(
-            config.yaw_kp * self._deadband(dx, config.deadband),
+            config.yaw_sign * config.yaw_kp * self._deadband(dx, config.deadband),
             -config.yaw_max_dps,
             config.yaw_max_dps,
         )
@@ -851,7 +865,9 @@ class TrackerController:
         )
         yaw_rate = self._yaw_rate_command_dps
         mapper = BetaflightRcMapper(
-            yaw_rate_full_stick_dps=config.yaw_stick_rate_dps
+            yaw_center_sensitivity_dps=config.yaw_center_sensitivity_dps,
+            yaw_max_rate_dps=config.yaw_stick_rate_dps,
+            yaw_expo=config.yaw_rate_expo,
         )
         channels = self._channels(
             pitch=mapper.angle_to_rc(

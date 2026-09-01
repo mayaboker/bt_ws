@@ -43,7 +43,7 @@ from bt_app.common import (
     TrackerMode)
 from bt_msgs import TargetSelectorState
 from loguru import logger as log
-from bt_app.velocity import gps_horizontal_velocity, ned_to_body_frd
+# from bt_app.velocity import gps_horizontal_velocity, ned_to_body_frd
 import time
 from bt_app.common.mavlink import NamedValue
 #TODO: remove when rc_channel_control implement adapter
@@ -391,9 +391,9 @@ class App:
             self.ctx.drone_attitude_received_at_s = float(
                 attitude.get("received_at_s", 0.0)
             )
-        gps = getattr(drone.dispatcher, "last_gps", None)
-        if gps:
-            self._update_gps_velocity(gps)
+        # gps = getattr(drone.dispatcher, "last_gps", None)
+        # if gps:
+        #     self._update_gps_velocity(gps)
         ## read last drone rc
         rc = drone.get_rc()
         if rc:

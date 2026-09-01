@@ -1,4 +1,4 @@
-# 
+#
 
 # diff
 
@@ -27,9 +27,15 @@ profile 0
 
 rateprofile 0
 
+# Keep bt-app's inverse yaw mapping aligned with Betaflight Actual rates.
+set rates_type = ACTUAL
+set yaw_rc_rate = 7
+set yaw_srate = 67
+set yaw_expo = 0
+
 battery_profile 0
 
 # end the command batch
 batch end
 
-# 
+#

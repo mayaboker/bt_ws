@@ -33,6 +33,8 @@ class ParameterKey:
     HY_DEADBAND: Final[Literal['HY_DEADBAND']] = 'HY_DEADBAND'
     HY_EXPO: Final[Literal['HY_EXPO']] = 'HY_EXPO'
     BF_YAW_RATE: Final[Literal['BF_YAW_RATE']] = 'BF_YAW_RATE'
+    BF_YAW_CENTER: Final[Literal['BF_YAW_CENTER']] = 'BF_YAW_CENTER'
+    BF_YAW_EXPO: Final[Literal['BF_YAW_EXPO']] = 'BF_YAW_EXPO'
     CAM_FX_PX: Final[Literal['CAM_FX_PX']] = 'CAM_FX_PX'
     CAM_FY_PX: Final[Literal['CAM_FY_PX']] = 'CAM_FY_PX'
     CAM_CX_PX: Final[Literal['CAM_CX_PX']] = 'CAM_CX_PX'
@@ -81,6 +83,7 @@ class ParameterKey:
     TRK_YAW_KP: Final[Literal['TRK_YAW_KP']] = 'TRK_YAW_KP'
     TRK_YAW_MAX: Final[Literal['TRK_YAW_MAX']] = 'TRK_YAW_MAX'
     TRK_YAW_SLEW: Final[Literal['TRK_YAW_SLEW']] = 'TRK_YAW_SLEW'
+    TRK_YAW_SIGN: Final[Literal['TRK_YAW_SIGN']] = 'TRK_YAW_SIGN'
     TRK_THR_KP: Final[Literal['TRK_THR_KP']] = 'TRK_THR_KP'
     TRK_VZ_KD: Final[Literal['TRK_VZ_KD']] = 'TRK_VZ_KD'
     TRK_VZ_MAX: Final[Literal['TRK_VZ_MAX']] = 'TRK_VZ_MAX'
@@ -129,6 +132,8 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'HY_DEADBAND',
     'HY_EXPO',
     'BF_YAW_RATE',
+    'BF_YAW_CENTER',
+    'BF_YAW_EXPO',
     'CAM_FX_PX',
     'CAM_FY_PX',
     'CAM_CX_PX',
@@ -177,6 +182,7 @@ ALL_PARAMETER_KEYS: Final[tuple[str, ...]] = (
     'TRK_YAW_KP',
     'TRK_YAW_MAX',
     'TRK_YAW_SLEW',
+    'TRK_YAW_SIGN',
     'TRK_THR_KP',
     'TRK_VZ_KD',
     'TRK_VZ_MAX',

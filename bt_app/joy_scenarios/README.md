@@ -132,8 +132,10 @@ cd bt_app
 uv run python -m joy_scenarios.03_alt_hold_yaw
 ```
 
-Full yaw stick is configured for approximately 15°/s through
-`HY_MAX_RATE=15`. Each turn integrates fresh `ATTITUDE.yaw` samples, including
+Full operator yaw stick is configured for approximately 15°/s through
+`HY_MAX_RATE=15`. The app converts that physical rate through Betaflight's
+Actual-rates curve (`BF_YAW_CENTER`, `BF_YAW_RATE`, and `BF_YAW_EXPO`) instead
+of treating RC deflection as linear. Each turn integrates fresh `ATTITUDE.yaw` samples, including
 correct handling across the 0°/360° boundary, and centers yaw for one second
 between turns. The scenario logs the measured average rate after each turn.
 

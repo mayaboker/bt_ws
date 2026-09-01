@@ -11,7 +11,9 @@ class BetaflightRcMapper:
     def __init__(
         self,
         *,
-        yaw_rate_full_stick_dps: float,
+        yaw_center_sensitivity_dps: float,
+        yaw_max_rate_dps: float,
+        yaw_expo: float,
         rc_mid: int = 1500,
         rc_mid_range: int = 500,
         rc_min: int = 1000,
@@ -21,8 +23,10 @@ class BetaflightRcMapper:
         """Map desired yaw rates to Betaflight RC yaw channel values.
 
         Args:
-            yaw_rate_full_stick_dps: Yaw rate, in degrees per second, represented by
-                full stick deflection. Must be greater than zero.
+            yaw_center_sensitivity_dps: Actual-rates center sensitivity in
+                degrees per second.
+            yaw_max_rate_dps: Actual-rates maximum yaw rate in degrees per second.
+            yaw_expo: Actual-rates expo as a fraction from 0 through 1.
             rc_mid: RC channel value at centered stick.
             rc_mid_range: Channel offset from center to full stick in either direction.
             rc_min: Minimum allowed RC channel value.
@@ -30,22 +34,56 @@ class BetaflightRcMapper:
             yaw_sign: Direction multiplier for yaw output. Use 1.0 for normal direction
                 or -1.0 to invert yaw.
         """
-        if yaw_rate_full_stick_dps <= 0:
-            raise ValueError("yaw_rate_full_stick_dps must be greater than zero")
+        rate_values = (yaw_center_sensitivity_dps, yaw_max_rate_dps, yaw_expo)
+        if not all(math.isfinite(value) for value in rate_values):
+            raise ValueError("yaw rate mapping values must be finite")
+        if yaw_center_sensitivity_dps <= 0:
+            raise ValueError("yaw center sensitivity must be greater than zero")
+        if yaw_max_rate_dps < yaw_center_sensitivity_dps:
+            raise ValueError("yaw maximum rate must not be below center sensitivity")
+        if not 0.0 <= yaw_expo <= 1.0:
+            raise ValueError("yaw expo must be in [0, 1]")
 
-        self.yaw_rate_full_stick_dps = yaw_rate_full_stick_dps
+        self.yaw_center_sensitivity_dps = yaw_center_sensitivity_dps
+        self.yaw_max_rate_dps = yaw_max_rate_dps
+        self.yaw_expo = yaw_expo
         self.rc_mid = rc_mid
         self.rc_range = rc_mid_range
         self.rc_min = rc_min
         self.rc_max = rc_max
         self.yaw_sign = yaw_sign
 
-    def yaw_rate_to_norm(self, yaw_rate_dps: float) -> float:
-        return clamp(
-            yaw_rate_dps / self.yaw_rate_full_stick_dps,
-            -1.0,
-            1.0,
+    def yaw_norm_to_rate(self, yaw_norm: float) -> float:
+        """Apply Betaflight's Actual-rates curve to normalized yaw stick."""
+        if not math.isfinite(yaw_norm):
+            raise ValueError("normalized yaw command must be finite")
+        yaw_norm = clamp(yaw_norm, -1.0, 1.0)
+        magnitude = abs(yaw_norm)
+        curve = (
+            self.yaw_expo * magnitude**6
+            + (1.0 - self.yaw_expo) * magnitude**2
         )
+        rate = (
+            self.yaw_center_sensitivity_dps * magnitude
+            + (self.yaw_max_rate_dps - self.yaw_center_sensitivity_dps) * curve
+        )
+        return math.copysign(rate, yaw_norm)
+
+    def yaw_rate_to_norm(self, yaw_rate_dps: float) -> float:
+        """Invert Betaflight's monotonic Actual-rates curve by bisection."""
+        if not math.isfinite(yaw_rate_dps):
+            raise ValueError("yaw rate must be finite")
+        sign = -1.0 if yaw_rate_dps < 0.0 else 1.0
+        target = min(abs(yaw_rate_dps), self.yaw_max_rate_dps)
+        lower = 0.0
+        upper = 1.0
+        for _ in range(40):
+            midpoint = (lower + upper) / 2.0
+            if self.yaw_norm_to_rate(midpoint) < target:
+                lower = midpoint
+            else:
+                upper = midpoint
+        return sign * (lower + upper) / 2.0
 
     def yaw_rate_to_rc(self, yaw_rate_dps: float) -> int:
         yaw_norm = self.yaw_rate_to_norm(yaw_rate_dps)

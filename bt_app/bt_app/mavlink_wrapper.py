@@ -5,7 +5,7 @@ import struct
 import time
 import math
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Callable, ClassVar
 
 from loguru import logger as log
 from pymavlink import mavutil
@@ -39,6 +39,77 @@ MAX_UINT16 = 65535
 UNKNOWN_RSSI = 255
 UNKNOWN_CURRENT_BATTERY = -1
 UNKNOWN_BATTERY_REMAINING = -1
+MAX_RECEIVE_DATAGRAMS_PER_POLL = 64
+
+
+@dataclass(frozen=True, slots=True)
+class OdometryVelocitySample:
+    """Validated MAVLink ODOMETRY velocities with both advertised frames."""
+
+    source_time_epoch_us: int
+    received_monotonic_ns: int
+    mavlink_sequence: int
+    reset_counter: int
+    velocity_body_x_m_s: float
+    velocity_body_y_m_s: float
+    velocity_body_z_m_s: float
+    velocity_north_m_s: float
+    velocity_east_m_s: float
+    velocity_down_m_s: float
+
+
+def decode_odometry_velocity(msg, *, received_monotonic_ns: int) -> OdometryVelocitySample:
+    """Validate LOCAL_NED/BODY_FRD ODOMETRY and rotate velocity into NED."""
+
+    if msg.get_type() != "ODOMETRY":
+        raise ValueError("message is not ODOMETRY")
+    if msg.frame_id != mavutil.mavlink.MAV_FRAME_LOCAL_NED:
+        raise ValueError(f"unexpected odometry frame_id {msg.frame_id}")
+    if msg.child_frame_id != mavutil.mavlink.MAV_FRAME_BODY_FRD:
+        raise ValueError(f"unexpected odometry child_frame_id {msg.child_frame_id}")
+
+    source_time_epoch_us = int(msg.time_usec)
+    if source_time_epoch_us <= 0:
+        raise ValueError("odometry timestamp must be positive")
+    if received_monotonic_ns < 0:
+        raise ValueError("odometry receive timestamp must not be negative")
+
+    body = tuple(float(value) for value in (msg.vx, msg.vy, msg.vz))
+    quaternion = tuple(float(value) for value in msg.q)
+    if len(quaternion) != 4 or not all(math.isfinite(value) for value in (*body, *quaternion)):
+        raise ValueError("odometry velocity and quaternion must be finite")
+    norm = math.sqrt(sum(value * value for value in quaternion))
+    if norm <= 1e-12:
+        raise ValueError("odometry quaternion has zero norm")
+    w, x, y, z = (value / norm for value in quaternion)
+    vx, vy, vz = body
+    north = (
+        (1.0 - 2.0 * (y * y + z * z)) * vx
+        + 2.0 * (x * y - w * z) * vy
+        + 2.0 * (x * z + w * y) * vz
+    )
+    east = (
+        2.0 * (x * y + w * z) * vx
+        + (1.0 - 2.0 * (x * x + z * z)) * vy
+        + 2.0 * (y * z - w * x) * vz
+    )
+    down = (
+        2.0 * (x * z - w * y) * vx
+        + 2.0 * (y * z + w * x) * vy
+        + (1.0 - 2.0 * (x * x + y * y)) * vz
+    )
+    return OdometryVelocitySample(
+        source_time_epoch_us=source_time_epoch_us,
+        received_monotonic_ns=int(received_monotonic_ns),
+        mavlink_sequence=int(msg.get_seq()),
+        reset_counter=int(msg.reset_counter),
+        velocity_body_x_m_s=vx,
+        velocity_body_y_m_s=vy,
+        velocity_body_z_m_s=vz,
+        velocity_north_m_s=north,
+        velocity_east_m_s=east,
+        velocity_down_m_s=down,
+    )
 
 
 def make_base_mode(armed: bool) -> int:
@@ -161,6 +232,8 @@ class MavlinkService:
         rc_channels_interval_s: float = RC_CHANNELS_INTERVAL_S,
         v2_extension_channel_status_interval_s: float = V2_EXTENSION_CHANNEL_STATUS_INTERVAL_S,
         poll_interval_s: float = 0.01,
+        on_odometry: Callable[[OdometryVelocitySample], None] | None = None,
+        monotonic_ns: Callable[[], int] = time.monotonic_ns,
     ) -> None:
         self.context = context
         self.qopenhd_addr = qopenhd_addr
@@ -174,6 +247,10 @@ class MavlinkService:
             v2_extension_channel_status_interval_s
         )
         self.poll_interval_s = poll_interval_s
+        self.on_odometry = on_odometry
+        self._monotonic_ns = monotonic_ns
+        self.odometry_accepted = 0
+        self.odometry_rejected = 0
         self._started = False
         self._socket = None
         self._boot_time_s = time.monotonic()
@@ -441,20 +518,44 @@ class MavlinkService:
         if self._socket is None:
             return
 
-        try:
-            data, addr = self._socket.recvfrom(2048)
-        except BlockingIOError:
-            return
+        for _ in range(MAX_RECEIVE_DATAGRAMS_PER_POLL):
+            try:
+                data, addr = self._socket.recvfrom(2048)
+            except BlockingIOError:
+                return
 
-        try:
-            for byte in data:
-                msg = self._parser.parse_char(bytes([byte]))
-                if msg is not None and self._parameter_protocol is not None:
-                    self._schedule_protocol_responses(
-                        self._parameter_protocol.handle(msg, addr)
+            try:
+                for byte in data:
+                    msg = self._parser.parse_char(bytes([byte]))
+                    if msg is not None:
+                        self._handle_received_message(msg, addr)
+            except mavutil.mavlink.MAVError as exc:
+                log.warning("Discarding malformed MAVLink packet from {}: {}", addr, exc)
+
+    def _handle_received_message(self, msg, addr: tuple[str, int]) -> None:
+        if msg.get_type() == "ODOMETRY":
+            try:
+                sample = decode_odometry_velocity(
+                    msg,
+                    received_monotonic_ns=self._monotonic_ns(),
+                )
+            except (TypeError, ValueError, AttributeError) as exc:
+                self.odometry_rejected += 1
+                if self.odometry_rejected == 1 or self.odometry_rejected % 100 == 0:
+                    log.warning(
+                        "Rejected MAVLink odometry count={} reason={}",
+                        self.odometry_rejected,
+                        exc,
                     )
-        except mavutil.mavlink.MAVError as exc:
-            log.warning("Discarding malformed MAVLink packet from {}: {}", addr, exc)
+            else:
+                self.odometry_accepted += 1
+                if self.on_odometry is not None:
+                    self.on_odometry(sample)
+
+        if self._parameter_protocol is not None:
+            self._schedule_protocol_responses(
+                self._parameter_protocol.handle(msg, addr)
+            )
 
     def _schedule_protocol_responses(
         self,

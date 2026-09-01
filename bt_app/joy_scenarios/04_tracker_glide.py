@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tracking-timeout", type=float, default=60.0)
     parser.add_argument("--tracker-pulse-duration", type=float, default=0.25)
     parser.add_argument("--gate-roll", type=int, default=1500)
-    parser.add_argument("--gate-pitch", type=int, default=1300)
+    parser.add_argument("--gate-pitch", type=int, default=1350)
     parser.add_argument("--gate-move-duration", type=float, default=2.0)
     parser.add_argument("--touchdown-altitude", type=float, default=0.15)
     parser.add_argument("--descent-throttle", type=int, default=1640)
