@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BT Analysis</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">BT FLIGHT LAB</p>
+      <h1>Blackbox analysis</h1>
+      <p id="session-subtitle" class="subtitle">Loading latest finished session…</p>
+    </div>
+    <button id="reload" class="button" type="button">Reload latest</button>
+  </header>
+
+  <main id="content" hidden>
+    <section aria-labelledby="overview-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-number">01</p>
+          <h2 id="overview-title">Flight overview</h2>
+        </div>
+        <span id="status-pill" class="status-pill"></span>
+      </div>
+      <div id="summary-cards" class="card-grid"></div>
+      <div class="two-column">
+        <article class="panel">
+          <h3>Recording quality</h3>
+          <dl id="quality-list" class="metric-list"></dl>
+        </article>
+        <article class="panel">
+          <h3>State timeline</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>State</th><th>Start</th><th>Duration</th></tr></thead>
+              <tbody id="state-table"></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section aria-labelledby="velocity-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-number">02</p>
+          <h2 id="velocity-title">Body FLU velocity</h2>
+          <p class="section-copy">Forward, left, and up velocity from MAVLink BODY_FRD odometry.</p>
+        </div>
+        <div class="chart-controls">
+          <label for="data-scope">Show data</label>
+          <select id="data-scope" class="scope-select">
+            <option value="all">Entire flight</option>
+            <option value="through-track">Until end of TRACK (inclusive)</option>
+          </select>
+          <button id="reset-zoom" class="button secondary" type="button" disabled>Reset zoom</button>
+        </div>
+      </div>
+      <div id="velocity-unavailable" class="notice" hidden></div>
+      <article id="chart-panel" class="panel chart-panel">
+        <div id="chart-legend" class="chart-legend" aria-label="Flight state color legend"></div>
+        <div id="chart" class="chart" role="img" aria-label="FLU velocity graph"></div>
+        <div id="chart-tooltip" class="chart-tooltip" hidden></div>
+      </article>
+      <div id="velocity-stats" class="velocity-stats"></div>
+    </section>
+  </main>
+
+  <section id="loading" class="message-card">
+    <div class="spinner" aria-hidden="true"></div>
+    <h2>Reading blackbox</h2>
+    <p>Finding the newest finished flight and loading its Parquet chunks.</p>
+  </section>
+
+  <section id="error" class="message-card error-card" hidden>
+    <p class="eyebrow">DATA UNAVAILABLE</p>
+    <h2 id="error-title">Unable to load a flight</h2>
+    <p id="error-detail"></p>
+    <button id="retry" class="button" type="button">Try again</button>
+  </section>
+
+  <footer>Read-only dashboard · FLU = forward, left, up</footer>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
