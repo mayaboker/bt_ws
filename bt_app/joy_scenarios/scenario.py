@@ -251,6 +251,24 @@ class JoyScenario:
             duration_s=duration_s,
         )
 
+    def manual_align_tracker(
+        self,
+        *,
+        nudge_deflection: int,
+        nudge_duration_s: float,
+        pulse_duration_s: float,
+        key_reader=None,
+    ) -> None:
+        from joy_scenarios.steps import manual_align_tracker
+
+        manual_align_tracker(
+            self,
+            nudge_deflection=nudge_deflection,
+            nudge_duration_s=nudge_duration_s,
+            pulse_duration_s=pulse_duration_s,
+            key_reader=key_reader,
+        )
+
     def wait_for_tracker_exit(self, *, tracking_timeout_s: float) -> None:
         from joy_scenarios.steps import wait_for_tracker_exit
 

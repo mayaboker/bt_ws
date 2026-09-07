@@ -14,10 +14,10 @@ BANNER = """\
 ==============================================================================
 bt-app Tracker Glide Scenario (SITL ONLY)
 ==============================================================================
-Scripted joystick sequence:
-  1. Arm in MANUAL and automatically take off to 10 m.
-  2. Select tracker 1 and move the image-space target gate downward.
-  3. Center the gate command, then pulse enable to lock and enter TRACK.
+Joystick scenario sequence:
+  1. Arm in MANUAL and automatically take off to the requested altitude.
+  2. Select tracker 1 and align the image-space target gate.
+  3. Enable the aligned target to lock and enter TRACK.
   4. Glide under tracker control until TRACK automatically returns to ALT_HOLD.
   5. On tracking timeout, disable the tracker and recover ALT_HOLD.
   6. Switch to MANUAL, land, disarm, and verify IDLE.
@@ -25,6 +25,10 @@ Scripted joystick sequence:
 TRACK exit is used as the target-hit signal; bt-app exposes no separate impact
 event. A timeout still performs a controlled landing but returns exit status 1.
 WARNING: This scenario commands an armed aircraft and is intended for SITL.
+
+Tracker acquisition defaults to automatic. With --tracker-control manual,
+use the arrow keys to nudge the target gate, Space to enable tracking, and Q
+to cancel with a controlled recovery and landing.
 =============================================================================="""
 
 
@@ -40,14 +44,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rate-hz", type=float, default=50.0)
     parser.add_argument("--state-timeout", type=float, default=20.0)
     parser.add_argument("--flight-timeout", type=float, default=120.0)
-    parser.add_argument("--takeoff-altitude", type=float, default=10.0)
+    parser.add_argument("--takeoff-altitude", type=float, default=20.0)
     parser.add_argument("--altitude-tolerance", type=float, default=0.3)
     parser.add_argument("--tracker-entry-timeout", type=float, default=30.0)
     parser.add_argument("--tracking-timeout", type=float, default=60.0)
     parser.add_argument("--tracker-pulse-duration", type=float, default=0.25)
+    parser.add_argument(
+        "--tracker-control",
+        choices=("automatic", "manual"),
+        default="automatic",
+        help="automatically position/enable the tracker or wait for keyboard control",
+    )
     parser.add_argument("--gate-roll", type=int, default=1500)
-    parser.add_argument("--gate-pitch", type=int, default=1400)
+    parser.add_argument("--gate-pitch", type=int, default=1300)
     parser.add_argument("--gate-move-duration", type=float, default=2.0)
+    parser.add_argument("--gate-nudge-duration", type=float, default=0.1)
+    parser.add_argument("--gate-nudge-deflection", type=int, default=200)
     parser.add_argument("--touchdown-altitude", type=float, default=0.15)
     parser.add_argument("--descent-throttle", type=int, default=1640)
     parser.add_argument(
@@ -67,12 +79,15 @@ def validate_args(args: argparse.Namespace) -> None:
         "tracking_timeout",
         "tracker_pulse_duration",
         "gate_move_duration",
+        "gate_nudge_duration",
     ):
         if getattr(args, name) <= 0:
             raise ValueError(f"--{name.replace('_', '-')} must be greater than zero")
     for name in ("gate_roll", "gate_pitch"):
         if not 1000 <= getattr(args, name) <= 2000:
             raise ValueError(f"--{name.replace('_', '-')} must be between 1000 and 2000")
+    if not 1 <= args.gate_nudge_deflection <= 500:
+        raise ValueError("--gate-nudge-deflection must be between 1 and 500")
     if not 1000 <= args.descent_throttle <= 1650:
         raise ValueError("--descent-throttle must be between 1000 and 1650")
 
@@ -106,15 +121,22 @@ def run_scenario(config: ScenarioConfig, args: argparse.Namespace) -> None:
             timeout_s=args.flight_timeout,
         )
         try:
-            scenario.move_target_gate(
-                roll=args.gate_roll,
-                pitch=args.gate_pitch,
-                duration_s=args.gate_move_duration,
-            )
-            scenario.enter_tracker_1(
-                entry_timeout_s=args.tracker_entry_timeout,
-                pulse_duration_s=args.tracker_pulse_duration,
-            )
+            if args.tracker_control == "manual":
+                scenario.manual_align_tracker(
+                    nudge_deflection=args.gate_nudge_deflection,
+                    nudge_duration_s=args.gate_nudge_duration,
+                    pulse_duration_s=args.tracker_pulse_duration,
+                )
+            else:
+                scenario.move_target_gate(
+                    roll=args.gate_roll,
+                    pitch=args.gate_pitch,
+                    duration_s=args.gate_move_duration,
+                )
+                scenario.enter_tracker_1(
+                    entry_timeout_s=args.tracker_entry_timeout,
+                    pulse_duration_s=args.tracker_pulse_duration,
+                )
             scenario.wait_for_tracker_exit(
                 tracking_timeout_s=args.tracking_timeout
             )
@@ -134,6 +156,8 @@ def run_scenario(config: ScenarioConfig, args: argparse.Namespace) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.tracker_control == "manual" and not sys.stdin.isatty():
+            raise ValueError("--tracker-control manual requires an interactive terminal")
         config = config_from_args(args)
         run_scenario(config, args)
     except KeyboardInterrupt:

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Protocol
 
 from bt_app.common import RobotState
 
 from joy_scenarios.models import (
     RC_MAX,
+    RC_MID,
     JoystickCommand,
     ScenarioConfig,
     ScenarioError,
@@ -55,6 +57,15 @@ class ScenarioRuntime(Protocol):
     def logger(self): ...
 
     def clock(self) -> float: ...
+
+    @property
+    def period_s(self) -> float: ...
+
+    def send(self, command: JoystickCommand) -> None: ...
+
+    def poll(self) -> None: ...
+
+    def sleep(self, duration_s: float) -> None: ...
 
 
 def wait_for_telemetry(scenario: ScenarioRuntime) -> None:
@@ -368,6 +379,84 @@ def move_target_gate(
         guard=lambda: scenario.telemetry.state == RobotState.ALT_HOLD,
         guard_description="ALT_HOLD while centering target gate command",
     )
+
+
+def manual_align_tracker(
+    scenario: ScenarioRuntime,
+    *,
+    nudge_deflection: int,
+    nudge_duration_s: float,
+    pulse_duration_s: float,
+    key_reader=None,
+) -> None:
+    """Let an operator position the target gate and request TRACK by keyboard."""
+
+    if not 1 <= nudge_deflection <= RC_MAX - RC_MID:
+        raise ValueError("gate nudge deflection must be between 1 and 500")
+    if nudge_duration_s <= 0 or pulse_duration_s <= 0:
+        raise ValueError("gate nudge and tracker pulse durations must be positive")
+
+    if key_reader is None:
+        from joy_scenarios.keyboard import TerminalKeyReader
+
+        reader_context = TerminalKeyReader()
+    else:
+        reader_context = nullcontext(key_reader)
+
+    centered = JoystickCommand.tracker_1_selected(enable=False)
+    low = RC_MID - nudge_deflection
+    high = RC_MID + nudge_deflection
+    controls = {
+        "left": {"roll": low},
+        "right": {"roll": high},
+        "up": {"pitch": high},
+        "down": {"pitch": low},
+    }
+    scenario.logger.phase(
+        "Manual tracker alignment: arrows nudge gate, Space enables TRACK, Q cancels"
+    )
+
+    with reader_context as reader:
+        while True:
+            scenario.send(centered)
+            scenario.poll()
+            if scenario.telemetry.state == RobotState.TRACK:
+                scenario.logger.phase("TRACK entered")
+                return
+            if scenario.telemetry.state != RobotState.ALT_HOLD:
+                raise ScenarioError(
+                    "Vehicle left ALT_HOLD during manual tracker alignment; "
+                    f"last telemetry: {scenario.telemetry.describe()}"
+                )
+
+            key = reader.read_key(scenario.period_s)
+            if key in controls:
+                command = centered.with_controls(**controls[key])
+                scenario.send_for(
+                    command,
+                    nudge_duration_s,
+                    guard=lambda: scenario.telemetry.state == RobotState.ALT_HOLD,
+                    guard_description="ALT_HOLD during manual target gate nudge",
+                )
+                scenario.send(centered)
+                continue
+            if key == "enable":
+                scenario.logger.phase("Sending manual tracker enable pulse")
+                entered = scenario.send_for_or_until(
+                    centered.with_controls(tracker_enable=RC_MAX),
+                    pulse_duration_s,
+                    lambda: scenario.telemetry.state == RobotState.TRACK,
+                )
+                scenario.send(centered)
+                if entered or scenario.telemetry.state == RobotState.TRACK:
+                    scenario.logger.phase("TRACK entered from manual alignment")
+                    return
+                scenario.logger.phase(
+                    "Tracker enable was not accepted; continue alignment and press Space again"
+                )
+                continue
+            if key == "cancel":
+                raise ScenarioError("Manual tracker alignment cancelled by operator")
 
 
 def wait_for_tracker_exit(

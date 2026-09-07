@@ -169,6 +169,20 @@ uv run python -m joy_scenarios.04_tracker_glide \
   --gate-move-duration 2
 ```
 
+For operator-controlled acquisition, use manual tracker control:
+
+```bash
+uv run python -m joy_scenarios.04_tracker_glide --tracker-control manual
+```
+
+After takeoff, use the arrow keys to nudge the image-space gate and press
+Space to request TRACK. If acquisition is not accepted, continue aligning and
+press Space again. Press `Q` to disable tracker selection and perform the
+normal controlled landing and disarm. Manual alignment has no timeout and
+requires an interactive terminal. Tune each nudge with
+`--gate-nudge-deflection` (default 200 PWM) and `--gate-nudge-duration`
+(default 0.1 seconds). Automatic mode remains the default.
+
 ## Joystick mapping
 
 | RC channel | Control | Low / center / high behavior |
