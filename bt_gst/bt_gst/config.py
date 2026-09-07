@@ -76,7 +76,8 @@ DEFAULT_SELECTOR_ZMQ_ENDPOINT = "tcp://127.0.0.1:5557"
 
 
 @dataclass(frozen=True)
-class DetectorConfig:
+class 
+DetectorConfig:
     enabled: bool = False
     overlay_enabled: bool = False
     low_h: int = 0

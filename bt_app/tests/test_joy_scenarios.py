@@ -3,13 +3,17 @@ from __future__ import annotations
 from dataclasses import replace
 import importlib
 from io import StringIO
+import os
+import pty
 import struct
+import termios
 
 import pytest
 from pymavlink import mavutil
 
 from joy_scenarios import JoystickCommand, ScenarioConfig
 from joy_scenarios.console import ConsoleScenarioLogger
+from joy_scenarios.keyboard import TerminalKeyReader
 from joy_scenarios.models import (
     ColorMode,
     RC_MAX,
@@ -19,7 +23,7 @@ from joy_scenarios.models import (
     TelemetrySnapshot,
 )
 from joy_scenarios.scenario import JoyScenario
-from joy_scenarios.steps import land_manual
+from joy_scenarios.steps import land_manual, manual_align_tracker
 from joy_scenarios.telemetry import StateTransition, TelemetryMonitor
 
 
@@ -193,6 +197,24 @@ def test_console_logger_colors_state_transition_when_forced():
     assert "\033[1;32m" in output
     assert "UNKNOWN -> ALT_HOLD" in output
     assert "armed=True" in output
+
+
+def test_terminal_key_reader_decodes_arrow_and_restores_terminal():
+    master_fd, slave_fd = pty.openpty()
+    stream = os.fdopen(slave_fd, "r")
+    original = termios.tcgetattr(stream.fileno())
+    try:
+        with TerminalKeyReader(stream) as reader:
+            os.write(master_fd, b"\x1b[A")
+            assert reader.read_key(0.1) == "up"
+            os.write(master_fd, b" ")
+            assert reader.read_key(0.1) == "enable"
+            os.write(master_fd, b"q")
+            assert reader.read_key(0.1) == "cancel"
+        assert termios.tcgetattr(stream.fileno()) == original
+    finally:
+        stream.close()
+        os.close(master_fd)
 
 
 class FakeTransport:
@@ -585,6 +607,142 @@ def test_tracker_glide_scenario_composes_successful_profile(monkeypatch):
         "complete",
         "exit",
     ]
+
+
+def test_tracker_glide_manual_mode_uses_keyboard_alignment(monkeypatch):
+    calls = []
+
+    class FakeScenario:
+        logger = FakeLogger()
+
+        def __init__(self, config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            calls.append("exit")
+
+        def wait_for_telemetry(self):
+            pass
+
+        def arm_manual(self):
+            pass
+
+        def auto_takeoff(self):
+            pass
+
+        def wait_for_altitude(self, target, **kwargs):
+            pass
+
+        def manual_align_tracker(self, **kwargs):
+            calls.append(("manual_align", kwargs))
+
+        def wait_for_tracker_exit(self, **kwargs):
+            calls.append("tracker_exit")
+
+        def land_manual(self, throttle):
+            calls.append("land")
+
+        def disarm(self):
+            calls.append("disarm")
+
+        def complete(self):
+            calls.append("complete")
+
+    monkeypatch.setattr(scenario_04_tracker_glide, "JoyScenario", FakeScenario)
+    args = scenario_04_tracker_glide.build_parser().parse_args(
+        ["--tracker-control", "manual"]
+    )
+
+    scenario_04_tracker_glide.run_scenario(
+        scenario_04_tracker_glide.config_from_args(args), args
+    )
+
+    assert [call[0] if isinstance(call, tuple) else call for call in calls] == [
+        "manual_align",
+        "tracker_exit",
+        "land",
+        "disarm",
+        "complete",
+        "exit",
+    ]
+    assert calls[0][1] == {
+        "nudge_deflection": 200,
+        "nudge_duration_s": 0.1,
+        "pulse_duration_s": 0.25,
+    }
+
+
+class FakeKeyReader:
+    def __init__(self, keys):
+        self.keys = iter(keys)
+
+    def read_key(self, timeout_s):
+        return next(self.keys)
+
+
+class ManualAlignmentRuntime:
+    config = ScenarioConfig()
+    period_s = 0.02
+
+    def __init__(self, keys, enable_results=()):
+        self.telemetry = TelemetrySnapshot(state=7, armed=True)
+        self.logger = FakeLogger()
+        self.reader = FakeKeyReader(keys)
+        self.enable_results = iter(enable_results)
+        self.sent = []
+        self.sent_for_calls = []
+
+    def send(self, command):
+        self.sent.append(command)
+
+    def poll(self):
+        pass
+
+    def send_for(self, command, duration_s, **kwargs):
+        self.sent_for_calls.append((command, duration_s))
+
+    def send_for_or_until(self, command, duration_s, predicate):
+        result = next(self.enable_results)
+        if result:
+            self.telemetry = replace(self.telemetry, state=8)
+        return result
+
+
+def test_manual_alignment_maps_arrows_and_enters_track_on_space():
+    runtime = ManualAlignmentRuntime(["left", "up", "enable"], [True])
+
+    manual_align_tracker(
+        runtime,
+        nudge_deflection=200,
+        nudge_duration_s=0.1,
+        pulse_duration_s=0.25,
+        key_reader=runtime.reader,
+    )
+
+    assert runtime.sent_for_calls[0][0].roll == 1300
+    assert runtime.sent_for_calls[0][0].pitch == RC_MID
+    assert runtime.sent_for_calls[1][0].roll == RC_MID
+    assert runtime.sent_for_calls[1][0].pitch == 1700
+    assert runtime.telemetry.state == 8
+
+
+def test_manual_alignment_allows_enable_retry_then_cancel():
+    runtime = ManualAlignmentRuntime(["enable", "right", "cancel"], [False])
+
+    with pytest.raises(ScenarioError, match="cancelled by operator"):
+        manual_align_tracker(
+            runtime,
+            nudge_deflection=200,
+            nudge_duration_s=0.1,
+            pulse_duration_s=0.25,
+            key_reader=runtime.reader,
+        )
+
+    assert runtime.sent_for_calls[0][0].roll == 1700
+    assert any("not accepted" in phase for phase in runtime.logger.phases)
 
 
 def test_tracker_timeout_recovers_lands_and_reports_failure(monkeypatch):
