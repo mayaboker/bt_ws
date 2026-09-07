@@ -165,7 +165,11 @@ class TrackerConfig:
             raise ValueError("tracker yaw sign must be -1 or 1")
         if self.roll_sign not in (-1, 1):
             raise ValueError("tracker roll sign must be -1 or 1")
-        if self.roll_kp_deg < 0.0 or self.roll_max_deg < 0.0 or self.roll_slew_deg_s <= 0.0:
+        if (
+            self.roll_kp_deg < 0.0
+            or self.roll_max_deg < 0.0
+            or self.roll_slew_deg_s <= 0.0
+        ):
             raise ValueError("tracker roll gain, limit, and slew are invalid")
         if self.roll_max_deg > self.angle_limit_deg:
             raise ValueError("tracker roll limit exceeds Betaflight angle limit")
@@ -183,7 +187,9 @@ class TrackerConfig:
             or self.nominal_vertical_speed_m_s <= 0.0
             or self.vertical_accel_limit_m_s2 <= 0.0
         ):
-            raise ValueError("TTC slew, yaw slew, speed, and acceleration must be positive")
+            raise ValueError(
+                "TTC slew, yaw slew, speed, and acceleration must be positive"
+            )
         if not 0.0 <= self.scale_alpha <= 1.0 or not 0.0 <= self.scale_beta <= 1.0:
             raise ValueError("TTC alpha-beta gains must be in [0, 1]")
         if self.vertical_speed_min_m_s >= 0.0 or self.vertical_speed_max_m_s < 0.0:
@@ -275,7 +281,9 @@ class OpticalTtcFilter:
             return ScaleUpdate(True, True, scale, measured_log, 0.0)
         dt_s = observation.received_at_s - self.time_s
         if dt_s <= 0.0:
-            return ScaleUpdate(False, True, scale, measured_log, None, "timestamp order")
+            return ScaleUpdate(
+                False, True, scale, measured_log, None, "timestamp order"
+            )
         predicted = self.log_scale + self.rate_hz * dt_s
         innovation = measured_log - predicted
         if abs(innovation) > math.log1p(config.scale_jump_fraction):
@@ -465,7 +473,10 @@ class TrackerController:
         if self._phase == TrackerPhase.COMMIT:
             return False
         config = self._config_snapshot()
-        if observation is None or now_s - observation.received_at_s > config.target_timeout_s:
+        if (
+            observation is None
+            or now_s - observation.received_at_s > config.target_timeout_s
+        ):
             if not self._active:
                 self._clear_acquisition()
             return False
@@ -657,7 +668,9 @@ class TrackerController:
             if self._commit_deadline_s is not None and now_s >= self._commit_deadline_s:
                 self._completion_latched = True
                 self._request_exit("commit complete")
-            result = self._frozen_result or self._safe_result(config, "commit unavailable")
+            result = self._frozen_result or self._safe_result(
+                config, "commit unavailable"
+            )
             return result
         speed, speed_age, speed_valid = self._validate_vario(
             now_s,
@@ -675,7 +688,10 @@ class TrackerController:
             config,
         )
         observation = self._latest_control_observation
-        if observation is None or now_s - observation.received_at_s > config.target_timeout_s:
+        if (
+            observation is None
+            or now_s - observation.received_at_s > config.target_timeout_s
+        ):
             self._request_exit("tracker observation stale")
             return self._safe_result(config, "tracker observation stale")
         dt_s = max(0.0, now_s - (self._last_update_s or now_s))
@@ -695,16 +711,14 @@ class TrackerController:
         result = observation.result
         dx, dy = self._normalized_errors(result, config)
         horizontal_alignment_scale = clamp(
-            (
-                config.horizontal_stop_threshold - abs(dx)
-            ) / (
-                config.horizontal_stop_threshold
-                - config.horizontal_slow_threshold
-            ),
+            (config.horizontal_stop_threshold - abs(dx))
+            / (config.horizontal_stop_threshold - config.horizontal_slow_threshold),
             0.0,
             1.0,
         )
-        live_frame = self._last_scale_update.accepted and self._last_scale_update.new_frame
+        live_frame = (
+            self._last_scale_update.accepted and self._last_scale_update.new_frame
+        )
         if self._phase == TrackerPhase.ALIGN and self._last_scale_update.new_frame:
             if live_frame and abs(dx) <= config.horizontal_alignment_threshold:
                 self._alignment_count += 1
@@ -761,9 +775,8 @@ class TrackerController:
             # pitch authority.
             alignment_weight = clamp(abs(dy), 0.0, 1.0)
             pitch_raw = (
-                (1.0 - alignment_weight) * ttc_pitch_raw
-                + alignment_weight * config.alignment_pitch_deg
-            )
+                1.0 - alignment_weight
+            ) * ttc_pitch_raw + alignment_weight * config.alignment_pitch_deg
         pitch_raw = clamp(pitch_raw, config.pitch_minimum_deg, 0.0)
         pitch_raw *= horizontal_alignment_scale
         pitch_error = pitch_raw - self._pitch_command_deg
@@ -852,9 +865,7 @@ class TrackerController:
         correction_limit = config.throttle_max_correction_rc
         integration_reduces_saturation = (
             correction_candidate > correction_limit and vertical_error < 0.0
-        ) or (
-            correction_candidate < -correction_limit and vertical_error > 0.0
-        )
+        ) or (correction_candidate < -correction_limit and vertical_error > 0.0)
         if (
             abs(correction_candidate) <= correction_limit
             or integration_reduces_saturation
@@ -904,13 +915,21 @@ class TrackerController:
             result.bbox_width / config.camera_width_px,
             result.bbox_height / config.camera_height_px,
         )
-        clipped_near_field = (
-            self._last_scale_update.reason == "bbox clipped"
-            and fill >= config.clipped_commit_fill_fraction
+        bbox_clipped = self._last_scale_update.reason == "bbox clipped"
+        clipped_fill = min(
+            result.bbox_width / config.camera_width_px,
+            result.bbox_height / config.camera_height_px,
         )
-        commit_block = None if clipped_near_field else self._commit_block(
-            config, fill=fill, measured_ttc=effective_ttc, dx=dx, dy=dy
-        )
+        if bbox_clipped:
+            commit_block = self._clipped_commit_block(
+                config, fill=clipped_fill, dx=dx, dy=dy
+            )
+            clipped_near_field = commit_block is None
+        else:
+            commit_block = self._commit_block(
+                config, fill=fill, measured_ttc=effective_ttc, dx=dx, dy=dy
+            )
+            clipped_near_field = False
         if self._phase == TrackerPhase.TRACKING and self._last_scale_update.new_frame:
             if (live_frame or clipped_near_field) and commit_block is None:
                 self._commit_count += 1
@@ -996,6 +1015,23 @@ class TrackerController:
             return "bbox fill"
         if measured_ttc > config.commit_ttc_s:
             return "ttc"
+        if abs(dx) > config.commit_alignment:
+            return "horizontal alignment"
+        if abs(dy) > config.commit_alignment:
+            return "vertical alignment"
+        return None
+
+    @staticmethod
+    def _clipped_commit_block(
+        config: TrackerConfig,
+        *,
+        fill: float,
+        dx: float,
+        dy: float,
+    ) -> str | None:
+        """Require two-axis fill and alignment when TTC is invalid after clipping."""
+        if fill < config.clipped_commit_fill_fraction:
+            return "clipped bbox fill"
         if abs(dx) > config.commit_alignment:
             return "horizontal alignment"
         if abs(dy) > config.commit_alignment:

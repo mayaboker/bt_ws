@@ -24,9 +24,13 @@ class TargetSelectorCommandMessage:
     center_x: float
     center_y: float
     state: TargetSelectorState
+    roi_width: int | None = None
+    roi_height: int | None = None
 
     def __post_init__(self) -> None:
-        if isinstance(self.timestamp_ns, bool) or not isinstance(self.timestamp_ns, int):
+        if isinstance(self.timestamp_ns, bool) or not isinstance(
+            self.timestamp_ns, int
+        ):
             raise ValueError("timestamp_ns must be an integer")
         if self.timestamp_ns < 0:
             raise ValueError("timestamp_ns must be nonnegative")
@@ -37,23 +41,38 @@ class TargetSelectorCommandMessage:
                 raise ValueError(f"{name} must be between 0.0 and 1.0")
         if not isinstance(self.state, TargetSelectorState):
             raise ValueError("state must be a TargetSelectorState")
+        if (self.roi_width is None) != (self.roi_height is None):
+            raise ValueError("roi_width and roi_height must be provided together")
+        for name, value in (
+            ("roi_width", self.roi_width),
+            ("roi_height", self.roi_height),
+        ):
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            ):
+                raise ValueError(f"{name} must be a positive integer")
 
     def encode(self) -> bytes:
         try:
-            return msgpack.packb(
-                {
-                    "timestamp_ns": self.timestamp_ns,
-                    "center_x": self.center_x,
-                    "center_y": self.center_y,
-                    "state": int(self.state),
-                },
-                use_bin_type=True,
-            )
+            data = {
+                "timestamp_ns": self.timestamp_ns,
+                "center_x": self.center_x,
+                "center_y": self.center_y,
+                "state": int(self.state),
+            }
+            if self.roi_width is not None:
+                data["roi_width"] = self.roi_width
+                data["roi_height"] = self.roi_height
+            return msgpack.packb(data, use_bin_type=True)
         except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError(f"unable to encode target selector command: {exc}") from exc
+            raise ValueError(
+                f"unable to encode target selector command: {exc}"
+            ) from exc
 
     @classmethod
-    def decode(cls, payload: bytes | bytearray | memoryview) -> "TargetSelectorCommandMessage":
+    def decode(
+        cls, payload: bytes | bytearray | memoryview
+    ) -> "TargetSelectorCommandMessage":
         try:
             data = msgpack.unpackb(payload, raw=False)
         except (msgpack.UnpackException, TypeError, ValueError) as exc:
@@ -62,7 +81,9 @@ class TargetSelectorCommandMessage:
             raise ValueError("target selector payload must contain a mapping")
         missing = [field for field in _WIRE_FIELDS if field not in data]
         if missing:
-            raise ValueError("target selector fields are missing: " + ", ".join(missing))
+            raise ValueError(
+                "target selector fields are missing: " + ", ".join(missing)
+            )
         try:
             state = TargetSelectorState(_required_integer(data, "state"))
         except ValueError as exc:
@@ -72,6 +93,8 @@ class TargetSelectorCommandMessage:
             center_x=_required_float(data, "center_x"),
             center_y=_required_float(data, "center_y"),
             state=state,
+            roi_width=_optional_integer(data, "roi_width"),
+            roi_height=_optional_integer(data, "roi_height"),
         )
 
 
@@ -87,3 +110,9 @@ def _required_float(data: dict[Any, Any], field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, float):
         raise ValueError(f"{field} must be a float")
     return value
+
+
+def _optional_integer(data: dict[Any, Any], field: str) -> int | None:
+    if field not in data:
+        return None
+    return _required_integer(data, field)

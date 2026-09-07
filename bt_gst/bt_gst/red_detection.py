@@ -25,11 +25,14 @@ class RedDetection:
     selector_valid: bool = False
     selector_state: int = 0
     candidates: tuple[DetectionBox, ...] = ()
+    score: float = 0.0
+    initialized: bool = False
 
 
 @dataclass
 class DetectionOverlayState:
     _detection: RedDetection | None = None
+    _selector: DetectionBox | None = None
     _lock: Lock = field(default_factory=Lock, repr=False)
 
     def update(self, detection: RedDetection | None) -> None:
@@ -45,6 +48,14 @@ class DetectionOverlayState:
         if detection.pts_ns != timestamp_ns:
             return None
         return detection
+
+    def update_selector(self, selector: DetectionBox | None) -> None:
+        with self._lock:
+            self._selector = selector
+
+    def selector(self) -> DetectionBox | None:
+        with self._lock:
+            return self._selector
 
 
 def read_red_detection(buffer: object) -> RedDetection | None:
@@ -80,4 +91,35 @@ def read_red_detection(buffer: object) -> RedDetection | None:
         selector_valid=bool(structure.get_value("selector-valid")),
         selector_state=int(structure.get_value("selector-state")),
         candidates=candidates,
+    )
+
+
+def read_cpu_nano_detection(
+    buffer: object,
+    gst_video: object,
+    confidence_threshold: float,
+) -> RedDetection | None:
+    """Normalize one CPU NanoTrack ROI meta into the common detection model."""
+
+    meta = gst_video.buffer_get_video_region_of_interest_meta_id(buffer, 0)
+    if meta is None:
+        return None
+    # GstVideo does not expose GLib through every GI namespace. The plugin adds
+    # exactly one ROI with id 0, so the nanotrack parameter is authoritative.
+    parameters = meta.get_param("nanotrack")
+    if parameters is None:
+        return None
+    initialized = bool(parameters.get_value("initialized"))
+    score = 0.0 if initialized else float(parameters.get_value("confidence"))
+    locked = not initialized and score >= confidence_threshold
+    pts = int(buffer.pts)
+    return RedDetection(
+        found=locked,
+        x=int(meta.x),
+        y=int(meta.y),
+        width=int(meta.w),
+        height=int(meta.h),
+        pts_ns=None if pts == GST_CLOCK_TIME_NONE else pts,
+        score=score,
+        initialized=initialized,
     )

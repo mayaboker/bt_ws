@@ -68,3 +68,26 @@ bt-app. The socket worker validates and stores only the newest command; the
 pipeline runner applies it to `controlledreddetect`. The Cairo overlay draws
 all candidates blue, an invalid selector yellow, and the selected target and
 valid selector green.
+
+## Tracker backends
+
+The legacy `detector:` configuration continues to select
+`controlledreddetect`. New configurations can select either backend explicitly
+with `tracker.type: controlled_red` or `tracker.type: cpu_nano`.
+
+CPU NanoTrack consumes BGR frames and publishes the same
+`TrackerResultMessage` wire format as the red detector. Its native metadata is
+different: confidence from `GstVideoRegionOfInterestMeta` is compared with
+`confidence_threshold`; only qualifying boxes are published as locked.
+
+Use `bt_bringup/launch/gst_cpu_nano.yaml` for selector-controlled NanoTrack:
+
+```bash
+export GST_PLUGIN_PATH="$PWD/build-cpunanotracker${GST_PLUGIN_PATH:+:$GST_PLUGIN_PATH}"
+bt-gst run -c ../bt_bringup/launch/gst_cpu_nano.yaml
+```
+
+In `initialization: selector` mode, target-selector coordinates reposition a
+configured `selector_roi_size` and reinitialize tracking. Use
+`initialization: fixed` with `fixed_roi: [x, y, width, height]` to start from a
+static ROI instead. Existing `selector_zmq` and `zmq` endpoints are unchanged.

@@ -29,7 +29,9 @@ class TerminalKeyReader:
 
     def __enter__(self) -> TerminalKeyReader:
         if not self.stream.isatty():
-            raise RuntimeError("manual tracker control requires an interactive terminal")
+            raise RuntimeError(
+                "manual tracker control requires an interactive terminal"
+            )
         self._saved_settings = termios.tcgetattr(self.fd)
         tty.setcbreak(self.fd)
         return self
@@ -63,6 +65,8 @@ class TerminalKeyReader:
             return ARROW_KEYS.get(bytes(sequence))
         if first == b" ":
             return "enable"
+        if first.lower() in (b"a", b"d", b"w", b"s"):
+            return first.lower().decode("ascii")
         if first.lower() == b"q":
             return "cancel"
         return None

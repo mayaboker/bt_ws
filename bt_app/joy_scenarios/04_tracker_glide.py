@@ -27,7 +27,7 @@ event. A timeout still performs a controlled landing but returns exit status 1.
 WARNING: This scenario commands an armed aircraft and is intended for SITL.
 
 Tracker acquisition defaults to automatic. With --tracker-control manual,
-use the arrow keys to nudge the target gate, Space to enable tracking, and Q
+use the arrow keys to nudge the target gate, A/D and S/W to resize it, Space to enable tracking, and Q
 to cancel with a controlled recovery and landing.
 =============================================================================="""
 
@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--altitude-tolerance", type=float, default=0.3)
     parser.add_argument("--tracker-entry-timeout", type=float, default=30.0)
     parser.add_argument("--tracking-timeout", type=float, default=60.0)
-    parser.add_argument("--tracker-pulse-duration", type=float, default=0.25)
+    parser.add_argument("--tracker-pulse-duration", type=float, default=0.5)
     parser.add_argument(
         "--tracker-control",
         choices=("automatic", "manual"),
@@ -85,7 +85,9 @@ def validate_args(args: argparse.Namespace) -> None:
             raise ValueError(f"--{name.replace('_', '-')} must be greater than zero")
     for name in ("gate_roll", "gate_pitch"):
         if not 1000 <= getattr(args, name) <= 2000:
-            raise ValueError(f"--{name.replace('_', '-')} must be between 1000 and 2000")
+            raise ValueError(
+                f"--{name.replace('_', '-')} must be between 1000 and 2000"
+            )
     if not 1 <= args.gate_nudge_deflection <= 500:
         raise ValueError("--gate-nudge-deflection must be between 1 and 500")
     if not 1000 <= args.descent_throttle <= 1650:
@@ -137,9 +139,7 @@ def run_scenario(config: ScenarioConfig, args: argparse.Namespace) -> None:
                     entry_timeout_s=args.tracker_entry_timeout,
                     pulse_duration_s=args.tracker_pulse_duration,
                 )
-            scenario.wait_for_tracker_exit(
-                tracking_timeout_s=args.tracking_timeout
-            )
+            scenario.wait_for_tracker_exit(tracking_timeout_s=args.tracking_timeout)
         except ScenarioError as exc:
             tracking_failure = exc
             scenario.logger.failure(f"Tracker phase failed: {exc}")
@@ -157,7 +157,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.tracker_control == "manual" and not sys.stdin.isatty():
-            raise ValueError("--tracker-control manual requires an interactive terminal")
+            raise ValueError(
+                "--tracker-control manual requires an interactive terminal"
+            )
         config = config_from_args(args)
         run_scenario(config, args)
     except KeyboardInterrupt:

@@ -10,6 +10,7 @@ from bt_app.common import RobotState
 from joy_scenarios.models import (
     RC_MAX,
     RC_MID,
+    RC_MIN,
     JoystickCommand,
     ScenarioConfig,
     ScenarioError,
@@ -23,7 +24,9 @@ class ScenarioRuntime(Protocol):
     @property
     def telemetry(self) -> TelemetrySnapshot: ...
 
-    def send_for(self, command: JoystickCommand, duration_s: float, **kwargs) -> None: ...
+    def send_for(
+        self, command: JoystickCommand, duration_s: float, **kwargs
+    ) -> None: ...
 
     def send_for_or_until(
         self,
@@ -211,9 +214,7 @@ def change_altitude(
         return setpoint >= target_m if ascending else setpoint <= target_m
 
     direction = "climbing" if ascending else "descending"
-    scenario.logger.phase(
-        f"ALT_HOLD {direction}: moving setpoint to {target_m:.2f} m"
-    )
+    scenario.logger.phase(f"ALT_HOLD {direction}: moving setpoint to {target_m:.2f} m")
     scenario.wait_until(
         command,
         setpoint_reached,
@@ -412,8 +413,15 @@ def manual_align_tracker(
         "up": {"pitch": high},
         "down": {"pitch": low},
     }
+    resize_controls = {
+        "a": (RC_MID, RC_MIN),
+        "d": (RC_MAX, RC_MIN),
+        "s": (RC_MIN, RC_MID),
+        "w": (RC_MIN, RC_MAX),
+    }
     scenario.logger.phase(
-        "Manual tracker alignment: arrows nudge gate, Space enables TRACK, Q cancels"
+        "Manual tracker alignment: arrows move, A/D resize width, S/W resize height, "
+        "Space enables TRACK, Q cancels"
     )
 
     with reader_context as reader:
@@ -437,6 +445,19 @@ def manual_align_tracker(
                     nudge_duration_s,
                     guard=lambda: scenario.telemetry.state == RobotState.ALT_HOLD,
                     guard_description="ALT_HOLD during manual target gate nudge",
+                )
+                scenario.send(centered)
+                continue
+            if key in resize_controls:
+                width_rc, height_rc = resize_controls[key]
+                command = centered.with_controls(
+                    extended_channels=(width_rc, height_rc, *(RC_MIN,) * 7)
+                )
+                scenario.send_for(
+                    command,
+                    nudge_duration_s,
+                    guard=lambda: scenario.telemetry.state == RobotState.ALT_HOLD,
+                    guard_description="ALT_HOLD during manual target gate resize",
                 )
                 scenario.send(centered)
                 continue
@@ -519,10 +540,7 @@ def land_manual(scenario: ScenarioRuntime, throttle: int) -> None:
             return consecutive_samples >= 3
         last_sample_count = scenario.telemetry.altitude_samples
         altitude = scenario.telemetry.altitude_m
-        if (
-            altitude is not None
-            and altitude <= scenario.config.touchdown_altitude_m
-        ):
+        if altitude is not None and altitude <= scenario.config.touchdown_altitude_m:
             consecutive_samples += 1
         else:
             consecutive_samples = 0

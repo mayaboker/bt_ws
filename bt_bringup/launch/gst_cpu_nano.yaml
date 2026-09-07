@@ -1,0 +1,28 @@
+source:
+  type: simulation
+  topic: /X3/front_camera/image
+  rate: 30
+tracker:
+  enabled: true
+  type: cpu_nano
+  overlay_enabled: true
+  cpu_nano:
+    models_dir: /home/user/projects/bt_ws/bt_gst/src/cpunanotracker/models
+    initialization: selector
+    selector_roi_size: [60, 90]
+    confidence_threshold: 0.5
+zmq:
+  enabled: true
+  endpoint: tcp://127.0.0.1:5556
+  bind: true
+  max_rate_hz: 30
+selector_zmq:
+  enabled: true
+  endpoint: tcp://127.0.0.1:5557
+  bind: false
+  command_timeout_s: 0.5
+video_local: true
+codec: h264
+host: 127.0.0.1
+port: 5000
+mtu: 1200

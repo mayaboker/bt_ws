@@ -376,7 +376,7 @@ Fill is the larger of the bbox width fraction and height fraction:
 fill = max(bbox_width / image_width, bbox_height / image_height)
 ```
 
-The normal path requires fill ≥ 0.60, TTC ≤ 0.50 seconds, and both alignment errors ≤ 0.15 for five consecutive accepted camera frames. A second near-field path accepts five distinct fresh, locked, clipped frames with fill ≥ `TTC_CLIP_FILL=0.80`. This path does not use the frozen TTC or alignment gates because bbox scale and center are incomplete after clipping. Duplicate control-loop reads never advance either path.
+The normal path requires fill ≥ 0.30, TTC ≤ 0.50 seconds, and both alignment errors ≤ 0.15 for five consecutive accepted camera frames. A second near-field path accepts five distinct fresh, locked, clipped frames only when both the width and height fill fractions are at least `TTC_CLIP_FILL=0.95` and both alignment errors remain within `TTC_ALIGN`. It does not use frozen TTC because bbox scale is incomplete after clipping. Duplicate control-loop reads never advance either path.
 
 When the count reaches `TTC_COMMIT_FR`, the controller:
 
@@ -407,13 +407,13 @@ The most important active defaults are:
 | Acquisition/loss | `TTC_LOCK_FR=8`, `TTC_LOCK_S=0.20`, `TTC_TIMEOUT=0.25` |
 | Initial alignment | `TTC_ALN_PIT=-5`, horizontal `TTC_ALN_XY=0.25`, `TTC_ALN_FR=5`; vertical image error commands bounded climb/descent |
 | Pitch/TTC | `TTC_PIT_INIT=-10`, `TTC_PIT_MIN=-15`, forward slew `TTC_PIT_SLEW=5`, recovery slew `TTC_PIT_REC=25`, `TTC_INV_KP=10` |
-| Vertical profile | `TGT_HEIGHT_M=0.2`, countdown TTC feedforward, `TTC_VY_NOM=1.0` pitch timing, `TTC_DY_KP=1.5`, `TTC_DY_VMAX=0.5`, clipped recovery `TTC_DY_NEAR=1.5`, `TRK_VZ_ACCEL=1.0` |
+| Vertical profile | `TGT_HEIGHT_M=1.1`, countdown TTC feedforward, `TTC_VY_NOM=1.2` pitch timing, `TTC_DY_KP=1.5`, `TTC_DY_VMAX=0.5`, clipped recovery `TTC_DY_NEAR=1.5`, `TRK_VZ_ACCEL=1.0` |
 | Vertical PI-D | `TTC_VY_KP=20`, `TTC_VY_KI=3`, `TTC_VY_KD=10`, `TTC_AZ_ALPHA=0.2` |
-| Vertical limits | `TTC_VY_MIN=-5`, `TTC_VY_MAX=2`, `TTC_VY_I_MAX=40`, `TTC_THR_MAX=140` |
+| Vertical limits | `TTC_VY_MIN=-7`, `TTC_VY_MAX=2`, `TTC_VY_I_MAX=40`, `TTC_THR_MAX=140` |
 | Yaw | `TRK_YAW_KP=20`, `TRK_YAW_MAX=15`, `TRK_YAW_SLEW=20`, `TRK_YAW_SIGN=-1`, `TRK_DEADBAND=0.02` |
 | Roll | Image-error lateral correction with `TRK_ROLL_KP=90`, `TRK_ROLL_MAX=20`, `TRK_ROLL_SLEW=40`, and `TRK_ROLL_SIGN=1` |
 | Horizontal gate | Full forward pitch through `TRK_XY_SLOW=0.10`, linearly reduced to zero at `TRK_XY_STOP=0.25`; roll, yaw, and vertical control remain active |
-| Commit | `TTC_FILL=0.60`, `TTC_CLIP_FILL=0.80`, `TTC_ALIGN=0.15`, `TTC_COMMIT_FR=5`, `TTC_MIN_S=0.50` |
+| Commit | `TTC_FILL=0.30`, `TTC_CLIP_FILL=0.95`, `TTC_ALIGN=0.15`, `TTC_COMMIT_FR=5`, `TTC_MIN_S=0.50` |
 
 Parameter-change callbacks rebuild and validate an immutable `TrackerConfig`. Each observe or update operation takes a lock-protected configuration snapshot, so one iteration uses a consistent set of values.
 

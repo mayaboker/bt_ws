@@ -12,10 +12,12 @@ from bt_gst.config import (
     AppConfigOverrides,
     CameraSourceConfig,
     ConfigError,
+    CpuNanoConfig,
     DetectorConfig,
     FileSourceConfig,
     SimulationSourceConfig,
     SelectorZmqConfig,
+    TrackerConfig,
     ZmqConfig,
     load_config_overrides,
     resolve_config,
@@ -24,6 +26,7 @@ from bt_gst.config import (
 from bt_gst.pipeline_builder import build_pipeline_description
 from bt_gst.pipeline_runner import (
     _WarningRateLimiter,
+    _apply_selector_command,
     _on_detection_overlay_draw,
     _on_detector_buffer,
 )
@@ -33,6 +36,7 @@ from bt_gst.red_detection import (
     DetectionBox,
     RedDetection,
     read_red_detection,
+    read_cpu_nano_detection,
 )
 
 
@@ -86,7 +90,7 @@ def test_detector_pipeline_contains_plugin_and_overlay_without_appsink() -> None
         )
     )
 
-    assert "controlledreddetect name=red_detector" in pipeline
+    assert "controlledreddetect name=tracker_backend" in pipeline
     assert "cairooverlay name=detection_overlay" in pipeline
     assert "appsink" not in pipeline
 
@@ -111,6 +115,74 @@ def test_detector_accepts_wrapped_red_hue_range() -> None:
     assert "low-h=170" in pipeline
     assert "high-h=10" in pipeline
     assert "minimum-area=10" in pipeline
+
+
+def test_cpu_nano_pipeline_uses_bgr_and_selector_initialization() -> None:
+    pipeline = build_pipeline_description(
+        AppConfig(
+            source=SimulationSourceConfig("/camera"),
+            tracker=TrackerConfig(
+                enabled=True,
+                type="cpu_nano",
+                overlay_enabled=True,
+                cpu_nano=CpuNanoConfig(
+                    models_dir=Path("models/nano track"),
+                    initialization="selector",
+                ),
+            ),
+            video_local=False,
+        )
+    )
+
+    assert "video/x-raw,format=BGR" in pipeline
+    assert "cpunanotrack name=tracker_backend enabled=false" in pipeline
+    assert "models-dir='models/nano track'" in pipeline
+    assert "cairooverlay name=detection_overlay" in pipeline
+
+
+def test_cpu_nano_fixed_pipeline_starts_enabled_with_roi() -> None:
+    pipeline = build_pipeline_description(
+        AppConfig(
+            source=SimulationSourceConfig("/camera"),
+            tracker=TrackerConfig(
+                enabled=True,
+                type="cpu_nano",
+                cpu_nano=CpuNanoConfig(
+                    models_dir=Path("models"),
+                    initialization="fixed",
+                    fixed_roi=(10, 20, 30, 40),
+                ),
+            ),
+            video_local=False,
+        )
+    )
+
+    assert "enabled=true roi=10,20,30,40" in pipeline
+
+
+def test_loads_cpu_nano_tracker_config_and_rejects_legacy_conflict(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n  type: simulation\n  topic: /camera\n"
+        "tracker:\n  enabled: true\n  type: cpu_nano\n  overlay_enabled: true\n"
+        "  cpu_nano:\n    models_dir: models\n    initialization: selector\n"
+        "    selector_roi_size: [80, 100]\n    confidence_threshold: 0.7\n",
+        encoding="utf-8",
+    )
+    config = resolve_config(AppConfig(), load_config_overrides(config_path))
+
+    assert config.tracker is not None
+    assert config.tracker.type == "cpu_nano"
+    assert config.tracker.cpu_nano.selector_roi_size == (80, 100)
+    assert config.tracker.cpu_nano.confidence_threshold == pytest.approx(0.7)
+    validate_config(config)
+
+    conflict = tmp_path / "conflict.yaml"
+    conflict.write_text("tracker: {}\ndetector: {}\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="cannot be used together"):
+        load_config_overrides(conflict)
 
 
 def test_loads_and_resolves_zmq_config(tmp_path: Path) -> None:
@@ -154,7 +226,7 @@ def test_loads_selector_zmq_config(tmp_path: Path) -> None:
 
 
 def test_zmq_requires_enabled_detector() -> None:
-    with pytest.raises(ConfigError, match="requires detector.enabled"):
+    with pytest.raises(ConfigError, match="requires an enabled tracker"):
         validate_config(
             AppConfig(
                 source=FileSourceConfig(Path("video.avi")),
@@ -208,7 +280,12 @@ def test_detection_overlay_colors_candidates_and_selector():
     state = DetectionOverlayState()
     state.update(
         RedDetection(
-            True, 10, 20, 30, 40, 123,
+            True,
+            10,
+            20,
+            30,
+            40,
+            123,
             selector=DetectionBox(5, 6, 80, 80),
             selector_valid=True,
             selector_state=1,
@@ -232,7 +309,12 @@ def test_detection_overlay_hides_selector_when_target_is_locked():
     state = DetectionOverlayState()
     state.update(
         RedDetection(
-            True, 10, 20, 30, 40, 123,
+            True,
+            10,
+            20,
+            30,
+            40,
+            123,
             selector=DetectionBox(5, 6, 80, 80),
             selector_valid=True,
             selector_state=2,
@@ -276,9 +358,7 @@ class FakeMeta:
 
 
 class FakeBuffer:
-    def __init__(
-        self, pts: int, has_meta: bool = True, found: bool = True
-    ) -> None:
+    def __init__(self, pts: int, has_meta: bool = True, found: bool = True) -> None:
         self.pts = pts
         self.has_meta = has_meta
         self.found = found
@@ -287,6 +367,133 @@ class FakeBuffer:
     def get_custom_meta(self, _name: str) -> FakeMeta | None:
         self.meta_reads += 1
         return FakeMeta(self.found) if self.has_meta else None
+
+
+class FakeNanoParameters:
+    def __init__(self, initialized: bool, confidence: float = 0.0) -> None:
+        self.values = {"initialized": initialized, "confidence": confidence}
+
+    def get_value(self, name: str) -> object:
+        return self.values[name]
+
+
+class FakeNanoMeta:
+    x, y, w, h = 10, 20, 30, 40
+
+    def __init__(self, initialized: bool, confidence: float = 0.0) -> None:
+        self.parameters = FakeNanoParameters(initialized, confidence)
+
+    def get_param(self, name: str) -> FakeNanoParameters | None:
+        return self.parameters if name == "nanotrack" else None
+
+
+class FakeGstVideo:
+    meta = None
+
+    @classmethod
+    def buffer_get_video_region_of_interest_meta_id(cls, buffer, meta_id):
+        assert meta_id == 0
+        return cls.meta
+
+
+def test_cpu_nano_metadata_maps_confidence_to_common_lock() -> None:
+    buffer = FakeBuffer(123, has_meta=False)
+    FakeGstVideo.meta = FakeNanoMeta(initialized=True)
+    initialized = read_cpu_nano_detection(buffer, FakeGstVideo, 0.5)
+    FakeGstVideo.meta = FakeNanoMeta(initialized=False, confidence=0.49)
+    weak = read_cpu_nano_detection(buffer, FakeGstVideo, 0.5)
+    FakeGstVideo.meta = FakeNanoMeta(initialized=False, confidence=0.75)
+    locked = read_cpu_nano_detection(buffer, FakeGstVideo, 0.5)
+
+    assert initialized is not None and initialized.initialized and not initialized.found
+    assert weak is not None and not weak.found and weak.score == pytest.approx(0.49)
+    assert locked == RedDetection(
+        True, 10, 20, 30, 40, 123, score=0.75, initialized=False
+    )
+
+
+class FakeCapsStructure:
+    def get_value(self, name):
+        return {"width": 640, "height": 480}[name]
+
+
+class FakeCaps:
+    def get_size(self):
+        return 1
+
+    def get_structure(self, index):
+        assert index == 0
+        return FakeCapsStructure()
+
+
+class FakePad:
+    def get_current_caps(self):
+        return FakeCaps()
+
+
+class FakeTrackerElement:
+    def __init__(self):
+        self.properties = []
+
+    def get_static_pad(self, name):
+        assert name == "sink"
+        return FakePad()
+
+    def set_property(self, name, value):
+        self.properties.append((name, value))
+
+
+def test_cpu_nano_selector_centers_and_clamps_roi() -> None:
+    element = FakeTrackerElement()
+    tracker = TrackerConfig(
+        enabled=True,
+        type="cpu_nano",
+        cpu_nano=CpuNanoConfig(selector_roi_size=(60, 90)),
+    )
+    command = type("Command", (), {"center_x": 1.0, "center_y": 0.0, "state": 1})()
+
+    _apply_selector_command(element, command, tracker)
+
+    assert element.properties == [("roi", "580,0,60,90"), ("enabled", False)]
+
+
+def test_cpu_nano_starts_only_on_locked_command_and_uses_command_size() -> None:
+    element = FakeTrackerElement()
+    tracker = TrackerConfig(
+        enabled=True,
+        type="cpu_nano",
+        cpu_nano=CpuNanoConfig(selector_roi_size=(60, 90)),
+    )
+    command = type(
+        "Command",
+        (),
+        {
+            "center_x": 0.5,
+            "center_y": 0.5,
+            "state": 2,
+            "roi_width": 80,
+            "roi_height": 100,
+        },
+    )()
+
+    _apply_selector_command(element, command, tracker)
+
+    assert element.properties == [("roi", "280,190,80,100"), ("enabled", True)]
+
+
+def test_cpu_nano_selector_updates_fixed_overlay_gate() -> None:
+    element = FakeTrackerElement()
+    state = DetectionOverlayState()
+    tracker = TrackerConfig(
+        enabled=True,
+        type="cpu_nano",
+        cpu_nano=CpuNanoConfig(selector_roi_size=(60, 90)),
+    )
+    command = type("Command", (), {"center_x": 0.5, "center_y": 0.5, "state": 1})()
+
+    _apply_selector_command(element, command, tracker, state)
+
+    assert state.selector() == DetectionBox(290, 195, 60, 90)
 
 
 def test_read_red_detection_handles_timestamp_and_missing_meta() -> None:
@@ -407,6 +614,36 @@ def test_detector_probe_skips_missing_metadata_and_preserves_frame_gap() -> None
     assert [message.frame_id for message in publisher.messages] == [2]
 
 
+def test_probe_silently_skips_metadata_while_tracker_is_disabled() -> None:
+    class RecordingLimiter:
+        calls = 0
+
+        def ready(self):
+            self.calls += 1
+            return True
+
+    publisher = FakePublisher()
+    limiter = RecordingLimiter()
+    buffer = FakeBuffer(100, has_meta=False)
+
+    _on_detector_buffer(
+        None,
+        FakeProbeInfo(buffer),
+        (
+            None,
+            publisher,
+            iter(range(1, 100)),
+            limiter,
+            FakeGst,
+            read_red_detection,
+            lambda: False,
+        ),
+    )
+
+    assert publisher.messages == []
+    assert limiter.calls == 0
+
+
 def test_detector_probe_publishes_unlocked_zero_box_when_not_found() -> None:
     publisher = FakePublisher()
 
@@ -422,9 +659,7 @@ def test_detector_probe_publishes_unlocked_zero_box_when_not_found() -> None:
         ),
     )
 
-    assert publisher.messages == [
-        TrackerResultMessage(frame_id=1, timestamp_ns=100)
-    ]
+    assert publisher.messages == [TrackerResultMessage(frame_id=1, timestamp_ns=100)]
 
 
 def test_missing_metadata_warning_limiter_allows_one_warning_per_interval() -> None:
@@ -487,3 +722,5 @@ def test_resolve_config_accepts_empty_override() -> None:
         AppConfigOverrides(),
     )
     assert config.source == FileSourceConfig(Path("video.avi"))
+    (TrackerConfig,)
+    (_apply_selector_command,)

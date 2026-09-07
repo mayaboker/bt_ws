@@ -356,8 +356,12 @@ def test_yaw_rate_slew_limits_initial_command_and_sign_reversal():
     acquire(controller)
     right = observation(14, 0.52, x=530)
     controller.observe(
-        right, now_s=0.52, mode_selected=True, altitude_m=10.0,
-        vertical_speed_m_s=0.0, altitude_sample_time_s=0.52,
+        right,
+        now_s=0.52,
+        mode_selected=True,
+        altitude_m=10.0,
+        vertical_speed_m_s=0.0,
+        altitude_sample_time_s=0.52,
     )
     first = controller.update(
         now_s=0.52, vertical_speed_m_s=0.0, vertical_speed_sample_time_s=0.52
@@ -368,8 +372,12 @@ def test_yaw_rate_slew_limits_initial_command_and_sign_reversal():
 
     left = observation(15, 0.56, x=10)
     controller.observe(
-        left, now_s=0.56, mode_selected=True, altitude_m=10.0,
-        vertical_speed_m_s=0.0, altitude_sample_time_s=0.56,
+        left,
+        now_s=0.56,
+        mode_selected=True,
+        altitude_m=10.0,
+        vertical_speed_m_s=0.0,
+        altitude_sample_time_s=0.56,
     )
     reversing = controller.update(
         now_s=0.56, vertical_speed_m_s=0.0, vertical_speed_sample_time_s=0.56
@@ -468,7 +476,9 @@ def test_bbox_expansion_estimates_inverse_ttc():
     acquire(controller)
     scale_factor = math.exp(1.5 * 0.04)
     controller.observe(
-        observation(14, 0.52, width=round(100 * scale_factor), height=round(80 * scale_factor)),
+        observation(
+            14, 0.52, width=round(100 * scale_factor), height=round(80 * scale_factor)
+        ),
         now_s=0.52,
         mode_selected=True,
         altitude_m=10.0,
@@ -629,13 +639,13 @@ def test_clipped_scale_uses_counting_down_effective_ttc():
     assert controller._diagnostics.vertical_schedule_ttc_s == pytest.approx(4.0)
 
 
-def test_large_clipped_bbox_enters_commit_without_fresh_ttc():
+def test_large_aligned_clipped_bbox_enters_commit_without_fresh_ttc():
     controller = TrackerController(FakeParameters())
     time_s = acquire(controller)
     for frame in range(14, 19):
         time_s += 0.04
         controller.observe(
-            observation(frame, time_s, width=600, height=390, x=0, y=90),
+            observation(frame, time_s, width=600, height=390, x=0, y=45),
             now_s=time_s,
             mode_selected=True,
             altitude_m=1.0,
@@ -651,3 +661,51 @@ def test_large_clipped_bbox_enters_commit_without_fresh_ttc():
     assert result.phase == TrackerPhase.COMMIT
     assert result.terminal_ready
     assert result.terminal_block_reason is None
+
+
+def test_stretched_clipped_bbox_cannot_false_commit():
+    controller = TrackerController(FakeParameters())
+    time_s = acquire(controller)
+    for frame in range(14, 21):
+        time_s += 0.04
+        controller.observe(
+            observation(frame, time_s, width=633, height=149, x=7, y=331),
+            now_s=time_s,
+            mode_selected=True,
+            altitude_m=7.0,
+            vertical_speed_m_s=-3.7,
+            altitude_sample_time_s=time_s,
+        )
+        result = controller.update(
+            now_s=time_s,
+            vertical_speed_m_s=-3.7,
+            vertical_speed_sample_time_s=time_s,
+        )
+
+    assert result.phase == TrackerPhase.TRACKING
+    assert not result.terminal_ready
+    assert result.terminal_block_reason == "clipped bbox fill"
+
+
+def test_large_clipped_bbox_requires_alignment_before_commit():
+    controller = TrackerController(FakeParameters())
+    time_s = acquire(controller)
+    for frame in range(14, 21):
+        time_s += 0.04
+        controller.observe(
+            observation(frame, time_s, width=620, height=460, x=100, y=10),
+            now_s=time_s,
+            mode_selected=True,
+            altitude_m=2.0,
+            vertical_speed_m_s=-1.0,
+            altitude_sample_time_s=time_s,
+        )
+        result = controller.update(
+            now_s=time_s,
+            vertical_speed_m_s=-1.0,
+            vertical_speed_sample_time_s=time_s,
+        )
+
+    assert result.phase == TrackerPhase.TRACKING
+    assert not result.terminal_ready
+    assert result.terminal_block_reason == "horizontal alignment"

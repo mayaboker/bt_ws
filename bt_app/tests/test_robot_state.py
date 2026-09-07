@@ -421,7 +421,12 @@ def test_alt_hold_override_priority_is_failsafe_then_manual_then_track():
 @pytest.mark.parametrize(
     ("joystick", "joy_failsafe", "exit_requested", "expected"),
     [
-        (InternalJoystick(tracker_mode=TrackerMode.TRACKER1), True, True, RobotState.FAILSAFE),
+        (
+            InternalJoystick(tracker_mode=TrackerMode.TRACKER1),
+            True,
+            True,
+            RobotState.FAILSAFE,
+        ),
         (
             InternalJoystick(manual=RC_MIN, tracker_mode=TrackerMode.TRACKER1),
             False,
@@ -588,12 +593,13 @@ def test_tracker_enable_requires_observed_low_before_startup_high():
     assert not app.ctx.tracker_start_requested
 
 
-def test_tracker_enable_rising_edge_is_one_loop_pulse():
+def test_tracker_enable_request_remains_active_during_alt_hold_acquisition():
     app = make_app_with_context()
     app.ctx.request_rc = InternalJoystick(
         tracker_mode=TrackerMode.TRACKER2,
         tracker_enable=RC_MIN,
     )
+    app.ctx.state = RobotState.ALT_HOLD
     app._prepare_tracker_switches()
     app.ctx.request_rc = app.ctx.request_rc._replace(tracker_enable=RC_MAX)
 
@@ -601,6 +607,12 @@ def test_tracker_enable_rising_edge_is_one_loop_pulse():
     assert app.ctx.tracker_start_requested
     assert app._selected_tracker_mode == TrackerMode.TRACKER2
 
+    app._prepare_tracker_switches()
+    assert app.ctx.tracker_start_requested
+
+    app.ctx.state = RobotState.TRACK
+    app._prepare_tracker_switches()
+    assert app.ctx.tracker_start_requested
     app._prepare_tracker_switches()
     assert not app.ctx.tracker_start_requested
 

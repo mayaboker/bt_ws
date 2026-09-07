@@ -28,6 +28,26 @@ def test_selector_command_round_trip_and_wire_shape():
     }
 
 
+def test_selector_command_round_trips_optional_roi_size():
+    message = command(roi_width=80, roi_height=120)
+
+    assert TargetSelectorCommandMessage.decode(message.encode()) == message
+    assert msgpack.unpackb(message.encode(), raw=False)["roi_width"] == 80
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"roi_width": 0, "roi_height": 10},
+        {"roi_width": 10, "roi_height": -1},
+        {"roi_width": 10},
+    ],
+)
+def test_selector_command_rejects_invalid_roi_size(overrides):
+    with pytest.raises(ValueError, match="roi_"):
+        command(**overrides)
+
+
 def test_selector_command_is_frozen_and_slotted():
     message = command()
     assert not hasattr(message, "__dict__")

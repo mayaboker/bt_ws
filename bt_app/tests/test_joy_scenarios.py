@@ -30,15 +30,9 @@ from joy_scenarios.telemetry import StateTransition, TelemetryMonitor
 scenario_01_basic_takeoff_land = importlib.import_module(
     "joy_scenarios.01_basic_takeoff_land"
 )
-scenario_02_altitude_steps = importlib.import_module(
-    "joy_scenarios.02_altitude_steps"
-)
-scenario_03_alt_hold_yaw = importlib.import_module(
-    "joy_scenarios.03_alt_hold_yaw"
-)
-scenario_04_tracker_glide = importlib.import_module(
-    "joy_scenarios.04_tracker_glide"
-)
+scenario_02_altitude_steps = importlib.import_module("joy_scenarios.02_altitude_steps")
+scenario_03_alt_hold_yaw = importlib.import_module("joy_scenarios.03_alt_hold_yaw")
+scenario_04_tracker_glide = importlib.import_module("joy_scenarios.04_tracker_glide")
 
 
 def wire_message(encoder, message):
@@ -122,9 +116,7 @@ def test_telemetry_counts_fresh_altitude_messages():
     encoder = mavutil.mavlink.MAVLink(None, srcSystem=1, srcComponent=1)
     position = wire_message(
         encoder,
-        encoder.global_position_int_encode(
-            0, 0, 0, 2200, 1750, 0, 0, 0, 65535
-        ),
+        encoder.global_position_int_encode(0, 0, 0, 2200, 1750, 0, 0, 0, 65535),
     )
 
     monitor.consume(position)
@@ -209,6 +201,8 @@ def test_terminal_key_reader_decodes_arrow_and_restores_terminal():
             assert reader.read_key(0.1) == "up"
             os.write(master_fd, b" ")
             assert reader.read_key(0.1) == "enable"
+            os.write(master_fd, b"d")
+            assert reader.read_key(0.1) == "d"
             os.write(master_fd, b"q")
             assert reader.read_key(0.1) == "cancel"
         assert termios.tcgetattr(stream.fileno()) == original
@@ -671,7 +665,7 @@ def test_tracker_glide_manual_mode_uses_keyboard_alignment(monkeypatch):
     assert calls[0][1] == {
         "nudge_deflection": 200,
         "nudge_duration_s": 0.1,
-        "pulse_duration_s": 0.25,
+        "pulse_duration_s": 0.5,
     }
 
 

@@ -11,6 +11,8 @@ from bt_gst.config import (
     FileSourceConfig,
     SimulationSourceConfig,
     SourceConfig,
+    TrackerConfig,
+    effective_tracker_config,
     validate_config,
 )
 
@@ -27,7 +29,7 @@ def build_pipeline_description(config: AppConfig) -> str:
     pipeline_builder_logger.trace("building pipeline source={!r}", source)
     parts = [
         build_source_pipeline_description(source),
-        build_processing_pipeline_description(config.detector),
+        build_processing_pipeline_description(effective_tracker_config(config)),
         "! tee name=video_tee",
         "video_tee. !",
         build_stream_branch_description(config),
@@ -51,18 +53,37 @@ def build_source_pipeline_description(source: SourceConfig) -> str:
     raise ConfigError("source config is required")
 
 
-def build_processing_pipeline_description(detector: DetectorConfig) -> str:
-    if not detector.enabled:
+def build_processing_pipeline_description(tracker: TrackerConfig | DetectorConfig) -> str:
+    if isinstance(tracker, DetectorConfig):
+        tracker = effective_tracker_config(AppConfig(detector=tracker))
+    if not tracker.enabled:
         return "! videoconvert"
+    if tracker.type == "cpu_nano":
+        cpu = tracker.cpu_nano
+        enabled = "true" if cpu.initialization == "fixed" else "false"
+        x, y, width, height = cpu.fixed_roi
+        tracker_description = (
+            "! videoconvert ! video/x-raw,format=BGR ! "
+            "cpunanotrack name=tracker_backend "
+            f"enabled={enabled} roi={x},{y},{width},{height} "
+            f"models-dir={_quote_path(cpu.models_dir)}"
+        )
+        if not tracker.overlay_enabled:
+            return tracker_description
+        return (
+            f"{tracker_description} ! videoconvert ! "
+            "video/x-raw,format=BGRx ! cairooverlay name=detection_overlay"
+        )
+    detector = tracker.controlled_red
     detector_description = (
         "! videoconvert ! video/x-raw,format=RGB ! "
-        "controlledreddetect name=red_detector "
+        "controlledreddetect name=tracker_backend "
         f"detection-enabled=true low-h={detector.low_h} low-s={detector.low_s} "
         f"low-v={detector.low_v} high-h={detector.high_h} "
         f"high-s={detector.high_s} high-v={detector.high_v} "
         f"minimum-area={detector.minimum_area}"
     )
-    if not detector.overlay_enabled:
+    if not tracker.overlay_enabled:
         return detector_description
     return (
         f"{detector_description} ! videoconvert ! "

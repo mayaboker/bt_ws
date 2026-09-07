@@ -2,7 +2,7 @@
 Application entry point
 """
 
-#region
+# region
 import pathlib
 import signal
 import threading
@@ -21,37 +21,32 @@ from bt_app.context import Context, DEFAULT_RC_CHANNELS
 from bt_app.vehicle_config import DroneSink, VehicleConfig
 from bt_app.errors import AppExitCode, AppStartupError
 from bt_app.app_services import AppServices
-from bt_app.common import (
-    NO_RC_CHANNELS, 
-    RobotState,
-    MavSeverity)
+from bt_app.common import NO_RC_CHANNELS, RobotState, MavSeverity
 from bt_app.parameters.generated import ParameterKey
 from bt_app._version import __version__
-from bt_app.common import (
-    FREQ_HZ
-)
+from bt_app.common import FREQ_HZ
 from bt_app.msp.bt_v2 import (
     RC_MAX,
     RC_MID,
     RC_MIN,
     RCChannel_alias as RCChannel,
 )
-from bt_app.common import (
-    AETR1234,
-    InternalJoystick,
-    TrackerMode)
+from bt_app.common import AETR1234, InternalJoystick, TrackerMode
 from bt_msgs import TargetSelectorState
 from loguru import logger as log
+
 # from bt_app.velocity import gps_horizontal_velocity, ned_to_body_frd
 import time
 from bt_app.common.mavlink import NamedValue
-#TODO: remove when rc_channel_control implement adapter
+
+# TODO: remove when rc_channel_control implement adapter
 from bt_joy.server.mavlink import (
     RcChannelsOverrideEvent,
     NoCommunicationEvent,
-    CommunicationResumedEvent
+    CommunicationResumedEvent,
 )
-#endregion
+# endregion
+
 
 class AppLifecycle(Enum):
     NEW = auto()
@@ -140,9 +135,7 @@ class App:
 
         valid_sinks = {DroneSink.SERIAL.value, DroneSink.ETHERNET.value}
         if self.config.drone_sink not in valid_sinks:
-            raise AppStartupError(
-                f"Unsupported drone sink: {self.config.drone_sink}"
-            )
+            raise AppStartupError(f"Unsupported drone sink: {self.config.drone_sink}")
 
         if self.config.drone_sink != DroneSink.SERIAL.value:
             return
@@ -153,7 +146,6 @@ class App:
                 f"Serial port not found: {serial_path}",
                 exit_code=AppExitCode.SERIAL_PORT_NOT_FOUND,
             )
-
 
     def __load_controllers(self):
         """
@@ -184,7 +176,6 @@ class App:
     # def register_joy_interrupt(self, joy_adapter):
     #     joy_adapter.register_interrupt(AETR1234.AUX4, JoyInterrupt.TAKEOFF_REQUEST)
     #     joy_adapter.register_interrupt(AETR1234.AUX1, JoyInterrupt.MANUAL_REQUEST)
-        
 
     def _state_changed_handler(self, previous_state, new_state):
         """
@@ -196,7 +187,6 @@ class App:
         )
 
     def _handle_before_state_changed(self, prev, next):
-        
         """
         run before the state change, one time on change
         """
@@ -226,7 +216,9 @@ class App:
                 self._require_services().manual_land.reset()
 
             case RobotState.ALT_HOLD:
-                base_line = self._require_services().parameters.get(ParameterKey.HOV_BASELINE)
+                base_line = self._require_services().parameters.get(
+                    ParameterKey.HOV_BASELINE
+                )
                 from_takeoff = prev == RobotState.TAKEOFF
                 hold_setpoint = (
                     self._require_services().parameters.get(ParameterKey.TAKEOFF_ALT)
@@ -241,11 +233,10 @@ class App:
                     vertical_speed_m_s=self.ctx.drone_vertical_speed,
                     require_throttle_center=from_takeoff,
                 )
-                controller.set_baseline(base_line)# AETR1234.THROTTLE
+                controller.set_baseline(base_line)  # AETR1234.THROTTLE
                 self.ctx.alt_setpoint = hold_setpoint
                 self._require_services().mavlink.send_named_value_to_gcs(
-                    NamedValue.ALT_SP,
-                    hold_setpoint
+                    NamedValue.ALT_SP, hold_setpoint
                 )
                 previous_throttle = self.ctx.sent_rc[AETR1234.THROTTLE]
                 log.info(
@@ -274,14 +265,19 @@ class App:
 
             case RobotState.FAILSAFE:
                 # set the failsafe controller setpoint to the current altitude
-                base_line = self._require_services().parameters.get(ParameterKey.HOV_BASELINE)
-                self.controllers[RobotState.FAILSAFE].reset(self.ctx.drone_alt)
-                self.controllers[RobotState.FAILSAFE].set_baseline(base_line)# AETR1234.THROTTLE 
-                self._require_services().mavlink.send_named_value_to_gcs(
-                    NamedValue.ALT_SP,
-                    self.ctx.drone_alt
+                base_line = self._require_services().parameters.get(
+                    ParameterKey.HOV_BASELINE
                 )
-                log.info(f"switch to alt hold at altitude {self.ctx.drone_alt} with baseline {base_line}")
+                self.controllers[RobotState.FAILSAFE].reset(self.ctx.drone_alt)
+                self.controllers[RobotState.FAILSAFE].set_baseline(
+                    base_line
+                )  # AETR1234.THROTTLE
+                self._require_services().mavlink.send_named_value_to_gcs(
+                    NamedValue.ALT_SP, self.ctx.drone_alt
+                )
+                log.info(
+                    f"switch to alt hold at altitude {self.ctx.drone_alt} with baseline {base_line}"
+                )
 
         if prev == RobotState.MANUAL and next != RobotState.IDLE:
             self._require_services().manual_land.reset()
@@ -299,7 +295,7 @@ class App:
             return "target_lost_or_stale"
         return f"state_transition_{next_state.name.lower()}"
 
-    #region joystick handlers
+    # region joystick handlers
     def __handle_joy_rc(self, event: RcChannelsOverrideEvent):
         """Validate and publish the latest joystick snapshot to the context."""
         try:
@@ -336,8 +332,7 @@ class App:
         """Apply listener events on the application control-loop thread."""
         self._require_services().joystick.dispatch_pending()
 
-    
-    #endregion
+    # endregion
 
     def _log_armability_transition(self) -> None:
         """Log arm readiness once whenever the readiness state changes."""
@@ -363,18 +358,20 @@ class App:
         drone = self._require_services().drone
         vehicle_state = drone.get_state()
         if vehicle_state:
-            #TODO: move to consts
+            # TODO: move to consts
             # TODO read more about armed mask the code is just for test
             # self.ctx.armed = vehicle_state.get("box_mode_flags") == 3
             self.ctx.armable = vehicle_state.get("armable", False)
-            self.ctx.arming_disable_flags = vehicle_state.get("arming_disable_flags", [])
+            self.ctx.arming_disable_flags = vehicle_state.get(
+                "arming_disable_flags", []
+            )
             self._log_armability_transition()
 
             log.debug(vehicle_state)
 
         # end region
         # the zero point is where the drone power on, if i land in lower surface the alt will be negative
-        self.ctx.drone_alt = drone.get_altitude() # in meter
+        self.ctx.drone_alt = drone.get_altitude()  # in meter
         altitude = drone.dispatcher.last_altitude
         if altitude and "vertical_speed_m_s" in altitude:
             self.ctx.drone_vertical_speed = altitude["vertical_speed_m_s"]
@@ -402,10 +399,11 @@ class App:
             #     log.info(f"drone rc: {self.ctx.drone_rc}")
             #     self.ctx.armed = armed
 
-
         battery = drone.dispatcher.last_battery
         if battery and "voltage_v" in battery:
-            self.ctx.battery_voltage = battery["voltage_v"] + 20.0 #TODO: remove this hack, the voltage is not correct in betaflight 4.4.1
+            self.ctx.battery_voltage = (
+                battery["voltage_v"] + 20.0
+            )  # TODO: remove this hack, the voltage is not correct in betaflight 4.4.1
 
     def _update_gps_velocity(self, gps: dict[str, object]) -> None:
         """Store raw GPS and derive NED plus body-FRD diagnostic velocity."""
@@ -448,32 +446,29 @@ class App:
         self.ctx.drone_velocity_body_y_m_s = None
         self.ctx.drone_velocity_body_z_m_s = None
 
-        
-    
     def _takeoff_handler(self):
         """
         take off logic
         - get rc from takeoff controller
         - triggrt takeoff_reach flag
         """
-        
+
         setpoint = self._require_services().parameters.get(ParameterKey.TAKEOFF_ALT)
-        #TODO: setpoint is alt_ref + setpoint validate again the start alt is zero
+        # TODO: setpoint is alt_ref + setpoint validate again the start alt is zero
         rc = self.controllers[RobotState.TAKEOFF].update(
             setpoint,
             self.ctx.drone_alt,
             self.ctx.drone_alt_received_at_s,
         )
-        # time 
+        # time
         self.ctx.takeoff_reach = self.controllers[RobotState.TAKEOFF].time_in_alt >= 1
 
         if setpoint != self.ctx.alt_setpoint:
             self._require_services().mavlink.send_named_value_to_gcs(
-                    NamedValue.ALT_SP,
-                    setpoint
-                )
+                NamedValue.ALT_SP, setpoint
+            )
             self.ctx.alt_setpoint = setpoint
-        
+
         return rc
 
     def alt_hold_handler(self):
@@ -482,16 +477,12 @@ class App:
         """
         controller = self.controllers[RobotState.ALT_HOLD]
         # read last joystick state
-        
+
         # update alt setpoint
-        controller.update_setpoint_from_throttle(
-            self.ctx.request_rc.throttle
-        )
+        controller.update_setpoint_from_throttle(self.ctx.request_rc.throttle)
 
         # control yaw
-        controller.update_yaw_from_joystick(
-            self.ctx.request_rc.yaw
-        )
+        controller.update_yaw_from_joystick(self.ctx.request_rc.yaw)
 
         # TODO: add deadband ???
         # control pitch and yaw
@@ -506,30 +497,28 @@ class App:
                 "Hover altitude setpoint change requested",
                 MavSeverity.DEBUG,
             )
-            
-            
+
         setpoint = controller.setpoint
         # update gcs setpoint
         if controller.setpoint != self.ctx.alt_setpoint:
             self._require_services().mavlink.send_named_value_to_gcs(
-                    NamedValue.ALT_SP,
-                    setpoint
-                )
+                NamedValue.ALT_SP, setpoint
+            )
             self.ctx.alt_setpoint = setpoint
-        
+
         rc = controller.update(
             setpoint,
             self.ctx.drone_alt,
             self.ctx.drone_alt_received_at_s,
         )
         return rc
-    
+
     def failsafe_handler(self):
         """
         TODO: decide if we need a separate failsafe controller or just use hover controller
         TODO: what the altitude setpoint for failsafe? should we use the last known altitude or a predefined altitude?
         """
-        
+
         controller = self.controllers[RobotState.FAILSAFE]
         rc = controller.update(self.ctx.drone_alt, self.ctx.drone_vertical_speed)
         if controller.consume_descent_started_event():
@@ -542,13 +531,13 @@ class App:
                 "Failsafe land detected, disarming",
                 MavSeverity.WARNING,
             )
-        
+
         return rc
 
     def _manual_handler(self):
         channels = list(self.ctx.request_rc)
-        #todo: force angel because there is no acro mode in joystick
-        # don't force arm if user not aware 
+        # todo: force angel because there is no acro mode in joystick
+        # don't force arm if user not aware
         # channels[AETR1234.AUX1] = RC_MAX
         channels[AETR1234.AUX2] = RC_MAX
         return channels
@@ -611,15 +600,15 @@ class App:
 
         if self.ctx.drone_rc is not None:
             pass
-            #TODO: to understand why base 3
+            # TODO: to understand why base 3
             # AETR - roll, pitch, throttle, yaw, aux1, aux2, aux3, aux4
             # AERT - roll, pitch, yaw, throttle, aux1, aux2, aux3, aux4
             # print(format_channels(self.ctx.drone_rc, formatter=tuple(AETR1234)))
             # log.info(f"Drone RC: {self.ctx.drone_rc[3]}")
             # if self.ctx.state != RobotState.HOVER:
             #     self.controllers[RobotState.HOVER].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE
-            # if self.ctx.state != RobotState.FAILSAFE: 
-            #     self.controllers[RobotState.FAILSAFE].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE 
+            # if self.ctx.state != RobotState.FAILSAFE:
+            #     self.controllers[RobotState.FAILSAFE].set_baseline(self.ctx.drone_rc[3])# AETR1234.THROTTLE
 
     def _update_target_selector(self, now_s: float) -> None:
         selector = getattr(self._require_services(), "target_selector", None)
@@ -627,19 +616,28 @@ class App:
             return
         if self.ctx.state == RobotState.TRACK:
             state = TargetSelectorState.LOCKED
-        elif self.ctx.state == RobotState.ALT_HOLD and self.ctx.request_rc.is_tracker_selected():
-            state = TargetSelectorState.SELECTING
+        elif (
+            self.ctx.state == RobotState.ALT_HOLD
+            and self.ctx.request_rc.is_tracker_selected()
+        ):
+            state = (
+                TargetSelectorState.LOCKED
+                if self.ctx.request_rc.is_tracker_enable_high()
+                else TargetSelectorState.SELECTING
+            )
         else:
             state = TargetSelectorState.DISABLED
         selector.update(
             roll_rc=self.ctx.request_rc.roll,
             pitch_rc=self.ctx.request_rc.pitch,
+            width_rc=self.ctx.request_rc.reserved_10,
+            height_rc=self.ctx.request_rc.reserved_11,
             state=state,
             now_s=now_s,
         )
 
     def _prepare_tracker_switches(self) -> None:
-        """Turn an observed SF low-to-high transition into a one-loop request."""
+        """Keep a valid low-to-high request active while acquisition completes."""
         joystick = self.ctx.request_rc
         mode = joystick.selected_tracker_mode()
         self._selected_tracker_mode = mode or TrackerMode.DISABLED
@@ -653,6 +651,8 @@ class App:
             return
         if self._tracker_enable_was_low and joystick.is_tracker_selected():
             self.ctx.tracker_start_requested = True
+            if self.ctx.state == RobotState.ALT_HOLD:
+                return
         self._tracker_enable_was_low = False
 
     def _resolve_rc(self):
@@ -666,7 +666,7 @@ class App:
             case RobotState.FAILSAFE:
                 return self.failsafe_handler()
             case RobotState.TAKEOFF:
-                return self._takeoff_handler() 
+                return self._takeoff_handler()
             case RobotState.IDLE:
                 return self._make_disarm_channels()
             case RobotState.ARM:
@@ -677,7 +677,9 @@ class App:
                 return self.tracker_handler()
             case _:
                 log.error(f"RC selector not implemented for state {self.ctx.state}")
-                raise NotImplementedError(f"RC selector not implemented for state {self.ctx.state}")
+                raise NotImplementedError(
+                    f"RC selector not implemented for state {self.ctx.state}"
+                )
 
     def _sanitize_rc_channels(self, channels: list[int]) -> list[int]:
         sanitized = DEFAULT_RC_CHANNELS.copy()
@@ -696,7 +698,10 @@ class App:
 
     def _arm_handler(self):
         from typing import cast
-        arm_controller: ARMController = cast(ARMController, self.controllers[RobotState.ARM])
+
+        arm_controller: ARMController = cast(
+            ARMController, self.controllers[RobotState.ARM]
+        )
         self.ctx.armed = arm_controller.is_arm_done
         return self.controllers[RobotState.ARM].update()
 
@@ -716,7 +721,8 @@ class App:
         )
         self.ctx.tracker_exit_requested = tracker_controller.exit_requested
         return list(result.channels)
-    #TODO: move to arm controller 
+
+    # TODO: move to arm controller
 
     def _make_disarm_channels(self) -> list[int]:
         channels = [RC_MIN] * NO_RC_CHANNELS
@@ -834,6 +840,7 @@ class App:
             else:
                 signal_name = signal.Signals(self._shutdown_signal).name
                 log.info("Application shutdown requested by {}", signal_name)
+
 
 def main(config: VehicleConfig):
     app = App(config=config)
