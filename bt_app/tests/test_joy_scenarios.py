@@ -582,7 +582,9 @@ def test_tracker_glide_scenario_composes_successful_profile(monkeypatch):
             calls.append(("complete",))
 
     monkeypatch.setattr(scenario_04_tracker_glide, "JoyScenario", FakeScenario)
-    args = scenario_04_tracker_glide.build_parser().parse_args([])
+    args = scenario_04_tracker_glide.build_parser().parse_args(
+        ["--tracker-control", "automatic"]
+    )
 
     scenario_04_tracker_glide.run_scenario(
         scenario_04_tracker_glide.config_from_args(args), args
@@ -646,9 +648,7 @@ def test_tracker_glide_manual_mode_uses_keyboard_alignment(monkeypatch):
             calls.append("complete")
 
     monkeypatch.setattr(scenario_04_tracker_glide, "JoyScenario", FakeScenario)
-    args = scenario_04_tracker_glide.build_parser().parse_args(
-        ["--tracker-control", "manual"]
-    )
+    args = scenario_04_tracker_glide.build_parser().parse_args([])
 
     scenario_04_tracker_glide.run_scenario(
         scenario_04_tracker_glide.config_from_args(args), args
@@ -788,7 +788,9 @@ def test_tracker_timeout_recovers_lands_and_reports_failure(monkeypatch):
             calls.append("complete")
 
     monkeypatch.setattr(scenario_04_tracker_glide, "JoyScenario", FakeScenario)
-    args = scenario_04_tracker_glide.build_parser().parse_args([])
+    args = scenario_04_tracker_glide.build_parser().parse_args(
+        ["--tracker-control", "automatic"]
+    )
 
     with pytest.raises(ScenarioError, match="tracking timeout"):
         scenario_04_tracker_glide.run_scenario(

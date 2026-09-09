@@ -26,9 +26,10 @@ TRACK exit is used as the target-hit signal; bt-app exposes no separate impact
 event. A timeout still performs a controlled landing but returns exit status 1.
 WARNING: This scenario commands an armed aircraft and is intended for SITL.
 
-Tracker acquisition defaults to automatic. With --tracker-control manual,
-use the arrow keys to nudge the target gate, A/D and S/W to resize it, Space to enable tracking, and Q
-to cancel with a controlled recovery and landing.
+Tracker acquisition defaults to manual: use the arrow keys to nudge the target
+gate, A/D and S/W to resize it, Space to enable tracking, and Q to cancel with
+a controlled recovery and landing. Use --tracker-control automatic for the
+scripted acquisition flow.
 =============================================================================="""
 
 
@@ -52,8 +53,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--tracker-control",
         choices=("automatic", "manual"),
-        default="automatic",
-        help="automatically position/enable the tracker or wait for keyboard control",
+        default="manual",
+        help="wait for keyboard control (default) or automatically position/enable the tracker",
     )
     parser.add_argument("--gate-roll", type=int, default=1500)
     parser.add_argument("--gate-pitch", type=int, default=1300)

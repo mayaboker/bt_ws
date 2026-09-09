@@ -26,8 +26,8 @@ fi
 echo "bt-app config: ${BT_APP_CONFIG}"
 echo "bt-app log level: ${BT_APP_LOG_LEVEL}"
 
-cd "${WORKSPACE_ROOT}"
-exec uv run --project bt_app bt-app \
+cd "${WORKSPACE_ROOT}/bt_app"
+exec uv run bt-app \
   --log-level "${BT_APP_LOG_LEVEL}" \
   run \
   --config "${BT_APP_CONFIG}"
