@@ -49,10 +49,25 @@
       </div>
     </section>
 
-    <section aria-labelledby="velocity-title">
+    <section aria-labelledby="altitude-title">
       <div class="section-heading">
         <div>
           <p class="section-number">02</p>
+          <h2 id="altitude-title">Altimeter</h2>
+          <p class="section-copy">Altitude over flight time. Dashed vertical markers show tracker state or lock changes.</p>
+        </div>
+      </div>
+      <article id="altitude-panel" class="panel chart-panel">
+        <div id="altitude-legend" class="chart-legend" aria-label="Tracker transition legend"></div>
+        <div id="altitude-chart" class="altitude-chart" role="img" aria-label="Altitude graph with tracker state transitions"></div>
+        <div id="altitude-tooltip" class="chart-tooltip" hidden></div>
+      </article>
+    </section>
+
+    <section aria-labelledby="velocity-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-number">03</p>
           <h2 id="velocity-title">Body FLU velocity</h2>
           <p class="section-copy">Forward, left, and up velocity from MAVLink BODY_FRD odometry.</p>
         </div>

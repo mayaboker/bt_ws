@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
 
 from bt_analysis import __version__
-from bt_analysis.analysis import analyze_session, velocity_series
+from bt_analysis.analysis import analyze_session, flight_series, velocity_series
 from bt_analysis.errors import (
     NoFinishedSessionError,
     SessionDataError,
@@ -146,6 +146,22 @@ def create_app(repository: BlackboxRepository) -> FastAPI:
                 "units": "m/s",
                 **velocity_series(table),
             }
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except SessionDataError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/sessions/{session_id}/flight")
+    async def flight(session_id: str):
+        try:
+            session = repository.get(session_id)
+            table = repository.load_frames(session)
+            if table is None or table.num_rows == 0:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Flight frames are unavailable for session {session_id}",
+                )
+            return {"session_id": session.session_id, **flight_series(table)}
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except SessionDataError as exc:

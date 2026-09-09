@@ -71,6 +71,9 @@ class BlackboxRepository:
     def load_events(self, session: BlackboxSession) -> pa.Table | None:
         return self._load_stream(session, "events")
 
+    def load_frames(self, session: BlackboxSession) -> pa.Table | None:
+        return self._load_stream(session, "frames")
+
     def load_odometry(self, session: BlackboxSession) -> pa.Table | None:
         return self._load_stream(session, "odometry")
 

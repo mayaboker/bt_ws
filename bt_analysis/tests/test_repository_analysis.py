@@ -5,7 +5,7 @@ import math
 
 import pytest
 
-from bt_analysis.analysis import analyze_session, velocity_series
+from bt_analysis.analysis import analyze_session, flight_series, velocity_series
 from bt_analysis.errors import (
     NoFinishedSessionError,
     SessionDataError,
@@ -55,6 +55,7 @@ def test_analyzes_quality_states_and_flu_velocity(tmp_path, make_session):
 
     summary = analyze_session(repository, session)
     series = velocity_series(repository.load_odometry(session))
+    flight = flight_series(repository.load_frames(session))
 
     assert summary["session"]["duration_s"] == 4.0
     assert summary["quality"] == {
@@ -87,6 +88,8 @@ def test_analyzes_quality_states_and_flu_velocity(tmp_path, make_session):
         "vy_left_m_s": [-2.0, -0.0, 4.0],
         "vz_up_m_s": [-3.0, 3.0, -1.0],
     }
+    assert flight["altitude_m"] == [0.0, 2.5, 3.0]
+    assert [event["state"] for event in flight["tracker_transitions"]] == [1, 2]
     forward = summary["velocity"]["statistics"]["vx_forward_m_s"]
     assert forward["mean_m_s"] == pytest.approx(2 / 3)
     assert forward["rms_m_s"] == pytest.approx(math.sqrt(2))
@@ -127,4 +130,3 @@ def test_unsafe_chunk_inventory_is_reported(tmp_path, make_session):
 
     with pytest.raises(SessionDataError, match="Unsafe odometry"):
         repository.load_odometry(repository.latest())
-

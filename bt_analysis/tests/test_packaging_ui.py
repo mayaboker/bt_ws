@@ -25,6 +25,7 @@ def test_dashboard_assets_include_interactive_graph_controls():
     javascript = (static / "app.js").read_text()
 
     assert 'id="chart"' in html
+    assert 'id="altitude-chart"' in html
     assert 'id="chart-legend"' in html
     assert 'id="chart-tooltip"' in html
     assert 'id="reset-zoom"' in html
@@ -38,6 +39,7 @@ def test_dashboard_assets_include_interactive_graph_controls():
     assert "stateColors" in javascript
     assert "renderStateLegend" in javascript
     assert "filteredVelocityStatistics" in javascript
+    assert "renderAltitudeChart" in javascript
     assert 'state === "TRACK"' in javascript
     assert 'requestJson("/api/sessions")' in javascript
     assert 'postJson("/api/logs-directory/browse")' in javascript

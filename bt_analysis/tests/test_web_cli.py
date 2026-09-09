@@ -30,7 +30,7 @@ def test_dashboard_and_api_serve_latest_session(tmp_path, make_session):
     make_session("flight", start_utc_ns=100)
     app = create_app(BlackboxRepository(tmp_path))
 
-    index, sessions, latest, selected, velocity = asyncio.run(
+    index, sessions, latest, selected, velocity, flight = asyncio.run(
         get_responses(
             app,
             "/",
@@ -38,6 +38,7 @@ def test_dashboard_and_api_serve_latest_session(tmp_path, make_session):
             "/api/latest",
             "/api/sessions/flight",
             "/api/sessions/flight/velocity",
+            "/api/sessions/flight/flight",
         )
     )
 
@@ -52,6 +53,11 @@ def test_dashboard_and_api_serve_latest_session(tmp_path, make_session):
     assert velocity.status_code == 200
     assert velocity.json()["frame"] == "FLU"
     assert velocity.json()["vy_left_m_s"] == [-2.0, -0.0, 4.0]
+    assert flight.status_code == 200
+    assert flight.json()["altitude_m"] == [0.0, 2.5, 3.0]
+    assert flight.json()["tracker_transitions"][-1] == {
+        "elapsed_s": 2.0, "state": 2, "locked": True
+    }
 
 
 def test_api_reports_empty_and_unsafe_requests(tmp_path):

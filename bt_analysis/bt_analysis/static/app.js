@@ -11,7 +11,7 @@ const stateColors = {
   ALT_HOLD: "#cfe8dc", TRACK: "#f4d7b7", FAILSAFE: "#efc8c3",
 };
 
-const state = { summary: null, velocity: null, view: null, dragStart: null, scopeEnd: null, sessions: [] };
+const state = { summary: null, flight: null, velocity: null, view: null, dragStart: null, scopeEnd: null, sessions: [] };
 const el = (id) => document.getElementById(id);
 
 async function requestJson(url) {
@@ -183,6 +183,69 @@ function nearestIndex(values, target) {
   return low;
 }
 
+function trackerTransitionLabel(event) {
+  return `Tracker state ${event.state} · ${event.locked ? "locked" : "unlocked"}`;
+}
+
+function renderAltitudeChart() {
+  if (!state.flight || !state.flight.elapsed_s.length || !state.view) return;
+  const container = el("altitude-chart");
+  const width = Math.max(680, container.clientWidth || 1100), height = 320;
+  const margin = { left: 76, right: 24, top: 30, bottom: 38 };
+  const plotWidth = width - margin.left - margin.right, plotHeight = height - margin.top - margin.bottom;
+  const [viewStart, viewEnd] = state.view;
+  const x = (value) => margin.left + (value - viewStart) / Math.max(.001, viewEnd - viewStart) * plotWidth;
+  const visible = state.flight.elapsed_s
+    .map((time, index) => ({ time, value: state.flight.altitude_m[index] }))
+    .filter((sample) => sample.time >= viewStart && sample.time <= viewEnd);
+  if (!visible.length) { container.replaceChildren(); return; }
+  let minimum = Math.min(...visible.map((sample) => sample.value));
+  let maximum = Math.max(...visible.map((sample) => sample.value));
+  const padding = Math.max(.25, (maximum - minimum) * .08);
+  minimum -= padding; maximum += padding;
+  const y = (value) => margin.top + (maximum - value) / (maximum - minimum) * plotHeight;
+  const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "none" });
+
+  for (const interval of visibleIntervals()) {
+    const start = Math.max(interval.start_s, viewStart), end = Math.min(interval.end_s, viewEnd);
+    if (end > start) svg.append(svgNode("rect", { x: x(start), y: margin.top, width: x(end) - x(start), height: plotHeight, fill: stateColors[interval.state] || "#e8ebe8", opacity: ".42" }));
+  }
+  for (let index = 0; index <= 4; index++) {
+    const value = minimum + (maximum - minimum) * index / 4;
+    svg.append(svgNode("line", { x1: margin.left, y1: y(value), x2: width - margin.right, y2: y(value), stroke: "#d9ded9" }));
+    const label = svgNode("text", { x: margin.left - 10, y: y(value) + 4, "text-anchor": "end", fill: "#617068", "font-size": 11 });
+    label.textContent = value.toFixed(2); svg.append(label);
+  }
+  let path = "";
+  for (const sample of visible) path += `${path ? "L" : "M"}${x(sample.time).toFixed(2)},${y(sample.value).toFixed(2)}`;
+  svg.append(svgNode("path", { d: path, fill: "none", stroke: "#0b7351", "stroke-width": 2, "vector-effect": "non-scaling-stroke" }));
+
+  const transitions = state.flight.tracker_transitions.filter((event) => event.elapsed_s >= viewStart && event.elapsed_s <= viewEnd && (state.scopeEnd === null || event.elapsed_s <= state.scopeEnd));
+  transitions.forEach((event, index) => {
+    const markerX = x(event.elapsed_s);
+    svg.append(svgNode("line", { x1: markerX, y1: margin.top, x2: markerX, y2: height - margin.bottom, stroke: event.locked ? "#a9362a" : "#7c3aed", "stroke-width": 1.5, "stroke-dasharray": "5 4", "vector-effect": "non-scaling-stroke" }));
+    const label = svgNode("text", { x: markerX + 4, y: margin.top + 13 + (index % 2) * 14, fill: event.locked ? "#a9362a" : "#7c3aed", class: "tracker-marker-label" });
+    label.textContent = `${event.state} ${event.locked ? "LOCK" : "OPEN"}`; svg.append(label);
+  });
+  svg.append(svgNode("rect", { x: margin.left, y: margin.top, width: plotWidth, height: plotHeight, fill: "none", stroke: "#8b9890" }));
+  const overlay = svgNode("rect", { x: margin.left, y: margin.top, width: plotWidth, height: plotHeight, fill: "transparent" });
+  overlay.addEventListener("pointermove", (event) => {
+    const bounds = svg.getBoundingClientRect();
+    const pixel = Math.max(margin.left, Math.min(width - margin.right, (event.clientX - bounds.left) * width / bounds.width));
+    const time = viewStart + (pixel - margin.left) / plotWidth * (viewEnd - viewStart);
+    const sampleIndex = nearestIndex(state.flight.elapsed_s, time), tooltip = el("altitude-tooltip");
+    const nearestTransition = transitions.length ? transitions.reduce((best, item) => Math.abs(item.elapsed_s - time) < Math.abs(best.elapsed_s - time) ? item : best) : null;
+    const markerText = nearestTransition && Math.abs(x(nearestTransition.elapsed_s) - pixel) < 12 ? ` · ${trackerTransitionLabel(nearestTransition)}` : "";
+    tooltip.textContent = `${state.flight.elapsed_s[sampleIndex].toFixed(3)} s · altitude ${state.flight.altitude_m[sampleIndex].toFixed(3)} m${markerText}`;
+    tooltip.hidden = false; tooltip.style.left = `${Math.min(event.clientX - bounds.left + 14, bounds.width - 300)}px`; tooltip.style.top = "8px";
+  });
+  overlay.addEventListener("pointerleave", () => { el("altitude-tooltip").hidden = true; });
+  svg.append(overlay); container.replaceChildren(svg);
+
+  const legend = el("altitude-legend"); legend.replaceChildren();
+  const description = document.createElement("span"); description.textContent = transitions.length ? `${transitions.length} tracker transition marker(s) in view` : "No tracker transitions in view"; legend.append(description);
+}
+
 function renderChart() {
   if (!state.velocity || !state.velocity.elapsed_s.length) return;
   const container = el("chart");
@@ -268,7 +331,7 @@ function renderChart() {
     if (state.dragStart === null) return;
     const end = eventTime(event), start = state.dragStart; state.dragStart = null;
     if (Math.abs(end - start) > (viewEnd - viewStart) * .01) {
-      state.view = [Math.min(start, end), Math.max(start, end)]; el("reset-zoom").disabled = false; renderChart();
+      state.view = [Math.min(start, end), Math.max(start, end)]; el("reset-zoom").disabled = false; renderChart(); renderAltitudeChart();
     } else selection.setAttribute("visibility", "hidden");
   });
 }
@@ -310,10 +373,12 @@ async function loadDashboard(sessionId = el("session-select").value) {
     if (!sessionId) sessionId = await refreshSessions({ preserveSelection: false });
     const summary = await requestJson(`/api/sessions/${encodeURIComponent(sessionId)}`);
     state.summary = summary; state.scopeEnd = null; el("data-scope").value = "all"; renderSummary(summary);
+    state.flight = await requestJson(`/api/sessions/${encodeURIComponent(summary.session.session_id)}/flight`);
+    const flightTimes = state.flight.elapsed_s;
+    state.view = [flightTimes[0], flightTimes[flightTimes.length - 1]];
     if (summary.velocity.available) {
       state.velocity = await requestJson(`/api/sessions/${encodeURIComponent(summary.session.session_id)}/velocity`);
       const times = state.velocity.elapsed_s;
-      state.view = [times[0], times[times.length - 1]];
       const hasTrack = summary.states.some((interval) => interval.state === "TRACK");
       el("data-scope").disabled = !hasTrack;
       el("velocity-unavailable").hidden = true; el("chart-panel").hidden = false; el("reset-zoom").disabled = true;
@@ -322,7 +387,7 @@ async function loadDashboard(sessionId = el("session-select").value) {
       el("velocity-unavailable").textContent = "This session has no schema-v2 odometry stream. Metadata and state statistics remain available.";
     }
     el("loading").hidden = true; el("content").hidden = false;
-    if (state.velocity) requestAnimationFrame(renderChart);
+    requestAnimationFrame(() => { renderAltitudeChart(); if (state.velocity) renderChart(); });
   } catch (error) {
     el("loading").hidden = true; el("error").hidden = false;
     el("error-title").textContent = "Unable to load the selected flight";
@@ -356,22 +421,23 @@ el("browse").addEventListener("click", async () => {
 el("retry").addEventListener("click", () => loadDashboard());
 el("session-select").addEventListener("change", (event) => loadDashboard(event.target.value));
 el("data-scope").addEventListener("change", (event) => {
-  if (!state.velocity) return;
+  if (!state.flight) return;
   const trackIntervals = state.summary.states.filter((interval) => interval.state === "TRACK");
   state.scopeEnd = event.target.value === "through-track"
     ? Math.max(...trackIntervals.map((interval) => interval.end_s))
     : null;
-  const times = state.velocity.elapsed_s;
+  const times = state.flight.elapsed_s;
   state.view = [times[0], state.scopeEnd === null ? times[times.length - 1] : Math.min(state.scopeEnd, times[times.length - 1])];
   el("reset-zoom").disabled = true;
-  renderScopedData(); renderChart();
+  renderScopedData(); renderAltitudeChart(); if (state.velocity) renderChart();
 });
 el("reset-zoom").addEventListener("click", () => {
-  const times = state.velocity.elapsed_s;
+  const times = state.flight.elapsed_s;
   state.view = [times[0], state.scopeEnd === null ? times[times.length - 1] : Math.min(state.scopeEnd, times[times.length - 1])];
-  el("reset-zoom").disabled = true; renderChart();
+  el("reset-zoom").disabled = true; renderAltitudeChart(); if (state.velocity) renderChart();
 });
 new ResizeObserver(() => { if (state.velocity) renderChart(); }).observe(el("chart"));
+new ResizeObserver(() => { if (state.flight) renderAltitudeChart(); }).observe(el("altitude-chart"));
 updateLogsDirectory().then(() => refreshSessions({ preserveSelection: false })).then(loadDashboard).catch((error) => {
   el("loading").hidden = true; el("error").hidden = false;
   el("error-title").textContent = "Unable to find flight logs"; el("error-detail").textContent = error.message;

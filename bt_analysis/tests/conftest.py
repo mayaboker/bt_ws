@@ -58,7 +58,13 @@ def make_session(tmp_path):
             directory / "events-000000.parquet",
         )
         pq.write_table(
-            pa.Table.from_pylist([{"elapsed_s": 0.0}]),
+            pa.Table.from_pylist(
+                [
+                    {"elapsed_s": 0.0, "altitude_m": 0.0, "tracker_present": False, "tracker_state": None, "tracker_locked": None},
+                    {"elapsed_s": 1.0, "altitude_m": 2.5, "tracker_present": True, "tracker_state": 1, "tracker_locked": False},
+                    {"elapsed_s": 2.0, "altitude_m": 3.0, "tracker_present": True, "tracker_state": 2, "tracker_locked": True},
+                ]
+            ),
             directory / "frames-000000.parquet",
         )
         if with_odometry:
@@ -90,4 +96,3 @@ def make_session(tmp_path):
         return directory
 
     return create
-

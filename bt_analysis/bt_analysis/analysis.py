@@ -17,6 +17,7 @@ ODOMETRY_COLUMNS = (
     "velocity_body_y_m_s",
     "velocity_body_z_m_s",
 )
+FRAME_COLUMNS = ("elapsed_s", "altitude_m")
 
 
 def analyze_session(
@@ -95,6 +96,48 @@ def velocity_series(table: pa.Table) -> dict[str, list[float]]:
         "vx_forward_m_s": forward.tolist(),
         "vy_left_m_s": left.tolist(),
         "vz_up_m_s": up.tolist(),
+    }
+
+
+def flight_series(table: pa.Table) -> dict[str, Any]:
+    missing = [name for name in FRAME_COLUMNS if name not in table.column_names]
+    if missing:
+        raise SessionDataError(
+            "Frame schema is missing column(s): " + ", ".join(missing)
+        )
+    try:
+        elapsed = _finite_array(table, "elapsed_s")
+        altitude = _finite_array(table, "altitude_m")
+    except (TypeError, ValueError, pa.ArrowException) as exc:
+        raise SessionDataError(f"Invalid frame values: {exc}") from exc
+    if len(elapsed) != len(altitude):
+        raise SessionDataError("Frame columns have inconsistent lengths")
+    if len(elapsed) and np.any(np.diff(elapsed) < 0.0):
+        raise SessionDataError("Frame elapsed time is not monotonic")
+
+    transitions: list[dict[str, Any]] = []
+    tracker_columns = {"tracker_present", "tracker_state", "tracker_locked"}
+    if tracker_columns.issubset(table.column_names):
+        previous: tuple[int, bool] | None = None
+        for row in table.select(
+            ["elapsed_s", "tracker_present", "tracker_state", "tracker_locked"]
+        ).to_pylist():
+            if not row["tracker_present"] or row["tracker_state"] is None:
+                continue
+            current = (int(row["tracker_state"]), bool(row["tracker_locked"]))
+            if current != previous:
+                transitions.append(
+                    {
+                        "elapsed_s": float(row["elapsed_s"]),
+                        "state": current[0],
+                        "locked": current[1],
+                    }
+                )
+                previous = current
+    return {
+        "elapsed_s": elapsed.tolist(),
+        "altitude_m": altitude.tolist(),
+        "tracker_transitions": transitions,
     }
 
 
