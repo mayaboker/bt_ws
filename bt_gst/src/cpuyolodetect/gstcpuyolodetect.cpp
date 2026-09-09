@@ -297,12 +297,13 @@ static GstFlowReturn gst_cpu_yolo_detect_transform_ip(GstBaseTransform* base, Gs
         gst_video_frame_unmap(&frame);
         mapped = false;
 
-        for (const auto& detection : detections) {
+        for (std::size_t result_id = 0; result_id < detections.size(); ++result_id) {
+            const auto& detection = detections[result_id];
             const auto& label = self->runtime->labels.at(detection.class_id);
             if (!bt::gstmeta::add_detection(
                     buffer, label.c_str(), static_cast<gint>(detection.class_id),
                     detection.x, detection.y, detection.width, detection.height,
-                    detection.confidence, FALSE))
+                    detection.confidence, FALSE, static_cast<gint>(result_id)))
                 throw std::runtime_error("failed to attach ROI detection metadata");
         }
         GST_LOG_OBJECT(base, "detections=%zu preprocess=%.3fms inference=%.3fms postprocess=%.3fms",

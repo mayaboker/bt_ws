@@ -278,3 +278,21 @@ GST_DEBUG=cpuyolodetect:6 gst-launch-1.0 -e \
 
 Set `intra-op-threads=1`, `2`, `4`, or another positive value to compare CPU
 thread counts. A value of `0` lets ONNX Runtime choose its default.
+
+## 12. Use YOLO as the manually selected tracker backend
+
+The application keeps YOLO disabled while the keyboard selector is being
+aligned, then enables it with Space. The nearest detection intersecting the
+selector is chosen; later frames follow the same class using box association.
+
+```bash
+cd /home/user/projects/bt_ws/bt_bringup/launch
+TRACKER_BACKEND=cpu_yolo ./run_gst.sh
+```
+
+The interactive launcher also lists `cpu_yolo` as option 3 and loads
+`gst_cpu_yolo.yaml`. Edit that file to change the model, inference threads,
+confidence/NMS thresholds, selector size, or association thresholds. YOLO
+remains armed after a temporary detection loss and publishes unlocked results
+until the selected class is reacquired near its previous box. Move the selector
+and press Space again to select a different object.

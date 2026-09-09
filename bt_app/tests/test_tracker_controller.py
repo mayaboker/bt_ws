@@ -278,9 +278,50 @@ def test_alignment_keeps_vertical_motion_when_target_is_horizontally_misaligned(
     )
 
     assert result.phase == TrackerPhase.ALIGN
+    assert result.roll_command_deg == pytest.approx(0.0)
+    assert result.channels[RCChannel.ROLL] == RC_MID
+    assert result.yaw_rate_dps != pytest.approx(0.0)
     assert result.vertical_speed_target_m_s == pytest.approx(-0.5)
     assert result.vertical_speed_setpoint_m_s == pytest.approx(-0.02)
     assert result.channels[RCChannel.THROTTLE] < 1663
+
+
+def test_alignment_blocks_forward_tracking_when_only_vertical_axis_is_misaligned():
+    controller = TrackerController(FakeParameters())
+    for frame in range(1, 9):
+        time_s = (frame - 1) * 0.04
+        controller.observe(
+            observation(frame, time_s),
+            now_s=time_s,
+            mode_selected=True,
+            altitude_m=10.0,
+            vertical_speed_m_s=0.0,
+            altitude_sample_time_s=time_s,
+        )
+    controller.start_tracking(
+        now_s=0.28,
+        vertical_speed_m_s=0.0,
+        vertical_speed_sample_time_s=0.28,
+    )
+
+    for frame in range(9, 16):
+        time_s += 0.04
+        controller.observe(
+            observation(frame, time_s, x=270, y=370),
+            now_s=time_s,
+            mode_selected=True,
+            altitude_m=10.0,
+            vertical_speed_m_s=0.0,
+            altitude_sample_time_s=time_s,
+        )
+        result = controller.update(
+            now_s=time_s,
+            vertical_speed_m_s=0.0,
+            vertical_speed_sample_time_s=time_s,
+        )
+
+    assert result.phase == TrackerPhase.ALIGN
+    assert controller._alignment_count == 0
 
 
 def test_control_uses_ttc_pitch_vertical_speed_and_yaw():

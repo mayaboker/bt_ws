@@ -6,7 +6,9 @@ WORKSPACE_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 
 : "${GZIMGSRC_PLUGIN_DIR:=/home/user/projects/gz_betaflight_bridge/gst/gst_gzimgsrc/build}"
 : "${DETECTOR_PLUGIN_DIR:=${WORKSPACE_ROOT}/bt_gst/plugins/gst_detector/build}"
-: "${CPUNANOTRACK_PLUGIN_DIR:=${WORKSPACE_ROOT}/bt_gst/build-cpunanotracker}"
+: "${CPUNANOTRACK_PLUGIN_DIR:=${WORKSPACE_ROOT}/bt_gst/build/plugins}"
+: "${CPUYOLO_PLUGIN_DIR:=${WORKSPACE_ROOT}/bt_gst/build/plugins}"
+: "${ONNXRUNTIME_LIBRARY_DIR:=${WORKSPACE_ROOT}/bt_gst/third_party/onnxruntime-linux-x64-1.29.0/lib}"
 : "${BT_GST_PYTHON:=${WORKSPACE_ROOT}/bt_gst/.venv/bin/python}"
 GZ_IMAGE_TOPIC="${GZ_IMAGE_TOPIC:-/X3/front_camera/image}"
 
@@ -15,13 +17,13 @@ choose_tracker() {
     return
   fi
   if [[ ! -t 0 ]]; then
-    echo "No interactive terminal; set TRACKER_BACKEND=controlled_red or TRACKER_BACKEND=cpu_nano" >&2
+    echo "No interactive terminal; set TRACKER_BACKEND=controlled_red, cpu_nano, or cpu_yolo" >&2
     exit 2
   fi
 
   echo "Select tracker backend:"
-  PS3="Tracker [1-2]: "
-  select tracker in controlled_red cpu_nano; do
+  PS3="Tracker [1-3]: "
+  select tracker in controlled_red cpu_nano cpu_yolo; do
     if [[ -n "${tracker}" ]]; then
       TRACKER_BACKEND="${tracker}"
       return
@@ -45,9 +47,16 @@ case "${TRACKER_BACKEND}" in
     TRACKER_PLUGIN_FILE="${TRACKER_PLUGIN_DIR}/libgstcpunanotrack.so"
     TRACKER_ELEMENT="cpunanotrack"
     ;;
+  cpu_yolo)
+    : "${GST_CONFIG:=${SCRIPT_DIR}/gst_cpu_yolo.yaml}"
+    TRACKER_PLUGIN_DIR="${CPUYOLO_PLUGIN_DIR}"
+    TRACKER_PLUGIN_FILE="${TRACKER_PLUGIN_DIR}/libgstcpuyolodetect.so"
+    TRACKER_ELEMENT="cpuyolodetect"
+    export LD_LIBRARY_PATH="${ONNXRUNTIME_LIBRARY_DIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    ;;
   *)
     echo "Unsupported TRACKER_BACKEND: ${TRACKER_BACKEND}" >&2
-    echo "Expected controlled_red or cpu_nano." >&2
+    echo "Expected controlled_red, cpu_nano, or cpu_yolo." >&2
     exit 2
     ;;
 esac

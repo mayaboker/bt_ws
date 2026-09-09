@@ -9,7 +9,9 @@ from bt_gst.pipeline_builder import build_pipeline_description
 from bt_gst.red_detection import (
     DetectionBox,
     DetectionOverlayState,
+    YoloSelectionState,
     read_cpu_nano_detection,
+    read_cpu_yolo_detection,
     read_red_detection,
 )
 from bt_gst.zmq_publisher import ZmqFramePublisher, ZmqPublisherError
@@ -80,7 +82,15 @@ def run_pipeline(config: AppConfig) -> int:
         )
         if tracker_config.enabled and tracker_element is None:
             raise PipelineRunError("GStreamer element 'tracker_backend' was not found")
-        selector_supported = tracker_config.type == "controlled_red" or (
+        yolo_selection = (
+            YoloSelectionState(
+                tracker_config.cpu_yolo.association_iou_threshold,
+                tracker_config.cpu_yolo.association_max_distance,
+            )
+            if tracker_config.type == "cpu_yolo"
+            else None
+        )
+        selector_supported = tracker_config.type in {"controlled_red", "cpu_yolo"} or (
             tracker_config.type == "cpu_nano"
             and tracker_config.cpu_nano.initialization == "selector"
         )
@@ -117,7 +127,7 @@ def run_pipeline(config: AppConfig) -> int:
             detector_src_pad = tracker_element.get_static_pad("src")
             if detector_src_pad is None:
                 raise PipelineRunError(
-                    "GStreamer element 'red_detector' has no src pad"
+                    "GStreamer element 'tracker_backend' has no src pad"
                 )
             detector_src_pad.add_probe(
                 Gst.PadProbeType.BUFFER,
@@ -128,7 +138,7 @@ def run_pipeline(config: AppConfig) -> int:
                     frame_ids,
                     metadata_warning_limiter,
                     Gst,
-                    _metadata_reader(tracker_config, GstVideo),
+                    _metadata_reader(tracker_config, GstVideo, yolo_selection),
                     lambda: (
                         tracker_config.type == "controlled_red"
                         or bool(tracker_element.get_property("enabled"))
@@ -156,7 +166,11 @@ def run_pipeline(config: AppConfig) -> int:
                         )
                         if selector_key != applied_selector:
                             if _apply_selector_command(
-                                tracker_element, selector, tracker_config, overlay_state
+                                tracker_element,
+                                selector,
+                                tracker_config,
+                                overlay_state,
+                                yolo_selection,
                             ):
                                 applied_selector = selector_key
                 message = bus.timed_pop_filtered(
@@ -199,9 +213,22 @@ def run_pipeline(config: AppConfig) -> int:
         pipeline_runner_logger.debug("GStreamer pipeline entered NULL")
 
 
-def _metadata_reader(tracker: TrackerConfig, gst_video: object):
+def _metadata_reader(
+    tracker: TrackerConfig,
+    gst_video: object,
+    yolo_selection: YoloSelectionState | None = None,
+):
     if tracker.type == "controlled_red":
         return read_red_detection
+    if tracker.type == "cpu_yolo":
+        if yolo_selection is None:
+            raise PipelineRunError("CPU YOLO selection state is required")
+        return lambda buffer: read_cpu_yolo_detection(
+            buffer,
+            gst_video,
+            tracker.cpu_yolo.max_detections,
+            yolo_selection,
+        )
     return lambda buffer: read_cpu_nano_detection(
         buffer, gst_video, tracker.cpu_nano.confidence_threshold
     )
@@ -212,6 +239,7 @@ def _apply_selector_command(
     command: object,
     tracker: TrackerConfig,
     overlay_state: DetectionOverlayState | None = None,
+    yolo_selection: YoloSelectionState | None = None,
 ) -> bool:
     if tracker.type == "controlled_red":
         tracker_element.set_property("selector-center-x", command.center_x)
@@ -220,6 +248,8 @@ def _apply_selector_command(
         return True
     if int(command.state) == 0:
         tracker_element.set_property("enabled", False)
+        if yolo_selection is not None:
+            yolo_selection.disable()
         if overlay_state is not None:
             overlay_state.update_selector(None)
         return True
@@ -237,10 +267,15 @@ def _apply_selector_command(
     command_roi_width = getattr(command, "roi_width", None)
     command_roi_height = getattr(command, "roi_height", None)
     if command_roi_width is None or command_roi_height is None:
-        roi_width, roi_height = tracker.cpu_nano.selector_roi_size
+        selector_size = (
+            tracker.cpu_yolo.selector_roi_size
+            if tracker.type == "cpu_yolo"
+            else tracker.cpu_nano.selector_roi_size
+        )
+        roi_width, roi_height = selector_size
         if roi_width > width or roi_height > height:
             raise PipelineRunError(
-                "CPU NanoTrack selector ROI is larger than the input frame"
+                f"{tracker.type} selector ROI is larger than the input frame"
             )
     else:
         roi_width = min(command_roi_width, width)
@@ -249,8 +284,20 @@ def _apply_selector_command(
     y = min(
         max(round(command.center_y * height - roi_height / 2), 0), height - roi_height
     )
-    tracker_element.set_property("roi", f"{x},{y},{roi_width},{roi_height}")
     locked = int(command.state) == 2
+    if tracker.type == "cpu_yolo":
+        if yolo_selection is None:
+            raise PipelineRunError("CPU YOLO selection state is required")
+        selector_box = DetectionBox(x, y, roi_width, roi_height)
+        if locked:
+            yolo_selection.arm(selector_box, width, height)
+        else:
+            yolo_selection.disable()
+        tracker_element.set_property("enabled", locked)
+        if overlay_state is not None:
+            overlay_state.update_selector(None if locked else selector_box)
+        return True
+    tracker_element.set_property("roi", f"{x},{y},{roi_width},{roi_height}")
     tracker_element.set_property("enabled", locked)
     if overlay_state is not None:
         overlay_state.update_selector(

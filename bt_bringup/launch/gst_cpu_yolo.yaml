@@ -1,0 +1,32 @@
+source:
+  type: simulation
+  topic: /X3/front_camera/image
+  rate: 30
+tracker:
+  enabled: true
+  type: cpu_yolo
+  overlay_enabled: true
+  cpu_yolo:
+    model_file: /home/user/projects/bt_ws/bt_gst/models/yolov8n.onnx
+    intra_op_threads: 4
+    confidence_threshold: 0.4
+    iou_threshold: 0.7
+    max_detections: 100
+    selector_roi_size: [60, 90]
+    association_iou_threshold: 0.1
+    association_max_distance: 0.25
+zmq:
+  enabled: true
+  endpoint: tcp://127.0.0.1:5556
+  bind: true
+  max_rate_hz: 30
+selector_zmq:
+  enabled: true
+  endpoint: tcp://127.0.0.1:5557
+  bind: false
+  command_timeout_s: 0.5
+video_local: true
+codec: h264
+host: 127.0.0.1
+port: 5000
+mtu: 1200

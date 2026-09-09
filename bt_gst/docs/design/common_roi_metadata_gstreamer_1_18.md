@@ -29,6 +29,11 @@ capture has the selected box, confidence `0.0`, class ID `-1`, and
 `initialized=true`. Disabled elements add no result metadata. Neither plugin
 removes upstream metadata.
 
+`cpuyolodetect` assigns ROI IDs sequentially from zero on each buffer. This
+lets the GStreamer 1.18 Python application retrieve every result by ID, because
+typed iteration over multiple ROI metas is not reliable through PyGObject on
+the supported runtime.
+
 ## Reading the metadata
 
 ```cpp

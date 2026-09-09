@@ -262,7 +262,7 @@ parameters:
     limits: {min: 0.01, max: 2.0}
   TGT_HEIGHT_M:
     type: float
-    default: 0.2
+    default: 1.1
     limits: {min: -100.0, max: 1000.0}
   TTC_VY_NOM:
     type: float
@@ -270,7 +270,7 @@ parameters:
     limits: {min: 0.01, max: 5.0}
   TTC_VY_MIN:
     type: float
-    default: -5.0
+    default: -7.0
     limits: {min: -20.0, max: 0.0}
   TTC_VY_MAX:
     type: float
@@ -286,7 +286,7 @@ parameters:
     limits: {min: 0.0, max: 20.0}
   TTC_DY_VMAX:
     type: float
-    default: 0.5
+    default: 1.5
     limits: {min: 0.0, max: 20.0}
   TTC_DY_NEAR:
     type: float

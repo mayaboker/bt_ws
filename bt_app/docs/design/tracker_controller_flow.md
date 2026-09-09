@@ -111,7 +111,7 @@ Before TRACK starts, any distinct TTC-invalid frame clears acquisition. During a
 - acceleration history from the current vario sample;
 - phase and commit state.
 
-During `ALIGN`, yaw remains active and pitch stays at `TTC_ALN_PIT`. Optical TTC cannot increase the closing pitch, but vertical image error drives a bounded vertical-speed target through the existing vario PI-D loop. This lets the vehicle descend when the target is below image center instead of holding altitude until the bbox is clipped. The target must remain within the horizontal threshold `TTC_ALN_XY` for `TTC_ALN_FR` distinct accepted frames. A distinct rejected or horizontally misaligned frame resets this counter; reading the same frame again does not advance it. On transition to `TRACKING`, the optical expansion-rate estimate is reset so staging motion is not interpreted as target closing.
+During `ALIGN`, yaw remains active while pitch stays at `TTC_ALN_PIT=0` and roll stays centered. This prevents horizontal translation while vertical image error drives a bounded vertical-speed target through the existing vario PI-D loop. The vehicle can therefore descend and rotate toward the target without approaching above it. Both horizontal and vertical image errors must remain within `TTC_ALN_XY` for `TTC_ALN_FR` distinct accepted frames. A distinct rejected or misaligned frame resets this counter; reading the same frame again does not advance it. On transition to `TRACKING`, roll and pitch become active and the optical expansion-rate estimate is reset so staging motion is not interpreted as target closing.
 
 `stop_tracking(...)` resets all dynamic controller state and returns to acquisition behavior.
 
@@ -405,9 +405,9 @@ The most important active defaults are:
 |---|---|
 | Optical filter | `TTC_SCALE_A=0.35`, `TTC_SCALE_B=0.08`, `TTC_SCALE_JMP=0.35` |
 | Acquisition/loss | `TTC_LOCK_FR=8`, `TTC_LOCK_S=0.20`, `TTC_TIMEOUT=0.25` |
-| Initial alignment | `TTC_ALN_PIT=-5`, horizontal `TTC_ALN_XY=0.25`, `TTC_ALN_FR=5`; vertical image error commands bounded climb/descent |
+| Initial alignment | Centered roll, `TTC_ALN_PIT=0`, two-axis `TTC_ALN_XY=0.25`, `TTC_ALN_FR=5`; yaw and vertical control align before horizontal translation |
 | Pitch/TTC | `TTC_PIT_INIT=-10`, `TTC_PIT_MIN=-15`, forward slew `TTC_PIT_SLEW=5`, recovery slew `TTC_PIT_REC=25`, `TTC_INV_KP=10` |
-| Vertical profile | `TGT_HEIGHT_M=1.1`, countdown TTC feedforward, `TTC_VY_NOM=1.2` pitch timing, `TTC_DY_KP=1.5`, `TTC_DY_VMAX=0.5`, clipped recovery `TTC_DY_NEAR=1.5`, `TRK_VZ_ACCEL=1.0` |
+| Vertical profile | `TGT_HEIGHT_M=1.1`, countdown TTC feedforward, `TTC_VY_NOM=1.2` pitch timing, `TTC_DY_KP=1.5`, `TTC_DY_VMAX=1.5`, clipped recovery `TTC_DY_NEAR=1.5`, `TRK_VZ_ACCEL=1.0` |
 | Vertical PI-D | `TTC_VY_KP=20`, `TTC_VY_KI=3`, `TTC_VY_KD=10`, `TTC_AZ_ALPHA=0.2` |
 | Vertical limits | `TTC_VY_MIN=-7`, `TTC_VY_MAX=2`, `TTC_VY_I_MAX=40`, `TTC_THR_MAX=140` |
 | Yaw | `TRK_YAW_KP=20`, `TRK_YAW_MAX=15`, `TRK_YAW_SLEW=20`, `TRK_YAW_SIGN=-1`, `TRK_DEADBAND=0.02` |

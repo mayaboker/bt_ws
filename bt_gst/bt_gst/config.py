@@ -60,7 +60,9 @@ class SimulationSourceConfigOverrides:
 
 
 SourceConfigOverride: TypeAlias = (
-    FileSourceConfigOverrides | CameraSourceConfigOverrides | SimulationSourceConfigOverrides
+    FileSourceConfigOverrides
+    | CameraSourceConfigOverrides
+    | SimulationSourceConfigOverrides
 )
 SourceOverride: TypeAlias = SourceConfig | SourceConfigOverride
 
@@ -73,7 +75,7 @@ SUPPORTED_CODECS = frozenset({DEFAULT_CODEC})
 DEFAULT_ZMQ_ENDPOINT = "tcp://127.0.0.1:5556"
 DEFAULT_ZMQ_MAX_RATE_HZ = 30
 DEFAULT_SELECTOR_ZMQ_ENDPOINT = "tcp://127.0.0.1:5557"
-SUPPORTED_TRACKER_TYPES = frozenset({"controlled_red", "cpu_nano"})
+SUPPORTED_TRACKER_TYPES = frozenset({"controlled_red", "cpu_nano", "cpu_yolo"})
 SUPPORTED_CPU_INITIALIZATION = frozenset({"selector", "fixed"})
 
 
@@ -124,12 +126,26 @@ class CpuNanoConfig:
 
 
 @dataclass(frozen=True)
+class CpuYoloConfig:
+    model_file: Path = Path("models/yolov8n.onnx")
+    labels_file: Path | None = None
+    intra_op_threads: int = 4
+    confidence_threshold: float = 0.4
+    iou_threshold: float = 0.7
+    max_detections: int = 100
+    selector_roi_size: tuple[int, int] = (60, 90)
+    association_iou_threshold: float = 0.1
+    association_max_distance: float = 0.25
+
+
+@dataclass(frozen=True)
 class TrackerConfig:
     enabled: bool = False
     type: str = "controlled_red"
     overlay_enabled: bool = False
     controlled_red: ControlledRedConfig = ControlledRedConfig()
     cpu_nano: CpuNanoConfig = CpuNanoConfig()
+    cpu_yolo: CpuYoloConfig = CpuYoloConfig()
 
 
 @dataclass(frozen=True)
@@ -207,7 +223,9 @@ def load_config_overrides(path: Path) -> AppConfigOverrides:
         config_logger.trace("config is empty path={}", path)
         return AppConfigOverrides()
     if not isinstance(raw_config, dict):
-        config_logger.debug("config root is not mapping type={}", type(raw_config).__name__)
+        config_logger.debug(
+            "config root is not mapping type={}", type(raw_config).__name__
+        )
         raise ConfigError("config root must be a mapping")
 
     return app_config_overrides_from_mapping(raw_config)
@@ -220,7 +238,9 @@ def app_config_overrides_from_mapping(raw_config: dict[str, Any]) -> AppConfigOv
     if raw_source is None:
         source = None
     elif not isinstance(raw_source, dict):
-        config_logger.debug("config source is not mapping type={}", type(raw_source).__name__)
+        config_logger.debug(
+            "config source is not mapping type={}", type(raw_source).__name__
+        )
         raise ConfigError("config source must be a mapping")
     else:
         source = source_config_from_mapping(raw_source)
@@ -228,7 +248,9 @@ def app_config_overrides_from_mapping(raw_config: dict[str, Any]) -> AppConfigOv
     raw_detector = raw_config.get("detector")
     raw_tracker = raw_config.get("tracker")
     if raw_detector is not None and raw_tracker is not None:
-        raise ConfigError("tracker and legacy detector sections cannot be used together")
+        raise ConfigError(
+            "tracker and legacy detector sections cannot be used together"
+        )
     detector = None
     if raw_detector is not None:
         if not isinstance(raw_detector, dict):
@@ -293,7 +315,9 @@ def source_config_from_mapping(raw_source: dict[str, Any]) -> SourceConfig:
     source_type = raw_source.get("type")
     config_logger.trace("mapping source config source_type={}", source_type)
     if not isinstance(source_type, str) or not source_type:
-        config_logger.debug("config source.type missing or invalid value={!r}", source_type)
+        config_logger.debug(
+            "config source.type missing or invalid value={!r}", source_type
+        )
         raise ConfigError("config source.type is required")
 
     if source_type == "file":
@@ -326,12 +350,16 @@ def resolve_config(
     *overrides: AppConfigOverrides,
 ) -> AppConfig:
     config = defaults if defaults is not None else AppConfig()
-    config_logger.trace("resolving config defaults={!r} overrides={!r}", config, overrides)
+    config_logger.trace(
+        "resolving config defaults={!r} overrides={!r}", config, overrides
+    )
     for override in overrides:
         config = AppConfig(
             source=_resolve_source_config(config.source, override.source),
             detector=_resolve_detector_config(config.detector, override.detector),
-            tracker=override.tracker if override.tracker is not None else config.tracker,
+            tracker=override.tracker
+            if override.tracker is not None
+            else config.tracker,
             zmq=_resolve_zmq_config(config.zmq, override.zmq),
             selector_zmq=_resolve_selector_zmq_config(
                 config.selector_zmq, override.selector_zmq
@@ -384,7 +412,9 @@ def _resolve_zmq_config(
         return current
     return ZmqConfig(
         enabled=override.enabled if override.enabled is not None else current.enabled,
-        endpoint=override.endpoint if override.endpoint is not None else current.endpoint,
+        endpoint=override.endpoint
+        if override.endpoint is not None
+        else current.endpoint,
         bind=override.bind if override.bind is not None else current.bind,
         max_rate_hz=(
             override.max_rate_hz
@@ -402,7 +432,9 @@ def _resolve_selector_zmq_config(
         return current
     return SelectorZmqConfig(
         enabled=override.enabled if override.enabled is not None else current.enabled,
-        endpoint=override.endpoint if override.endpoint is not None else current.endpoint,
+        endpoint=override.endpoint
+        if override.endpoint is not None
+        else current.endpoint,
         bind=override.bind if override.bind is not None else current.bind,
         command_timeout_s=(
             override.command_timeout_s
@@ -513,7 +545,9 @@ def _validate_detector_config(detector: DetectorConfig) -> None:
             raise ConfigError(f"detector.{field} must be an int")
         if not 0 <= value <= maximum:
             raise ConfigError(f"detector.{field} must be between 0 and {maximum}")
-    if isinstance(detector.minimum_area, bool) or not isinstance(detector.minimum_area, int):
+    if isinstance(detector.minimum_area, bool) or not isinstance(
+        detector.minimum_area, int
+    ):
         raise ConfigError("detector.minimum_area must be an int")
     if not 0 <= detector.minimum_area <= 10_000_000:
         raise ConfigError("detector.minimum_area must be between 0 and 10000000")
@@ -563,15 +597,20 @@ def effective_tracker_config(config: AppConfig) -> TrackerConfig:
 def _tracker_config_from_mapping(raw: dict[str, Any]) -> TrackerConfig:
     raw_red = raw.get("controlled_red", {})
     raw_cpu = raw.get("cpu_nano", {})
+    raw_yolo = raw.get("cpu_yolo", {})
     if not isinstance(raw_red, dict):
         raise ConfigError("tracker.controlled_red must be a mapping")
     if not isinstance(raw_cpu, dict):
         raise ConfigError("tracker.cpu_nano must be a mapping")
+    if not isinstance(raw_yolo, dict):
+        raise ConfigError("tracker.cpu_yolo must be a mapping")
     return TrackerConfig(
         enabled=_optional_bool(raw, "enabled") if "enabled" in raw else False,
         type=_optional_string(raw, "type") if "type" in raw else "controlled_red",
         overlay_enabled=(
-            _optional_bool(raw, "overlay_enabled") if "overlay_enabled" in raw else False
+            _optional_bool(raw, "overlay_enabled")
+            if "overlay_enabled" in raw
+            else False
         ),
         controlled_red=ControlledRedConfig(
             low_h=_optional_int(raw_red, "low_h") if "low_h" in raw_red else 0,
@@ -600,13 +639,56 @@ def _tracker_config_from_mapping(raw: dict[str, Any]) -> TrackerConfig:
             selector_roi_size=_optional_int_tuple(
                 raw_cpu, "selector_roi_size", 2, (60, 90)
             ),
-            fixed_roi=_optional_int_tuple(
-                raw_cpu, "fixed_roi", 4, (100, 80, 60, 90)
-            ),
+            fixed_roi=_optional_int_tuple(raw_cpu, "fixed_roi", 4, (100, 80, 60, 90)),
             confidence_threshold=(
                 _optional_float(raw_cpu, "confidence_threshold")
                 if "confidence_threshold" in raw_cpu
                 else 0.5
+            ),
+        ),
+        cpu_yolo=CpuYoloConfig(
+            model_file=(
+                Path(_optional_string(raw_yolo, "model_file"))
+                if "model_file" in raw_yolo
+                else Path("models/yolov8n.onnx")
+            ),
+            labels_file=(
+                Path(_optional_string(raw_yolo, "labels_file"))
+                if raw_yolo.get("labels_file") is not None
+                else None
+            ),
+            intra_op_threads=(
+                _optional_int(raw_yolo, "intra_op_threads")
+                if "intra_op_threads" in raw_yolo
+                else 4
+            ),
+            confidence_threshold=(
+                _optional_float(raw_yolo, "confidence_threshold")
+                if "confidence_threshold" in raw_yolo
+                else 0.4
+            ),
+            iou_threshold=(
+                _optional_float(raw_yolo, "iou_threshold")
+                if "iou_threshold" in raw_yolo
+                else 0.7
+            ),
+            max_detections=(
+                _optional_int(raw_yolo, "max_detections")
+                if "max_detections" in raw_yolo
+                else 100
+            ),
+            selector_roi_size=_optional_int_tuple(
+                raw_yolo, "selector_roi_size", 2, (60, 90)
+            ),
+            association_iou_threshold=(
+                _optional_float(raw_yolo, "association_iou_threshold")
+                if "association_iou_threshold" in raw_yolo
+                else 0.1
+            ),
+            association_max_distance=(
+                _optional_float(raw_yolo, "association_max_distance")
+                if "association_max_distance" in raw_yolo
+                else 0.25
             ),
         ),
     )
@@ -637,23 +719,79 @@ def _validate_tracker_config(tracker: TrackerConfig) -> None:
             )
         )
         return
+    if tracker.type == "cpu_yolo":
+        yolo = tracker.cpu_yolo
+        if not isinstance(yolo.model_file, Path) or not str(yolo.model_file):
+            raise ConfigError("tracker.cpu_yolo.model_file must be a non-empty path")
+        if yolo.labels_file is not None and (
+            not isinstance(yolo.labels_file, Path) or not str(yolo.labels_file)
+        ):
+            raise ConfigError(
+                "tracker.cpu_yolo.labels_file must be a non-empty path or null"
+            )
+        if (
+            isinstance(yolo.intra_op_threads, bool)
+            or not isinstance(yolo.intra_op_threads, int)
+            or yolo.intra_op_threads < 0
+        ):
+            raise ConfigError(
+                "tracker.cpu_yolo.intra_op_threads must be a nonnegative int"
+            )
+        if (
+            isinstance(yolo.max_detections, bool)
+            or not isinstance(yolo.max_detections, int)
+            or yolo.max_detections <= 0
+        ):
+            raise ConfigError("tracker.cpu_yolo.max_detections must be a positive int")
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in yolo.selector_roi_size
+        ):
+            raise ConfigError(
+                "tracker.cpu_yolo.selector_roi_size values must be positive ints"
+            )
+        for field in (
+            "confidence_threshold",
+            "iou_threshold",
+            "association_iou_threshold",
+            "association_max_distance",
+        ):
+            value = getattr(yolo, field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ConfigError(f"tracker.cpu_yolo.{field} must be a number")
+            if not 0.0 <= value <= 1.0:
+                raise ConfigError(f"tracker.cpu_yolo.{field} must be between 0 and 1")
+        return
     cpu = tracker.cpu_nano
     if not isinstance(cpu.models_dir, Path) or not str(cpu.models_dir):
         raise ConfigError("tracker.cpu_nano.models_dir must be a non-empty path")
     if cpu.initialization not in SUPPORTED_CPU_INITIALIZATION:
         raise ConfigError("tracker.cpu_nano.initialization must be selector or fixed")
-    if any(isinstance(value, bool) or not isinstance(value, int) or value <= 0
-           for value in cpu.selector_roi_size):
-        raise ConfigError("tracker.cpu_nano.selector_roi_size values must be positive ints")
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        for value in cpu.selector_roi_size
+    ):
+        raise ConfigError(
+            "tracker.cpu_nano.selector_roi_size values must be positive ints"
+        )
     x, y, width, height = cpu.fixed_roi
-    if any(isinstance(value, bool) or not isinstance(value, int) for value in (x, y, width, height)):
+    if any(
+        isinstance(value, bool) or not isinstance(value, int)
+        for value in (x, y, width, height)
+    ):
         raise ConfigError("tracker.cpu_nano.fixed_roi values must be ints")
     if x < 0 or y < 0 or width <= 0 or height <= 0:
-        raise ConfigError("tracker.cpu_nano.fixed_roi must be nonnegative x,y and positive width,height")
-    if isinstance(cpu.confidence_threshold, bool) or not isinstance(cpu.confidence_threshold, (int, float)):
+        raise ConfigError(
+            "tracker.cpu_nano.fixed_roi must be nonnegative x,y and positive width,height"
+        )
+    if isinstance(cpu.confidence_threshold, bool) or not isinstance(
+        cpu.confidence_threshold, (int, float)
+    ):
         raise ConfigError("tracker.cpu_nano.confidence_threshold must be a number")
     if not 0.0 <= cpu.confidence_threshold <= 1.0:
-        raise ConfigError("tracker.cpu_nano.confidence_threshold must be between 0 and 1")
+        raise ConfigError(
+            "tracker.cpu_nano.confidence_threshold must be between 0 and 1"
+        )
 
 
 def _validate_selector_zmq_config(config: SelectorZmqConfig) -> None:

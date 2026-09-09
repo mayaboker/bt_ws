@@ -15,11 +15,13 @@ inline GstVideoRegionOfInterestMeta* add_detection(
     guint width,
     guint height,
     gdouble confidence,
-    gboolean initialized)
+    gboolean initialized,
+    gint result_id = -1)
 {
     auto* roi = gst_buffer_add_video_region_of_interest_meta(
         buffer, object_type, x, y, width, height);
     if (!roi) return nullptr;
+    if (result_id >= 0) roi->id = result_id;
 
     auto* parameters = gst_structure_new(
         kDetectionParameters,

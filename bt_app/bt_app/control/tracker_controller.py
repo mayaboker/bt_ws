@@ -720,7 +720,11 @@ class TrackerController:
             self._last_scale_update.accepted and self._last_scale_update.new_frame
         )
         if self._phase == TrackerPhase.ALIGN and self._last_scale_update.new_frame:
-            if live_frame and abs(dx) <= config.horizontal_alignment_threshold:
+            if (
+                live_frame
+                and abs(dx) <= config.horizontal_alignment_threshold
+                and abs(dy) <= config.horizontal_alignment_threshold
+            ):
                 self._alignment_count += 1
             else:
                 self._alignment_count = 0
@@ -791,10 +795,16 @@ class TrackerController:
             -max_pitch_step,
             max_pitch_step,
         )
-        roll_target = clamp(
-            config.roll_sign * config.roll_kp_deg * self._deadband(dx, config.deadband),
-            -config.roll_max_deg,
-            config.roll_max_deg,
+        roll_target = (
+            0.0
+            if self._phase == TrackerPhase.ALIGN
+            else clamp(
+                config.roll_sign
+                * config.roll_kp_deg
+                * self._deadband(dx, config.deadband),
+                -config.roll_max_deg,
+                config.roll_max_deg,
+            )
         )
         max_roll_step = config.roll_slew_deg_s * dt_s
         self._roll_command_deg += clamp(

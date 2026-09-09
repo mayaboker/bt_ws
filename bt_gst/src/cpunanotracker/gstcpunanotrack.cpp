@@ -377,7 +377,7 @@ static GstFlowReturn transform_ip(GstBaseTransform* base, GstBuffer* buffer)
         const double confidence = result.initialized ? 0.0 : result.confidence;
         if (!bt::gstmeta::add_detection(
                 buffer, "nanotrack", -1, x, y, right-x, bottom-y,
-                confidence, result.initialized))
+                confidence, result.initialized, 0))
             throw std::runtime_error("Cannot attach ROI detection metadata");
         GST_LOG_OBJECT(base, "initialized=%d box=%d,%d,%d,%d confidence=%.6f", result.initialized,
                        x, y, right-x, bottom-y, result.confidence);

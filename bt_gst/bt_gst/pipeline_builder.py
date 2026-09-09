@@ -53,7 +53,9 @@ def build_source_pipeline_description(source: SourceConfig) -> str:
     raise ConfigError("source config is required")
 
 
-def build_processing_pipeline_description(tracker: TrackerConfig | DetectorConfig) -> str:
+def build_processing_pipeline_description(
+    tracker: TrackerConfig | DetectorConfig,
+) -> str:
     if isinstance(tracker, DetectorConfig):
         tracker = effective_tracker_config(AppConfig(detector=tracker))
     if not tracker.enabled:
@@ -72,6 +74,28 @@ def build_processing_pipeline_description(tracker: TrackerConfig | DetectorConfi
             return tracker_description
         return (
             f"{tracker_description} ! videoconvert ! "
+            "video/x-raw,format=BGRx ! cairooverlay name=detection_overlay"
+        )
+    if tracker.type == "cpu_yolo":
+        yolo = tracker.cpu_yolo
+        labels = (
+            f" labels-file={_quote_path(yolo.labels_file)}"
+            if yolo.labels_file is not None
+            else ""
+        )
+        detector_description = (
+            "! videoconvert ! video/x-raw,format=RGB ! "
+            "cpuyolodetect name=tracker_backend enabled=false "
+            f"model-file={_quote_path(yolo.model_file)}{labels} "
+            f"intra-op-threads={yolo.intra_op_threads} "
+            f"confidence-threshold={yolo.confidence_threshold} "
+            f"iou-threshold={yolo.iou_threshold} "
+            f"max-detections={yolo.max_detections}"
+        )
+        if not tracker.overlay_enabled:
+            return detector_description
+        return (
+            f"{detector_description} ! videoconvert ! "
             "video/x-raw,format=BGRx ! cairooverlay name=detection_overlay"
         )
     detector = tracker.controlled_red
@@ -100,8 +124,7 @@ def build_stream_branch_description(config: AppConfig) -> str:
     if isinstance(config.source, SimulationSourceConfig):
         framerate = config.source.rate
         raw_caps = (
-            f"video/x-raw,format=I420,width=640,height=480,"
-            f"framerate={framerate}/1"
+            f"video/x-raw,format=I420,width=640,height=480,framerate={framerate}/1"
         )
     return (
         "queue leaky=downstream max-size-buffers=2 ! "

@@ -13,6 +13,7 @@ from bt_gst.config import (
     CameraSourceConfig,
     ConfigError,
     CpuNanoConfig,
+    CpuYoloConfig,
     DetectorConfig,
     FileSourceConfig,
     SimulationSourceConfig,
@@ -35,8 +36,10 @@ from bt_gst.red_detection import (
     DetectionOverlayState,
     DetectionBox,
     RedDetection,
+    YoloSelectionState,
     read_red_detection,
     read_cpu_nano_detection,
+    read_cpu_yolo_detection,
 )
 
 
@@ -158,6 +161,59 @@ def test_cpu_nano_fixed_pipeline_starts_enabled_with_roi() -> None:
     )
 
     assert "enabled=true roi=10,20,30,40" in pipeline
+
+
+def test_cpu_yolo_pipeline_starts_disabled_and_uses_rgb() -> None:
+    pipeline = build_pipeline_description(
+        AppConfig(
+            source=SimulationSourceConfig("/camera"),
+            tracker=TrackerConfig(
+                enabled=True,
+                type="cpu_yolo",
+                overlay_enabled=True,
+                cpu_yolo=CpuYoloConfig(
+                    model_file=Path("models/yolo model.onnx"),
+                    labels_file=Path("models/labels file.txt"),
+                    intra_op_threads=2,
+                    max_detections=20,
+                ),
+            ),
+            video_local=False,
+        )
+    )
+
+    assert "video/x-raw,format=RGB" in pipeline
+    assert "cpuyolodetect name=tracker_backend enabled=false" in pipeline
+    assert "model-file='models/yolo model.onnx'" in pipeline
+    assert "labels-file='models/labels file.txt'" in pipeline
+    assert "intra-op-threads=2" in pipeline
+    assert "max-detections=20" in pipeline
+    assert "cairooverlay name=detection_overlay" in pipeline
+
+
+def test_loads_cpu_yolo_tracker_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "source:\n  type: simulation\n  topic: /camera\n"
+        "tracker:\n  enabled: true\n  type: cpu_yolo\n  overlay_enabled: true\n"
+        "  cpu_yolo:\n    model_file: models/yolo.onnx\n    labels_file: null\n"
+        "    intra_op_threads: 3\n    confidence_threshold: 0.6\n"
+        "    iou_threshold: 0.5\n    max_detections: 25\n"
+        "    selector_roi_size: [80, 100]\n"
+        "    association_iou_threshold: 0.2\n"
+        "    association_max_distance: 0.3\n",
+        encoding="utf-8",
+    )
+
+    config = resolve_config(AppConfig(), load_config_overrides(config_path))
+
+    assert config.tracker is not None
+    assert config.tracker.type == "cpu_yolo"
+    assert config.tracker.cpu_yolo.model_file == Path("models/yolo.onnx")
+    assert config.tracker.cpu_yolo.labels_file is None
+    assert config.tracker.cpu_yolo.intra_op_threads == 3
+    assert config.tracker.cpu_yolo.selector_roi_size == (80, 100)
+    validate_config(config)
 
 
 def test_loads_cpu_nano_tracker_config_and_rejects_legacy_conflict(
@@ -412,6 +468,68 @@ def test_cpu_nano_metadata_maps_confidence_to_common_lock() -> None:
     )
 
 
+class FakeYoloParameters:
+    def __init__(self, class_id: int, confidence: float) -> None:
+        self.values = {"class-id": class_id, "confidence": confidence}
+
+    def get_value(self, name: str) -> object:
+        return self.values[name]
+
+
+class FakeYoloMeta:
+    def __init__(self, box: DetectionBox, class_id: int, confidence: float) -> None:
+        self.x, self.y = box.x, box.y
+        self.w, self.h = box.width, box.height
+        self.parameters = FakeYoloParameters(class_id, confidence)
+
+    def get_param(self, name: str) -> FakeYoloParameters | None:
+        return self.parameters if name == "bt-object-detection" else None
+
+
+class FakeYoloGstVideo:
+    metas: list[FakeYoloMeta] = []
+
+    @classmethod
+    def buffer_get_video_region_of_interest_meta_id(cls, _buffer, meta_id):
+        return cls.metas[meta_id] if meta_id < len(cls.metas) else None
+
+
+def test_cpu_yolo_selects_nearest_then_follows_same_class() -> None:
+    selection = YoloSelectionState(0.1, 0.25)
+    selection.arm(DetectionBox(280, 190, 80, 100), 640, 480)
+    buffer = FakeBuffer(123, has_meta=False)
+    FakeYoloGstVideo.metas = [
+        FakeYoloMeta(DetectionBox(285, 195, 30, 40), 1, 0.7),
+        FakeYoloMeta(DetectionBox(345, 250, 15, 20), 2, 0.9),
+    ]
+
+    initial = read_cpu_yolo_detection(buffer, FakeYoloGstVideo, 10, selection)
+    FakeYoloGstVideo.metas = [
+        FakeYoloMeta(DetectionBox(300, 200, 30, 40), 1, 0.65),
+        FakeYoloMeta(DetectionBox(286, 196, 30, 40), 2, 0.99),
+    ]
+    followed = read_cpu_yolo_detection(buffer, FakeYoloGstVideo, 10, selection)
+
+    assert initial is not None and initial.found and initial.x == 285
+    assert followed is not None and followed.found and followed.x == 300
+    assert followed.score == pytest.approx(0.65)
+
+
+def test_cpu_yolo_stays_armed_across_loss_and_reacquires() -> None:
+    selection = YoloSelectionState(0.1, 0.25)
+    selection.arm(DetectionBox(280, 190, 80, 100), 640, 480)
+    buffer = FakeBuffer(123, has_meta=False)
+    FakeYoloGstVideo.metas = [FakeYoloMeta(DetectionBox(300, 200, 30, 40), 1, 0.8)]
+    read_cpu_yolo_detection(buffer, FakeYoloGstVideo, 10, selection)
+    FakeYoloGstVideo.metas = []
+    lost = read_cpu_yolo_detection(buffer, FakeYoloGstVideo, 10, selection)
+    FakeYoloGstVideo.metas = [FakeYoloMeta(DetectionBox(320, 210, 30, 40), 1, 0.75)]
+    reacquired = read_cpu_yolo_detection(buffer, FakeYoloGstVideo, 10, selection)
+
+    assert lost is not None and not lost.found
+    assert reacquired is not None and reacquired.found and reacquired.x == 320
+
+
 class FakeCapsStructure:
     def get_value(self, name):
         return {"width": 640, "height": 480}[name]
@@ -494,6 +612,38 @@ def test_cpu_nano_selector_updates_fixed_overlay_gate() -> None:
     _apply_selector_command(element, command, tracker, state)
 
     assert state.selector() == DetectionBox(290, 195, 60, 90)
+
+
+def test_cpu_yolo_space_arms_selection_and_enables_detector() -> None:
+    element = FakeTrackerElement()
+    overlay = DetectionOverlayState()
+    selection = YoloSelectionState(0.1, 0.25)
+    tracker = TrackerConfig(
+        enabled=True,
+        type="cpu_yolo",
+        cpu_yolo=CpuYoloConfig(selector_roi_size=(80, 100)),
+    )
+    command = type(
+        "Command",
+        (),
+        {
+            "center_x": 0.5,
+            "center_y": 0.5,
+            "state": 2,
+            "roi_width": None,
+            "roi_height": None,
+        },
+    )()
+
+    _apply_selector_command(element, command, tracker, overlay, selection)
+
+    assert element.properties == [("enabled", True)]
+    assert overlay.selector() is None
+    FakeYoloGstVideo.metas = [FakeYoloMeta(DetectionBox(300, 200, 20, 20), 0, 0.9)]
+    detection = read_cpu_yolo_detection(
+        FakeBuffer(123, has_meta=False), FakeYoloGstVideo, 10, selection
+    )
+    assert detection is not None and detection.found
 
 
 def test_read_red_detection_handles_timestamp_and_missing_meta() -> None:
