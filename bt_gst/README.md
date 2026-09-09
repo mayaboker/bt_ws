@@ -4,6 +4,39 @@
 optionally detects red objects, and streams H.264 over RTP/UDP. Detection
 results can be drawn directly on the video.
 
+## Build all native plugins
+
+The root CMake project builds `controlledreddetect`, `cpunanotrack`,
+`metaprint`, and `cpuyolodetect` into one directory:
+
+```bash
+cd /home/user/projects/bt_ws/bt_gst
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
+export GST_PLUGIN_PATH="$PWD/build/plugins${GST_PLUGIN_PATH:+:$GST_PLUGIN_PATH}"
+gst-inspect-1.0 controlledreddetect
+gst-inspect-1.0 cpunanotrack
+gst-inspect-1.0 metaprint
+gst-inspect-1.0 cpuyolodetect
+```
+
+The CPU inference plugins require a complete ONNX Runtime SDK under
+`third_party/onnxruntime-linux-x64-1.29.0`, including
+`lib/libonnxruntime.so`. Optional plugins can be disabled when their
+dependencies are unavailable:
+
+```bash
+cmake -S . -B build -G Ninja \
+  -DBT_GST_BUILD_CPU_NANOTRACK=OFF \
+  -DBT_GST_BUILD_CPU_YOLO_DETECT=OFF
+```
+
+Each plugin's standalone CMake build remains supported.
+
+See the [`cpuyolodetect` usage guide](docs/cpuyolodetect_usage.md) for model
+requirements, inspection, headless checks, and image/video/camera pipelines.
+
 ## Setup
 
 Install the native dependencies:

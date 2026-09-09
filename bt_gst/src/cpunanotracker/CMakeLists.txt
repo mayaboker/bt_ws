@@ -4,7 +4,8 @@ project(cpunanotrack LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0 gstreamer-base-1.0 gstreamer-video-1.0)
+pkg_check_modules(GST_NANOTRACK REQUIRED IMPORTED_TARGET
+    gstreamer-1.0 gstreamer-base-1.0 gstreamer-video-1.0)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc)
 set(ONNXRUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/onnxruntime-linux-x64-1.29.0"
     CACHE PATH "ONNX Runtime SDK directory")
@@ -40,14 +41,16 @@ if(NOT ONNXRUNTIME_INCLUDE_DIR OR NOT ONNXRUNTIME_LIBRARY)
         "-DONNXRUNTIME_INCLUDE_DIR and -DONNXRUNTIME_LIBRARY explicitly).")
 endif()
 
-add_library(ONNXRuntime::ONNXRuntime SHARED IMPORTED)
-set_target_properties(ONNXRuntime::ONNXRuntime PROPERTIES
-    IMPORTED_LOCATION "${ONNXRUNTIME_LIBRARY}"
-    INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_INCLUDE_DIR}")
+if(NOT TARGET ONNXRuntime::ONNXRuntime)
+    add_library(ONNXRuntime::ONNXRuntime SHARED IMPORTED GLOBAL)
+    set_target_properties(ONNXRuntime::ONNXRuntime PROPERTIES
+        IMPORTED_LOCATION "${ONNXRUNTIME_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_INCLUDE_DIR}")
+endif()
 
 add_library(gstcpunanotrack SHARED gstcpunanotrack.cpp)
 target_include_directories(gstcpunanotrack PRIVATE ${OpenCV_INCLUDE_DIRS})
-target_link_libraries(gstcpunanotrack PRIVATE PkgConfig::GST ${OpenCV_LIBS} ONNXRuntime::ONNXRuntime)
+target_link_libraries(gstcpunanotrack PRIVATE PkgConfig::GST_NANOTRACK ${OpenCV_LIBS} ONNXRuntime::ONNXRuntime)
 target_compile_options(gstcpunanotrack PRIVATE -Wall -Wextra)
 # Keep the native build RPATH so the bundled ONNX Runtime is found by the plugin scanner.
 get_filename_component(ONNXRUNTIME_LIBRARY_DIR "${ONNXRUNTIME_LIBRARY}" DIRECTORY)
@@ -56,13 +59,13 @@ set_target_properties(gstcpunanotrack PROPERTIES BUILD_RPATH "${ONNXRUNTIME_LIBR
 set(METAPRINT_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../metaprint.cpp")
 if(EXISTS "${METAPRINT_SOURCE}")
     add_library(gstmetaprint SHARED "${METAPRINT_SOURCE}")
-    target_link_libraries(gstmetaprint PRIVATE PkgConfig::GST)
+    target_link_libraries(gstmetaprint PRIVATE PkgConfig::GST_NANOTRACK)
 else()
     message(STATUS "Skipping gstmetaprint: ${METAPRINT_SOURCE} was not found")
 endif()
 
 add_executable(cpunanotracker-check check.cpp)
-target_link_libraries(cpunanotracker-check PRIVATE PkgConfig::GST)
+target_link_libraries(cpunanotracker-check PRIVATE PkgConfig::GST_NANOTRACK)
 target_compile_options(cpunanotracker-check PRIVATE -Wall -Wextra)
 enable_testing()
 set(NANOTRACK_MODELS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../demos/nanotracker/onnx")
