@@ -11,11 +11,19 @@ const stateColors = {
   ALT_HOLD: "#cfe8dc", TRACK: "#f4d7b7", FAILSAFE: "#efc8c3",
 };
 
-const state = { summary: null, velocity: null, view: null, dragStart: null, scopeEnd: null };
+const state = { summary: null, velocity: null, view: null, dragStart: null, scopeEnd: null, sessions: [] };
 const el = (id) => document.getElementById(id);
 
 async function requestJson(url) {
   const response = await fetch(url, { cache: "no-store" });
+  let body = null;
+  try { body = await response.json(); } catch (_) { body = null; }
+  if (!response.ok) throw new Error(body?.detail || `${response.status} ${response.statusText}`);
+  return body;
+}
+
+async function postJson(url) {
+  const response = await fetch(url, { method: "POST", cache: "no-store" });
   let body = null;
   try { body = await response.json(); } catch (_) { body = null; }
   if (!response.ok) throw new Error(body?.detail || `${response.status} ${response.statusText}`);
@@ -265,10 +273,42 @@ function renderChart() {
   });
 }
 
-async function loadDashboard() {
+function sessionLabel(session, index) {
+  const newest = index === 0 ? "Newest · " : "";
+  return `${newest}${formatUtc(session.start_utc_ns)} · ${session.status} · ${session.session_id}`;
+}
+
+async function refreshSessions({ preserveSelection = true } = {}) {
+  const select = el("session-select");
+  const previous = preserveSelection ? select.value : "";
+  const result = await requestJson("/api/sessions");
+  state.sessions = result.sessions;
+  select.replaceChildren();
+  for (const [index, session] of state.sessions.entries()) {
+    const option = document.createElement("option");
+    option.value = session.session_id;
+    option.textContent = sessionLabel(session, index);
+    select.append(option);
+  }
+  if (previous && state.sessions.some((session) => session.session_id === previous)) {
+    select.value = previous;
+  }
+  select.disabled = state.sessions.length === 0;
+  if (!state.sessions.length) throw new Error("No finished blackbox session found");
+  return select.value;
+}
+
+async function updateLogsDirectory() {
+  const result = await requestJson("/api/logs-directory");
+  el("logs-directory").textContent = result.path;
+  el("logs-directory").title = result.path;
+}
+
+async function loadDashboard(sessionId = el("session-select").value) {
   el("loading").hidden = false; el("error").hidden = true; el("content").hidden = true;
   try {
-    const summary = await requestJson("/api/latest");
+    if (!sessionId) sessionId = await refreshSessions({ preserveSelection: false });
+    const summary = await requestJson(`/api/sessions/${encodeURIComponent(sessionId)}`);
     state.summary = summary; state.scopeEnd = null; el("data-scope").value = "all"; renderSummary(summary);
     if (summary.velocity.available) {
       state.velocity = await requestJson(`/api/sessions/${encodeURIComponent(summary.session.session_id)}/velocity`);
@@ -285,13 +325,36 @@ async function loadDashboard() {
     if (state.velocity) requestAnimationFrame(renderChart);
   } catch (error) {
     el("loading").hidden = true; el("error").hidden = false;
-    el("error-title").textContent = "Unable to load the latest flight";
+    el("error-title").textContent = "Unable to load the selected flight";
     el("error-detail").textContent = error.message;
   }
 }
 
-el("reload").addEventListener("click", loadDashboard);
-el("retry").addEventListener("click", loadDashboard);
+el("reload").addEventListener("click", async () => {
+  try { await updateLogsDirectory(); await refreshSessions(); await loadDashboard(); }
+  catch (error) {
+    el("loading").hidden = true; el("content").hidden = true; el("error").hidden = false;
+    el("error-title").textContent = "Unable to refresh flight logs"; el("error-detail").textContent = error.message;
+  }
+});
+el("browse").addEventListener("click", async () => {
+  const button = el("browse");
+  button.disabled = true;
+  try {
+    const result = await postJson("/api/logs-directory/browse");
+    el("logs-directory").textContent = result.path; el("logs-directory").title = result.path;
+    await refreshSessions({ preserveSelection: false });
+    if (result.selected_session_id) el("session-select").value = result.selected_session_id;
+    await loadDashboard(el("session-select").value);
+  } catch (error) {
+    if (error.message !== "Folder selection cancelled") {
+      el("loading").hidden = true; el("content").hidden = true; el("error").hidden = false;
+      el("error-title").textContent = "Unable to use log folder"; el("error-detail").textContent = error.message;
+    }
+  } finally { button.disabled = false; }
+});
+el("retry").addEventListener("click", () => loadDashboard());
+el("session-select").addEventListener("change", (event) => loadDashboard(event.target.value));
 el("data-scope").addEventListener("change", (event) => {
   if (!state.velocity) return;
   const trackIntervals = state.summary.states.filter((interval) => interval.state === "TRACK");
@@ -309,4 +372,7 @@ el("reset-zoom").addEventListener("click", () => {
   el("reset-zoom").disabled = true; renderChart();
 });
 new ResizeObserver(() => { if (state.velocity) renderChart(); }).observe(el("chart"));
-loadDashboard();
+updateLogsDirectory().then(() => refreshSessions({ preserveSelection: false })).then(loadDashboard).catch((error) => {
+  el("loading").hidden = true; el("error").hidden = false;
+  el("error-title").textContent = "Unable to find flight logs"; el("error-detail").textContent = error.message;
+});

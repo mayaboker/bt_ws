@@ -93,7 +93,10 @@ main section { padding-top: 54px; }
 .button.secondary { color: var(--green); background: transparent; }
 
 .chart-controls { display: flex; align-items: center; gap: 10px; }
-.chart-controls label { color: var(--muted); font-size: .78rem; font-weight: 750; }
+.chart-controls label, .session-controls label { color: var(--muted); font-size: .78rem; font-weight: 750; }
+.session-controls { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.session-controls .scope-select { max-width: min(430px, 52vw); }
+.logs-directory { flex-basis: 100%; max-width: 650px; overflow: hidden; color: var(--muted); font-size: .72rem; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .scope-select {
   border: 1px solid var(--green);
   border-radius: 999px;
@@ -210,7 +213,9 @@ footer { padding: 24px 0 42px; color: var(--muted); border-top: 1px solid rgba(2
 @media (max-width: 560px) {
   .topbar, main, footer, .message-card { width: min(100% - 24px, 1380px); }
   .topbar, .section-heading { align-items: flex-start; flex-direction: column; }
-  .chart-controls { align-items: flex-start; flex-wrap: wrap; }
+  .chart-controls, .session-controls { align-items: flex-start; justify-content: flex-start; flex-wrap: wrap; }
+  .session-controls .scope-select { max-width: 100%; width: 100%; }
+  .logs-directory { text-align: left; }
   .card-grid { grid-template-columns: 1fr; }
   .message-card { padding: 34px 20px; }
   .chart { min-height: 560px; }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
@@ -49,6 +50,82 @@ def create_app(repository: BlackboxRepository) -> FastAPI:
             session = repository.latest()
             return analyze_session(repository, session)
         except NoFinishedSessionError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except SessionDataError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/sessions")
+    async def sessions():
+        return {
+            "sessions": [
+                {
+                    "session_id": session.session_id,
+                    "start_utc_ns": session.metadata.get("start_utc_ns"),
+                    "end_utc_ns": session.metadata.get("end_utc_ns"),
+                    "status": session.metadata.get("status"),
+                    "end_reason": session.metadata.get("end_reason"),
+                }
+                for session in repository.sessions()
+            ]
+        }
+
+    @app.get("/api/logs-directory")
+    async def logs_directory():
+        return {"path": str(repository.logs_directory.resolve())}
+
+    @app.post("/api/logs-directory/browse")
+    async def browse_logs_directory():
+        initial = repository.logs_directory.resolve()
+        if not initial.is_dir():
+            initial = initial.parent
+        try:
+            result = subprocess.run(
+                [
+                    "zenity",
+                    "--file-selection",
+                    "--directory",
+                    "--title=Select BT blackbox log folder",
+                    f"--filename={initial}/",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError as exc:
+            raise HTTPException(
+                status_code=501,
+                detail=f"Unable to open the folder browser: {exc}",
+            ) from exc
+        if result.returncode != 0:
+            raise HTTPException(status_code=409, detail="Folder selection cancelled")
+
+        selected = Path(result.stdout.strip()).expanduser().resolve()
+        selected_session_id = None
+        if selected.name.endswith("_blackbox"):
+            selected_session_id = selected.name.removesuffix("_blackbox")
+            candidate = selected.parent
+        else:
+            candidate = selected
+        if not candidate.is_dir():
+            raise HTTPException(status_code=422, detail="Selected folder does not exist")
+        previous = repository.logs_directory
+        repository.logs_directory = candidate
+        if not repository.sessions():
+            repository.logs_directory = previous
+            raise HTTPException(
+                status_code=422,
+                detail="Selected folder contains no finished blackbox sessions",
+            )
+        return {
+            "path": str(candidate),
+            "selected_session_id": selected_session_id,
+        }
+
+    @app.get("/api/sessions/{session_id}")
+    async def session_summary(session_id: str):
+        try:
+            return analyze_session(repository, repository.get(session_id))
+        except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except SessionDataError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 import bt_analysis.main as main_module
+import bt_analysis.web as web_module
 from bt_analysis.cli import (
     DEFAULT_HOST,
     DEFAULT_LOGS_DIRECTORY,
@@ -29,19 +30,25 @@ def test_dashboard_and_api_serve_latest_session(tmp_path, make_session):
     make_session("flight", start_utc_ns=100)
     app = create_app(BlackboxRepository(tmp_path))
 
-    index, latest, velocity = asyncio.run(
+    index, sessions, latest, selected, velocity = asyncio.run(
         get_responses(
             app,
             "/",
+            "/api/sessions",
             "/api/latest",
+            "/api/sessions/flight",
             "/api/sessions/flight/velocity",
         )
     )
 
     assert index.status_code == 200
     assert "Blackbox analysis" in index.text
+    assert sessions.status_code == 200
+    assert sessions.json()["sessions"][0]["session_id"] == "flight"
     assert latest.status_code == 200
     assert latest.json()["session"]["session_id"] == "flight"
+    assert selected.status_code == 200
+    assert selected.json()["session"]["session_id"] == "flight"
     assert velocity.status_code == 200
     assert velocity.json()["frame"] == "FLU"
     assert velocity.json()["vy_left_m_s"] == [-2.0, -0.0, 4.0]
@@ -68,6 +75,40 @@ def test_api_reports_missing_odometry(tmp_path, make_session):
 
     assert response.status_code == 404
     assert "unavailable" in response.json()["detail"]
+
+
+def test_browse_changes_log_root_and_accepts_session_directory(
+    tmp_path, make_session, monkeypatch
+):
+    session_directory = make_session("selected", start_utc_ns=100)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    repository = BlackboxRepository(empty)
+    app = create_app(repository)
+    monkeypatch.setattr(
+        web_module.subprocess,
+        "run",
+        lambda *args, **kwargs: type(
+            "Result", (), {"returncode": 0, "stdout": f"{session_directory}\n"}
+        )(),
+    )
+
+    async def browse_and_list():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            return (
+                await client.post("/api/logs-directory/browse"),
+                await client.get("/api/sessions"),
+            )
+
+    browse, sessions = asyncio.run(browse_and_list())
+
+    assert browse.status_code == 200
+    assert browse.json()["path"] == str(tmp_path)
+    assert browse.json()["selected_session_id"] == "selected"
+    assert sessions.json()["sessions"][0]["session_id"] == "selected"
 
 
 def test_cli_defaults_and_overrides():

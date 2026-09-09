@@ -13,7 +13,13 @@
       <h1>Blackbox analysis</h1>
       <p id="session-subtitle" class="subtitle">Loading latest finished session…</p>
     </div>
-    <button id="reload" class="button" type="button">Reload latest</button>
+    <div class="session-controls">
+      <label for="session-select">Flight log</label>
+      <select id="session-select" class="scope-select" aria-label="Flight log"></select>
+      <button id="browse" class="button secondary" type="button">Browse folder</button>
+      <button id="reload" class="button" type="button">Refresh logs</button>
+      <span id="logs-directory" class="logs-directory"></span>
+    </div>
   </header>
 
   <main id="content" hidden>
@@ -72,7 +78,7 @@
   <section id="loading" class="message-card">
     <div class="spinner" aria-hidden="true"></div>
     <h2>Reading blackbox</h2>
-    <p>Finding the newest finished flight and loading its Parquet chunks.</p>
+    <p>Finding finished flights and loading the selected Parquet chunks.</p>
   </section>
 
   <section id="error" class="message-card error-card" hidden>

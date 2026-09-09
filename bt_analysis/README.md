@@ -18,5 +18,10 @@ running from inside `bt_analysis`, provide the workspace path explicitly:
 uv run bt-analysis run --logs-dir ../bt_app/logs/blackbox
 ```
 
-The server is read-only. It selects the newest finished (`complete` or
-`unclean`) session and excludes a session that is still recording.
+The server is read-only. The dashboard initially selects the newest finished
+(`complete` or `unclean`) session. Use the **Flight log** combobox to analyze
+an older session and **Refresh logs** after a flight finishes. A session that
+is still recording is excluded until bt-app finalizes it. Use **Browse folder**
+to select a different blackbox root or an individual `*_blackbox` session
+folder; the native chooser is available when the server runs on a Linux desktop
+with Zenity.

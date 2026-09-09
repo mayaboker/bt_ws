@@ -29,6 +29,8 @@ def test_dashboard_assets_include_interactive_graph_controls():
     assert 'id="chart-tooltip"' in html
     assert 'id="reset-zoom"' in html
     assert 'id="data-scope"' in html
+    assert 'id="session-select"' in html
+    assert 'id="browse"' in html
     assert 'value="through-track"' in html
     assert 'addEventListener("pointermove"' in javascript
     assert 'addEventListener("pointerdown"' in javascript
@@ -37,3 +39,5 @@ def test_dashboard_assets_include_interactive_graph_controls():
     assert "renderStateLegend" in javascript
     assert "filteredVelocityStatistics" in javascript
     assert 'state === "TRACK"' in javascript
+    assert 'requestJson("/api/sessions")' in javascript
+    assert 'postJson("/api/logs-directory/browse")' in javascript
