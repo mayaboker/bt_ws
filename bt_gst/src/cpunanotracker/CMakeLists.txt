@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST_NANOTRACK REQUIRED IMPORTED_TARGET
-    gstreamer-1.0 gstreamer-base-1.0 gstreamer-video-1.0)
+    gstreamer-1.0>=1.18 gstreamer-base-1.0 gstreamer-video-1.0)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc)
 set(ONNXRUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/onnxruntime-linux-x64-1.29.0"
     CACHE PATH "ONNX Runtime SDK directory")
@@ -68,7 +68,7 @@ add_executable(cpunanotracker-check check.cpp)
 target_link_libraries(cpunanotracker-check PRIVATE PkgConfig::GST_NANOTRACK)
 target_compile_options(cpunanotracker-check PRIVATE -Wall -Wextra)
 enable_testing()
-set(NANOTRACK_MODELS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../demos/nanotracker/onnx")
+set(NANOTRACK_MODELS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/models")
 if(EXISTS "${NANOTRACK_MODELS_DIR}/nanotrack_backbone_template.onnx"
    AND EXISTS "${NANOTRACK_MODELS_DIR}/nanotrack_backbone.onnx"
    AND EXISTS "${NANOTRACK_MODELS_DIR}/nanotrack_head.onnx")

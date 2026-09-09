@@ -384,7 +384,7 @@ class FakeNanoMeta:
         self.parameters = FakeNanoParameters(initialized, confidence)
 
     def get_param(self, name: str) -> FakeNanoParameters | None:
-        return self.parameters if name == "nanotrack" else None
+        return self.parameters if name == "bt-object-detection" else None
 
 
 class FakeGstVideo:

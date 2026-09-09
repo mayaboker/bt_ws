@@ -93,7 +93,7 @@ sequence to verify plugin loading and metadata output:
 gst-launch-1.0 -q videotestsrc num-buffers=3 ! \
   video/x-raw,format=BGR,width=320,height=240 ! \
   cpunanotrack enabled=true roi="80,60,64,64" \
-    models-dir="$PWD/demos/nanotracker/onnx" ! \
+    models-dir="$PWD/src/cpunanotracker/models" ! \
   metaprint ! fakesink
 ```
 
@@ -105,7 +105,7 @@ gst-launch-1.0 -q \
   filesrc location="$PWD/assets/camera_run_2s_10s.mp4" ! \
   decodebin ! videoconvert ! video/x-raw,format=BGR ! \
   cpunanotrack enabled=true roi="100,80,60,90" \
-    models-dir="$PWD/demos/nanotracker/onnx" ! \
+    models-dir="$PWD/src/cpunanotracker/models" ! \
   metaprint ! fakesink
 ```
 
@@ -215,19 +215,20 @@ reported without automatic disabling, reacquisition, or object detection.
 
 ## Metadata
 
-Metadata matches the Radxa plugin, so the existing `metaprint` works unchanged:
+Metadata uses the project-wide GStreamer 1.18-compatible detection contract:
 
 | Field | Value |
 | --- | --- |
 | Meta type | `GstVideoRegionOfInterestMeta` |
 | ROI type | `nanotrack` |
 | Rectangle | `x,y,w,h` in input pixels, clipped to frame bounds; floor left/top, ceil right/bottom. |
-| Parameter structure | `nanotrack` |
+| Parameter structure | `bt-object-detection` |
 | `initialized` | Boolean, true only on the template-initialization frame. |
-| `confidence` | Double in [0,1], omitted on the initialization frame. |
+| `confidence` | Double in [0,1]; zero on the initialization frame. |
+| `class-id` | Integer `-1`, because NanoTrack does not classify the target. |
 
-No class ID or tracking ID is assigned. Existing upstream metadata remains
-attached. Read the result from a pad probe or appsink sample:
+No tracking ID is assigned. Existing upstream metadata remains attached. Read
+the result from a pad probe or appsink sample:
 
 ```cpp
 gpointer state = nullptr;
@@ -235,14 +236,15 @@ while (GstMeta* meta = gst_buffer_iterate_meta_filtered(
            buffer, &state, GST_VIDEO_REGION_OF_INTEREST_META_API_TYPE)) {
     auto* roi = reinterpret_cast<GstVideoRegionOfInterestMeta*>(meta);
     if (roi->roi_type != g_quark_from_static_string("nanotrack")) continue;
-    GstStructure* params = gst_video_region_of_interest_meta_get_param(roi, "nanotrack");
+    GstStructure* params = gst_video_region_of_interest_meta_get_param(
+        roi, "bt-object-detection");
     if (!params) continue;
     gboolean initialized = FALSE;
     gdouble confidence = 0;
     gst_structure_get_boolean(params, "initialized", &initialized);
     gboolean has_confidence = gst_structure_get_double(params, "confidence", &confidence);
     // Use roi->x/y/w/h and GST_BUFFER_PTS(buffer).
-    // Confidence is valid only when has_confidence is TRUE.
+    // Confidence and class-id are present on every result.
 }
 ```
 
@@ -264,7 +266,7 @@ Or run it directly with a model directory:
 
 ```bash
 GST_PLUGIN_PATH="$PWD/build-cpunanotracker" \
-  ./build-cpunanotracker/cpunanotracker-check "$PWD/demos/nanotracker/onnx"
+  ./build-cpunanotracker/cpunanotracker-check "$PWD/src/cpunanotracker/models"
 ```
 
 The check uses deterministic synthetic frames and real CPU inference. It covers

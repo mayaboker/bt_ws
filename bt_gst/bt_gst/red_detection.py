@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from threading import Lock
 
 RED_DETECTION_META_NAME = "GstRedDetectionMeta"
+OBJECT_DETECTION_PARAMS_NAME = "bt-object-detection"
 GST_CLOCK_TIME_NONE = (1 << 64) - 1
 
 
@@ -104,13 +105,13 @@ def read_cpu_nano_detection(
     meta = gst_video.buffer_get_video_region_of_interest_meta_id(buffer, 0)
     if meta is None:
         return None
-    # GstVideo does not expose GLib through every GI namespace. The plugin adds
-    # exactly one ROI with id 0, so the nanotrack parameter is authoritative.
-    parameters = meta.get_param("nanotrack")
+    # The NanoTrack pipeline adds exactly one result ROI with id 0. The common
+    # parameter structure is shared with cpuyolodetect and is authoritative.
+    parameters = meta.get_param(OBJECT_DETECTION_PARAMS_NAME)
     if parameters is None:
         return None
     initialized = bool(parameters.get_value("initialized"))
-    score = 0.0 if initialized else float(parameters.get_value("confidence"))
+    score = float(parameters.get_value("confidence"))
     locked = not initialized and score >= confidence_threshold
     pts = int(buffer.pts)
     return RedDetection(

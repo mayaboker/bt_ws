@@ -1,5 +1,9 @@
 # YOLO GStreamer analytics pipeline
 
+> **Historical design:** this document requires GStreamer 1.24 or newer. The
+> implemented GStreamer 1.18-compatible metadata contract is documented in
+> [common_roi_metadata_gstreamer_1_18.md](common_roi_metadata_gstreamer_1_18.md).
+
 ## Status and goal
 
 This document defines the first standalone YOLO detection pipeline for

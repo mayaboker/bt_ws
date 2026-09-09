@@ -1,3 +1,5 @@
+#include "detection_meta.hpp"
+
 #include <gst/base/gstbasetransform.h>
 #include <gst/video/video.h>
 
@@ -22,13 +24,17 @@ static GstFlowReturn gst_meta_print_transform_ip(GstBaseTransform*, GstBuffer* b
                buffer, &state, GST_VIDEO_REGION_OF_INTEREST_META_API_TYPE)) {
         auto* roi = reinterpret_cast<GstVideoRegionOfInterestMeta*>(meta);
         const gchar* roi_type = g_quark_to_string(roi->roi_type);
-        GstStructure* params = gst_video_region_of_interest_meta_get_param(roi, "nanotrack");
+        GstStructure* params = gst_video_region_of_interest_meta_get_param(
+            roi, bt::gstmeta::kDetectionParameters);
         gboolean initialized = FALSE;
         gdouble confidence = 0.0;
+        gint class_id = -1;
         const gboolean has_initialized =
             params && gst_structure_get_boolean(params, "initialized", &initialized);
         const gboolean has_confidence =
             params && gst_structure_get_double(params, "confidence", &confidence);
+        const gboolean has_class_id =
+            params && gst_structure_get_int(params, "class-id", &class_id);
 
         g_print("pts=%" GST_TIME_FORMAT " roi=%s box=%u,%u,%u,%u",
                 GST_TIME_ARGS(GST_BUFFER_PTS(buffer)),
@@ -37,6 +43,8 @@ static GstFlowReturn gst_meta_print_transform_ip(GstBaseTransform*, GstBuffer* b
             g_print(" initialized=%s", initialized ? "true" : "false");
         if (has_confidence)
             g_print(" confidence=%.6f", confidence);
+        if (has_class_id)
+            g_print(" class-id=%d", class_id);
         g_print("\n");
     }
     return GST_FLOW_OK;
@@ -48,7 +56,7 @@ static void gst_meta_print_class_init(GstMetaPrintClass* klass)
     auto* transform = GST_BASE_TRANSFORM_CLASS(klass);
     gst_element_class_set_static_metadata(
         element, "ROI metadata printer", "Filter/Debug/Video",
-        "Prints GstVideoRegionOfInterestMeta attached to video buffers", "Betaloop");
+        "Prints GstVideoRegionOfInterestMeta and common detection fields", "Betaloop");
 
     GstCaps* caps = gst_caps_from_string("video/x-raw");
     gst_element_class_add_pad_template(

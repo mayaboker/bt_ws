@@ -1,5 +1,11 @@
 # Simple YOLO GStreamer alternative
 
+> **Superseded metadata decision:** the implementation now targets GStreamer
+> 1.18 and emits the common `GstVideoRegionOfInterestMeta` contract documented
+> in [common_roi_metadata_gstreamer_1_18.md](common_roi_metadata_gstreamer_1_18.md).
+> The analytics and `objectdetectionoverlay` sections below describe the older
+> GStreamer 1.24 design and are retained only as design history.
+
 ## Recommendation
 
 Keep the installed GStreamer 1.24.2 stack and implement one project-owned

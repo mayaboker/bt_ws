@@ -1,5 +1,6 @@
 // CPU NanoTrackV3: GStreamer behavior and tracking math adapted from
 // src/nanotracker/gstrknnnanotrack.cpp; ONNX preprocessing matches the Python demo.
+#include "../detection_meta.hpp"
 #include <gst/base/gstbasetransform.h>
 #include <gst/video/video.h>
 #include <opencv2/imgproc.hpp>
@@ -373,12 +374,11 @@ static GstFlowReturn transform_ip(GstBaseTransform* base, GstBuffer* buffer)
         const int y = std::clamp(int(std::floor(b.y)), 0, height);
         const int right = std::clamp(int(std::ceil(b.x+b.width)), 0, width);
         const int bottom = std::clamp(int(std::ceil(b.y+b.height)), 0, height);
-        auto* meta = gst_buffer_add_video_region_of_interest_meta(buffer, "nanotrack", x, y, right-x, bottom-y);
-        if (!meta) throw std::runtime_error("Cannot attach ROI metadata");
-        auto* parameters = gst_structure_new("nanotrack", "initialized", G_TYPE_BOOLEAN, result.initialized, nullptr);
-        if (!result.initialized)
-            gst_structure_set(parameters, "confidence", G_TYPE_DOUBLE, result.confidence, nullptr);
-        gst_video_region_of_interest_meta_add_param(meta, parameters);
+        const double confidence = result.initialized ? 0.0 : result.confidence;
+        if (!bt::gstmeta::add_detection(
+                buffer, "nanotrack", -1, x, y, right-x, bottom-y,
+                confidence, result.initialized))
+            throw std::runtime_error("Cannot attach ROI detection metadata");
         GST_LOG_OBJECT(base, "initialized=%d box=%d,%d,%d,%d confidence=%.6f", result.initialized,
                        x, y, right-x, bottom-y, result.confidence);
         return GST_FLOW_OK;
@@ -414,7 +414,7 @@ static void gst_cpu_nano_track_class_init(GstCpuNanoTrackClass* klass)
     g_object_class_install_property(object, PROP_MODELS_DIR,
         g_param_spec_string("models-dir", "Models directory", "Directory containing NanoTrack CPU ONNX models", "", ready));
     gst_element_class_set_static_metadata(element, "CPU ONNX NanoTrack", "Filter/Metadata/Video",
-        "Tracks one ROI with NanoTrackV3 and attaches ROI metadata", "example");
+        "Tracks one ROI with NanoTrackV3 and attaches common ROI detection metadata", "example");
     gst_element_class_add_static_pad_template(element, &sink_template);
     gst_element_class_add_static_pad_template(element, &src_template);
     transform->start = GST_DEBUG_FUNCPTR(start);

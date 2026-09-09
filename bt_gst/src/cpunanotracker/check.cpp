@@ -108,14 +108,17 @@ public:
             if (roi->roi_type == g_quark_from_static_string("upstream-test")) ++upstream;
             if (roi->roi_type != g_quark_from_static_string("nanotrack")) continue;
             ++count;
-            auto* parameters = gst_video_region_of_interest_meta_get_param(roi, "nanotrack");
+            auto* parameters = gst_video_region_of_interest_meta_get_param(
+                roi, "bt-object-detection");
             gboolean initialized = FALSE;
             double confidence = -1;
+            gint class_id = 0;
             correct &= parameters && gst_structure_get_boolean(parameters, "initialized", &initialized);
             const bool has_score = parameters && gst_structure_get_double(parameters, "confidence", &confidence);
+            correct &= parameters && gst_structure_get_int(parameters, "class-id", &class_id) && class_id == -1;
             correct &= bool(initialized) == (expected == 1);
-            correct &= has_score == (expected == 0);
-            if (has_score) correct &= std::isfinite(confidence) && confidence >= 0 && confidence <= 1;
+            correct &= has_score && std::isfinite(confidence) && confidence >= 0 && confidence <= 1;
+            if (expected == 1) correct &= confidence == 0.0;
             correct &= roi->w > 0 && roi->h > 0 && roi->x+roi->w <= unsigned(width) && roi->y+roi->h <= unsigned(height);
             if (expected == 1) {
                 gchar* configured = nullptr;

@@ -5,10 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST_YOLO REQUIRED IMPORTED_TARGET
-    gstreamer-1.0
+    gstreamer-1.0>=1.18
     gstreamer-base-1.0
-    gstreamer-video-1.0
-    gstreamer-analytics-1.0)
+    gstreamer-video-1.0)
 
 set(ONNXRUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/onnxruntime-linux-x64-1.29.0"
     CACHE PATH "ONNX Runtime SDK directory")
@@ -42,7 +41,7 @@ get_filename_component(ONNXRUNTIME_LIBRARY_DIR "${ONNXRUNTIME_LIBRARY}" DIRECTOR
 set_target_properties(gstcpuyolodetect PROPERTIES BUILD_RPATH "${ONNXRUNTIME_LIBRARY_DIR}")
 
 add_executable(cpuyolodetect-check check.cpp)
-target_link_libraries(cpuyolodetect-check PRIVATE yolo_core)
+target_link_libraries(cpuyolodetect-check PRIVATE yolo_core PkgConfig::GST_YOLO)
 target_compile_options(cpuyolodetect-check PRIVATE -Wall -Wextra -Wpedantic)
 enable_testing()
 add_test(NAME cpuyolodetect-core COMMAND cpuyolodetect-check)

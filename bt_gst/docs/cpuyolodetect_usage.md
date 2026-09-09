@@ -1,7 +1,7 @@
 # `cpuyolodetect` usage
 
 This guide covers loading, inspecting, and running the CPU YOLO detector with
-GStreamer's standard `objectdetectionoverlay` element.
+the common GStreamer 1.18 ROI metadata contract.
 
 Run all commands from:
 
@@ -42,7 +42,7 @@ These exports apply only to the current terminal.
 
 ```bash
 gst-inspect-1.0 cpuyolodetect
-gst-inspect-1.0 objectdetectionoverlay
+gst-inspect-1.0 metaprint
 ```
 
 The detector inspection should show:
@@ -81,7 +81,7 @@ The model must have:
 
 No modelinfo sidecar is needed.
 
-`labels-file` is optional. Without it, the overlay displays decimal class IDs
+`labels-file` is optional. Without it, ROI types are decimal class IDs
 such as `0` and `1`.
 
 To use names, create a UTF-8 file containing exactly one non-empty label per
@@ -100,8 +100,8 @@ vehicle
 
 ## 5. Headless smoke-test pipeline
 
-This processes five copies of one image, sends detections through
-`objectdetectionoverlay`, and exits automatically:
+This processes five copies of one image, prints every detection ROI, and exits
+automatically:
 
 ```bash
 GST_DEBUG=cpuyolodetect:6 gst-launch-1.0 -e \
@@ -114,7 +114,7 @@ GST_DEBUG=cpuyolodetect:6 gst-launch-1.0 -e \
     confidence-threshold=0.4 \
     iou-threshold=0.7 \
     max-detections=100 ! \
-  objectdetectionoverlay draw-labels=true ! \
+  metaprint ! \
   fakesink sync=false
 ```
 
@@ -128,7 +128,7 @@ To use class names, add this property to `cpuyolodetect` before the `!`:
 labels-file="$YOLO_LABELS"
 ```
 
-## 6. Display detections on an image
+## 6. Display an image while printing detections
 
 ```bash
 GST_DEBUG=cpuyolodetect:6 gst-launch-1.0 -e \
@@ -138,13 +138,14 @@ GST_DEBUG=cpuyolodetect:6 gst-launch-1.0 -e \
   videoconvert ! video/x-raw,format=RGB ! \
   cpuyolodetect \
     model-file="$YOLO_MODEL" ! \
-  objectdetectionoverlay draw-labels=true ! \
+  metaprint ! \
   videoconvert ! autovideosink
 ```
 
 The element performs model-size letterboxing internally but passes the original
-frame downstream. Bounding boxes are mapped back to the original image before
-`objectdetectionoverlay` draws them.
+frame downstream. Bounding boxes in `metaprint` output are mapped back to the
+original image. GStreamer 1.18 has no standard ROI drawing element; the bt_gst
+application uses its existing Cairo overlay for visualization.
 
 ## 7. Run on a video file
 
@@ -156,7 +157,7 @@ GST_DEBUG=cpuyolodetect:6 gst-launch-1.0 -e \
   decodebin ! \
   videoconvert ! video/x-raw,format=RGB ! \
   cpuyolodetect model-file="$YOLO_MODEL" ! \
-  objectdetectionoverlay draw-labels=true ! \
+  metaprint ! \
   videoconvert ! autovideosink sync=false
 ```
 
@@ -173,7 +174,7 @@ gst-launch-1.0 -e \
   videoconvert ! video/x-raw,format=RGB ! \
   queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! \
   cpuyolodetect model-file="$YOLO_MODEL" ! \
-  objectdetectionoverlay draw-labels=true ! \
+  metaprint ! \
   videoconvert ! autovideosink sync=false
 ```
 
@@ -231,16 +232,17 @@ of the trained classes.
 ## 11. Final detection-demo pipeline
 
 The source video is 12 FPS. This pipeline uses four ONNX Runtime inference
-threads, draws detections, and displays measured FPS on the video:
+threads, prints detections, and displays measured FPS:
 
 ```bash
 cd /home/user/projects/bt_ws/bt_gst
 
-export GST_PLUGIN_PATH="$PWD/build/plugins${GST_PLUGIN_PATH:+:$GST_PLUGIN_PATH}"
+export GST_PLUGIN_PATH="$PWD/build/plugins"
+export LD_LIBRARY_PATH="$PWD/third_party/onnxruntime-linux-x64-1.29.0/lib"
 
 GST_DEBUG=cpuyolodetect:6 gst-launch-1.0 -e \
   filesrc location="$PWD/assets/detection-demo.mp4" ! \
-  decodebin ! \
+  qtdemux ! h264parse ! avdec_h264 ! \
   videoconvert ! video/x-raw,format=RGB ! \
   cpuyolodetect \
     model-file="$PWD/models/yolov8n.onnx" \
@@ -248,7 +250,7 @@ GST_DEBUG=cpuyolodetect:6 gst-launch-1.0 -e \
     confidence-threshold=0.4 \
     iou-threshold=0.7 \
     max-detections=100 ! \
-  objectdetectionoverlay draw-labels=true ! \
+  metaprint ! \
   videoconvert ! \
   fpsdisplaysink \
     video-sink=autovideosink \
@@ -262,12 +264,12 @@ throughput without rendering or the source's 12 FPS clock limit, use:
 ```bash
 GST_DEBUG=cpuyolodetect:6 gst-launch-1.0 -e \
   filesrc location="$PWD/assets/detection-demo.mp4" ! \
-  decodebin ! \
+  qtdemux ! h264parse ! avdec_h264 ! \
   videoconvert ! video/x-raw,format=RGB ! \
   cpuyolodetect \
     model-file="$PWD/models/yolov8n.onnx" \
     intra-op-threads=4 ! \
-  objectdetectionoverlay ! \
+  metaprint ! \
   fpsdisplaysink \
     video-sink=fakesink \
     text-overlay=false \

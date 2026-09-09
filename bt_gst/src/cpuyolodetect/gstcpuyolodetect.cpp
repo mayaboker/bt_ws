@@ -1,6 +1,6 @@
 #include "yolo_core.hpp"
+#include "../detection_meta.hpp"
 
-#include <gst/analytics/analytics.h>
 #include <gst/base/gstbasetransform.h>
 #include <gst/video/video.h>
 #include <onnxruntime_cxx_api.h>
@@ -70,8 +70,6 @@ public:
             for (std::size_t class_id = 0; class_id < channels - 4; ++class_id)
                 labels.push_back(std::to_string(class_id));
         }
-        for (const auto& label : labels) label_quarks.push_back(g_quark_from_string(label.c_str()));
-
         preprocessor = std::make_unique<bt::yolo::Preprocessor>(width, height);
         input_data_.resize(preprocessor->tensor_size());
         output_data_.resize(channels * candidates);
@@ -108,7 +106,6 @@ public:
     std::size_t channels = 0;
     std::size_t candidates = 0;
     std::vector<std::string> labels;
-    std::vector<GQuark> label_quarks;
     std::unique_ptr<bt::yolo::Preprocessor> preprocessor;
     bt::yolo::Decoder decoder;
 
@@ -300,16 +297,13 @@ static GstFlowReturn gst_cpu_yolo_detect_transform_ip(GstBaseTransform* base, Gs
         gst_video_frame_unmap(&frame);
         mapped = false;
 
-        auto* relation = gst_buffer_get_analytics_relation_meta(buffer);
-        if (!relation) relation = gst_buffer_add_analytics_relation_meta(buffer);
-        if (!relation) throw std::runtime_error("failed to attach analytics relation metadata");
         for (const auto& detection : detections) {
-            GstAnalyticsODMtd od;
-            if (!gst_analytics_relation_meta_add_od_mtd(
-                    relation, self->runtime->label_quarks.at(detection.class_id),
+            const auto& label = self->runtime->labels.at(detection.class_id);
+            if (!bt::gstmeta::add_detection(
+                    buffer, label.c_str(), static_cast<gint>(detection.class_id),
                     detection.x, detection.y, detection.width, detection.height,
-                    detection.confidence, &od))
-                throw std::runtime_error("failed to attach object detection metadata");
+                    detection.confidence, FALSE))
+                throw std::runtime_error("failed to attach ROI detection metadata");
         }
         GST_LOG_OBJECT(base, "detections=%zu preprocess=%.3fms inference=%.3fms postprocess=%.3fms",
                        detections.size(), preprocess_ms, inference_ms, postprocess_ms);
@@ -363,7 +357,7 @@ static void gst_cpu_yolo_detect_class_init(GstCpuYoloDetectClass* klass)
         g_param_spec_boolean("enabled", "Enabled", "Run inference and attach detections", TRUE, playing));
 
     gst_element_class_set_static_metadata(element_class, "CPU YOLO detector", "Filter/Metadata/Video",
-        "Runs raw Ultralytics ONNX inference and attaches GstAnalyticsODMtd", "bt_gst");
+        "Runs raw Ultralytics ONNX inference and attaches ROI detection metadata", "bt_gst");
     gst_element_class_add_static_pad_template(element_class, &sink_template);
     gst_element_class_add_static_pad_template(element_class, &src_template);
     transform_class->start = GST_DEBUG_FUNCPTR(gst_cpu_yolo_detect_start);

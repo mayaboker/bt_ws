@@ -1,4 +1,5 @@
 #include "yolo_core.hpp"
+#include "../detection_meta.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -15,6 +16,27 @@ static void require(bool condition, const char* message)
 int main() try
 {
     using namespace bt::yolo;
+
+    gst_init(nullptr, nullptr);
+    GstBuffer* buffer = gst_buffer_new();
+    auto* roi = bt::gstmeta::add_detection(
+        buffer, "0", 0, 10, 20, 30, 40, 0.75, FALSE);
+    require(roi && roi->roi_type == g_quark_from_static_string("0") &&
+            roi->x == 10 && roi->y == 20 && roi->w == 30 && roi->h == 40,
+            "common ROI geometry or type is incorrect");
+    GstStructure* parameters = gst_video_region_of_interest_meta_get_param(
+        roi, bt::gstmeta::kDetectionParameters);
+    gdouble metadata_confidence = 0.0;
+    gint metadata_class_id = -1;
+    gboolean metadata_initialized = TRUE;
+    require(parameters &&
+            gst_structure_get_double(parameters, "confidence", &metadata_confidence) &&
+            gst_structure_get_int(parameters, "class-id", &metadata_class_id) &&
+            gst_structure_get_boolean(parameters, "initialized", &metadata_initialized) &&
+            std::abs(metadata_confidence - 0.75) < 1e-9 &&
+            metadata_class_id == 0 && !metadata_initialized,
+            "common ROI parameter structure is incorrect");
+    gst_buffer_unref(buffer);
 
     // Two RGB pixels plus five bytes of row padding verifies stride handling.
     const std::vector<std::uint8_t> pixels{255, 0, 0, 0, 255, 0, 9, 9, 9, 9, 9};
@@ -48,7 +70,7 @@ int main() try
     require(finite.size() == 1 && std::isfinite(finite[0].confidence),
             "non-finite rejection or max-detections is incorrect");
 
-    std::cout << "PASS: RGB preprocessing, stride, letterbox, decode, NMS, and finite checks\n";
+    std::cout << "PASS: ROI metadata, RGB preprocessing, stride, letterbox, decode, NMS, and finite checks\n";
     return 0;
 } catch (const std::exception& error) {
     std::cerr << "FAIL: " << error.what() << '\n';
